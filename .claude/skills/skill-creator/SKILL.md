@@ -7,197 +7,184 @@ description: >
   skills", "SKILL.md", or asks how to package instructions for AI agents.
 ---
 
-# How to Create an Agent Skill
+# Creating Agent Skills
 
-Agent Skills are folders of instructions, scripts, and resources that AI agents
-can discover and use to perform tasks more accurately and efficiently. Skills
-use a simple, open format based on a `SKILL.md` file with YAML frontmatter
-and Markdown instructions.
+Skills are folders with instructions, scripts, and resources that agents discover and use. Format: SKILL.md with YAML frontmatter + markdown body.
 
-## Step 1: Plan the Skill
+## Plan
 
-Before writing anything, answer these questions:
+Answer before writing:
+- What task does this skill solve? Be specific.
+- What knowledge does the agent need? Domain, APIs, workflows, edge cases.
+- What tools or scripts are needed? Bundled scripts or instructions only?
 
-1. **What task does this skill help with?** Be specific (e.g., "generating PDF reports" not "helping with files").
-2. **What knowledge does the agent need?** Domain expertise, API details, workflow steps, edge cases.
-3. **What tools or scripts are needed?** Will the skill need bundled scripts, or just instructions?
+## Directory Structure
 
-## Step 2: Create the Directory Structure
-
-A skill is a directory containing at minimum a `SKILL.md` file:
+Minimum requirement: a folder with SKILL.md.
 
 ```
 my-skill/
-├── SKILL.md          # Required: metadata + instructions
-├── scripts/          # Optional: executable code
-├── references/       # Optional: additional documentation
-└── assets/           # Optional: templates, resources
+  SKILL.md            # required: metadata + instructions
+  scripts/            # optional: executable code
+  references/         # optional: detailed docs
+  assets/             # optional: templates, resources
 ```
 
-### Where to place skills
+Skill locations:
+- Project scope — `<project>/.claude/skills/` or `<project>/.agents/skills/`
+- User scope — `~/.claude/skills/` or `~/.agents/skills/`
 
-| Scope   | Path                          | Purpose                        |
-|---------|-------------------------------|--------------------------------|
-| Project | `<project>/.claude/skills/`   | Skills specific to a project   |
-| Project | `<project>/.agents/skills/`   | Cross-client interoperability  |
-| User    | `~/.claude/skills/`           | Available across all projects  |
-| User    | `~/.agents/skills/`           | Cross-client interoperability  |
+Cross-client interop uses the `.agents/` paths. Directory name must match the `name` frontmatter field.
 
-The directory name **must match** the `name` field in the frontmatter.
+## SKILL.md File
 
-## Step 3: Write the SKILL.md File
+Two parts: YAML frontmatter, then markdown body.
 
-The `SKILL.md` file has two parts: YAML frontmatter and Markdown body.
-
-### Frontmatter (Required Fields)
+### Frontmatter
 
 ```yaml
 ---
 name: my-skill-name
 description: >
-  What this skill does and when to use it. Be specific and include
-  keywords that help agents identify relevant tasks.
+  What this skill does and when to use it. Include keywords
+  that help agents match relevant tasks.
 ---
 ```
 
-### Frontmatter Field Reference
+Required fields:
+- name — max 64 chars, lowercase a-z, numbers, hyphens only, must match directory name
+- description — max 1024 chars, describes what the skill does and when to use it
 
-| Field           | Required | Constraints                                                    |
-|-----------------|----------|----------------------------------------------------------------|
-| `name`          | Yes      | Max 64 chars. Lowercase letters, numbers, hyphens only. Must not start/end with hyphen. No consecutive hyphens. Must match directory name. |
-| `description`   | Yes      | Max 1024 chars. Non-empty. Describes what the skill does AND when to use it. |
+Name rules:
+- Lowercase letters, numbers, hyphens only
+- No leading/trailing/consecutive hyphens
+- Valid: pdf-processing, data-analysis, code-review
+- Invalid: PDF-Processing, -pdf, pdf--processing
 
-### Name Rules
+### Instruction Body
 
-- Only lowercase letters (`a-z`), numbers, and hyphens (`-`)
-- Cannot start or end with a hyphen
-- No consecutive hyphens (`--`)
-- Must match the parent directory name
+The markdown after frontmatter is what the agent reads on activation. No format restrictions — write what helps the agent succeed.
 
-**Valid:** `pdf-processing`, `data-analysis`, `code-review`
-**Invalid:** `PDF-Processing`, `-pdf`, `pdf--processing`
+Recommended sections:
 
-## Step 4: Write the Instruction Body
-
-The Markdown body after the frontmatter is what the agent reads when the
-skill is activated. There are no format restrictions — write whatever helps
-the agent perform the task effectively.
-
-### Recommended Structure
-
-```markdown
+```
 # Skill Title
-
-## When to use this skill
-Describe the situations where this skill applies.
-
+## When to use
 ## Prerequisites
-List any tools, packages, or setup needed.
-
 ## Workflow
-Step-by-step instructions the agent should follow.
-
 ## Examples
-Show example inputs and expected outputs.
-
 ## Edge Cases
-Document known gotchas and how to handle them.
 ```
 
-### Writing Effective Instructions
+Writing effective instructions:
+- Be specific — `python3 scripts/extract.py --input FILE` beats "use the extraction script"
+- Explain why — reasoning ("do X because Y causes Z") beats rigid rules ("ALWAYS do X")
+- Show examples of good output
+- Stay under 5000 tokens / 500 lines, move detail to references/
+- Cover failure modes
 
-- **Be specific and actionable.** "Run `python3 scripts/extract.py --input FILE`" beats "use the extraction script."
-- **Explain the why.** Reasoning-based instructions ("Do X because Y tends to cause Z") work better than rigid directives ("ALWAYS do X").
-- **Use examples.** Show the agent what good output looks like.
-- **Keep it concise.** Target under 5000 tokens / 500 lines. Move detailed reference material to separate files in `references/`.
-- **Cover edge cases.** Document what to do when things go wrong.
+## Description
 
-## Step 5: Write an Effective Description
+The description is the only thing agents see before activation. Make it count.
 
-The `description` field is critical — it's the **only thing** agents see before
-deciding whether to activate your skill.
+Best practices:
+- Use imperative phrasing — "Use this skill when..." not "This skill does..."
+- Focus on user intent, not internals
+- List concrete and implicit use cases
+- Include trigger keywords users might say
+- Stay under 1024 chars
 
-### Description Best Practices
+Bad — too vague:
+`description: Helps with PDFs.`
 
-1. **Use imperative phrasing:** "Use this skill when..." not "This skill does..."
-2. **Focus on user intent:** Describe what the user is trying to achieve, not internal mechanics.
-3. **Be specific but broad:** List concrete use cases AND implicit ones.
-4. **Include trigger keywords:** Mention terms users might use even if they don't name the domain directly.
-5. **Stay under 1024 characters.**
-
-### Before and After
-
+Good — specific about what and when:
 ```yaml
-# Bad — too vague
-description: Helps with PDFs.
-
-# Good — specific about what and when
 description: >
   Analyze CSV and tabular data files — compute summary statistics,
-  add derived columns, generate charts, and clean messy data. Use
-  this skill when the user has a CSV, TSV, or Excel file and wants
-  to explore, transform, or visualize the data, even if they don't
-  explicitly mention "CSV" or "analysis."
+  add derived columns, generate charts, clean messy data. Use when
+  the user has a CSV, TSV, or Excel file and wants to explore,
+  transform, or visualize data.
 ```
 
-## Step 6: Add Scripts (Optional)
+## Scripts (Optional)
 
-Bundle executable scripts in a `scripts/` directory for reusable logic.
+Bundle reusable logic in scripts/. Design rules:
+- No interactive prompts — accept input via CLI flags, env vars, or stdin
+- Include --help output so agents learn the interface
+- Write clear error messages — what failed, what was expected, what to try
+- Prefer structured output (JSON/CSV) over free-form text
+- Data to stdout, diagnostics to stderr
+- Make scripts idempotent — agents may retry
+- Support --dry-run for destructive operations
 
-### Script Design Rules for Agent Use
-
-1. **No interactive prompts.** Agents run in non-interactive shells. Accept all input via CLI flags, env vars, or stdin.
-2. **Include `--help` output.** This is how agents learn the script's interface.
-3. **Write helpful error messages.** Say what went wrong, what was expected, and what to try.
-4. **Use structured output.** Prefer JSON/CSV over free-form text.
-5. **Separate data from diagnostics.** Structured data to stdout, progress/warnings to stderr.
-6. **Make scripts idempotent.** Agents may retry. "Create if not exists" is safer than "create and fail on duplicate."
-7. **Support `--dry-run` for destructive operations.**
-
-### Self-Contained Scripts (Inline Dependencies)
-
-Python with PEP 723 (run with `uv run scripts/my-script.py`):
+Self-contained Python (PEP 723, run with `uv run scripts/my-script.py`):
 
 ```python
 # /// script
-# dependencies = [
-#   "beautifulsoup4>=4.12,<5",
-# ]
+# dependencies = ["beautifulsoup4>=4.12,<5"]
 # ///
 import sys
 from bs4 import BeautifulSoup
-# ... script logic
 ```
 
-Reference scripts from SKILL.md using relative paths:
+Reference scripts from SKILL.md using relative paths.
 
-```markdown
-## Available scripts
-- **`scripts/validate.sh`** — Validates configuration files
-- **`scripts/process.py`** — Processes input data
+## References (Optional)
 
-## Workflow
-1. Run validation: `bash scripts/validate.sh "$INPUT_FILE"`
-2. Process results: `uv run scripts/process.py --input results.json`
-```
-
-## Step 7: Add References (Optional)
-
-Put detailed documentation in `references/` to keep the main SKILL.md lean:
+Keep SKILL.md lean. Put detailed docs in references/:
 
 ```
 my-skill/
-├── SKILL.md
-└── references/
-    ├── REFERENCE.md      # Detailed technical reference
-    ├── api-guide.md      # API documentation
-    └── examples.md       # Extended examples
+  SKILL.md
+  references/
+    REFERENCE.md
+    api-guide.md
+    examples.md
 ```
 
-Reference them from SKILL.md:
+Link from SKILL.md: `See [API guide](references/api-guide.md) for details.`
 
-```markdown
-See [the API guide](references/api-guide.md) for endpoint details.
+Keep references one level deep. Avoid nested reference chains.
+
+## Optimizing .md for Token Efficiency
+
+Skills are loaded into agent context. Every token costs capacity. Write markdown that is clear for humans and lean for models.
+
+Guidelines:
+- Prefer lists over tables — tables add `|`, `---`, padding; lists convey the same info with fewer tokens (10-25% savings)
+- Skip decorative separators — `---`, `===`, `***` add tokens with zero meaning; use headers instead
+- Avoid repeating context — state a subject once, then list its properties
+- Keep headings short — headings repeat in context; "Inventory" beats "Overview of the Player Inventory Storage Management System"
+- Avoid deep nesting — repeated `>`, `-`, spaces add up fast
+- Use backticks sparingly — only for actual code identifiers, not emphasis
+- Minimize code blocks — show simplified examples, reference full files instead of embedding them
+- Move large data to .json/.csv/.yaml — never embed stat tables or item databases in markdown
+- Use consistent vocabulary — pick one term per concept and stick with it; "inventory manager" everywhere, not sometimes "item storage controller"
+- Write dense English — "Stores player items" beats "This system is designed with the intention of allowing the player to have the ability to store items"
+- Cut blank lines — each costs a token; one between sections is enough
+- Skip decorative markers — NOTE:, WARNING: without blockquote symbols
+- Avoid emojis — they tokenize inefficiently
+
+Biggest token costs in markdown (worst first):
+- Large embedded tables
+- Massive code blocks
+- Repeated explanations
+- Decorative formatting
+- Long headings
+- Deep nesting
+
+Recommended layout for any system doc:
+
 ```
-
-Keep file references one level deep. Avoid deeply nested reference chains.
+# System Name
+## Purpose
+Short explanation.
+## Responsibilities
+- item
+- item
+## Data
+- structure
+- format
+## Related
+link-to-other-doc.md
+```
