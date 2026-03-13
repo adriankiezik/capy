@@ -1,0 +1,4 @@
+#!/bin/sh
+
+# Run cargo fmt and fail the commit if code isn't formatted
+exec cargo fmt -- --check
