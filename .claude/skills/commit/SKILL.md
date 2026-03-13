@@ -1,8 +1,11 @@
 ---
 name: commit
 description: >
-  Use when the user asks to commit, save progress, create a git commit,
-  or uses /commit. Enforces game-dev commit conventions with scoped prefixes
+  MANDATORY: You MUST invoke this skill for ALL git commits — whether the user
+  says "commit", "save progress", "commit the change", "and commit it", uses
+  /commit, or any other phrasing that results in creating a git commit.
+  Never perform commit workflows manually; always use this skill instead.
+  Enforces game-dev commit conventions with scoped prefixes
   (feat, fix, art, audio, level, ui, balance, perf, refactor, docs, chore, test).
 ---
 
