@@ -146,7 +146,12 @@ API:
 - [ ] Constructors enforce invariants
 - [ ] No panicking in library code
 
-// Error handling - to be added
+Error handling:
+- [ ] Library crates use `thiserror` with a crate-level error enum in `src/error.rs`
+- [ ] Binary crate uses `anyhow` with `.context()` at the boundary
+- [ ] No `.unwrap()` or `.expect()` — use `?` to propagate
+- [ ] Errors wrap lower-level errors via `#[from]` — no information loss
+- [ ] No error types in crates that have no fallible APIs yet
 
 Performance:
 - [ ] No allocations in hot paths without reason

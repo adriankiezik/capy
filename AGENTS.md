@@ -35,3 +35,11 @@ app → engine → [render, audio, physics, input, assets, net, ui, game] → co
 - **Ask first** before adding new external dependencies.
 - **Ask first** before creating new crates.
 - Each crate has its own `AGENTS.md` describing scope — respect those boundaries.
+
+## Error Handling
+
+- **Library crates** use `thiserror` — each crate with fallible APIs defines its own error enum in `src/error.rs` with a `Result<T>` alias.
+- **Binary crate** (`capy_app`) uses `anyhow` at the boundary with `.context()` for human-readable messages.
+- **No `.unwrap()` / `.expect()`** — workspace clippy lints warn on both. Use `?` to propagate errors.
+- Errors aggregate upward: e.g. `RenderError` wraps wgpu errors, `EngineError` wraps `RenderError` + winit errors.
+- Empty crates get error types when they gain real fallible APIs, not before.
