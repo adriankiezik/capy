@@ -4,3 +4,5 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+bevy_ecs = "0.18"
+raw-window-handle = "0.6"

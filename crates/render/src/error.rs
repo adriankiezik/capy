@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub enum RenderError {
+pub(crate) enum RenderError {
     #[error(transparent)]
     CreateSurface(#[from] wgpu::CreateSurfaceError),
 
@@ -15,39 +15,7 @@ pub enum RenderError {
     InvalidAdapter,
 
     #[error(transparent)]
-    Surface(#[from] SurfaceError),
+    Surface(#[from] wgpu::SurfaceError),
 }
 
-impl From<wgpu::SurfaceError> for RenderError {
-    fn from(e: wgpu::SurfaceError) -> Self {
-        Self::Surface(e.into())
-    }
-}
-
-#[derive(Debug, Error)]
-pub enum SurfaceError {
-    #[error("surface lost")]
-    Lost,
-    #[error("surface outdated")]
-    Outdated,
-    #[error("surface timed out")]
-    Timeout,
-    #[error("GPU out of memory")]
-    OutOfMemory,
-    #[error("other surface error")]
-    Other,
-}
-
-impl From<wgpu::SurfaceError> for SurfaceError {
-    fn from(e: wgpu::SurfaceError) -> Self {
-        match e {
-            wgpu::SurfaceError::Lost => Self::Lost,
-            wgpu::SurfaceError::Outdated => Self::Outdated,
-            wgpu::SurfaceError::Timeout => Self::Timeout,
-            wgpu::SurfaceError::OutOfMemory => Self::OutOfMemory,
-            wgpu::SurfaceError::Other => Self::Other,
-        }
-    }
-}
-
-pub type Result<T> = std::result::Result<T, RenderError>;
+pub(crate) type Result<T> = std::result::Result<T, RenderError>;

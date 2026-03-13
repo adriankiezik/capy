@@ -5,7 +5,7 @@ edition.workspace = true
 
 [dependencies]
 winit = "0.30.13"
-capy_render = { path = "../render" }
+capy_core = { path = "../core" }
 thiserror.workspace = true
 
 [lints]

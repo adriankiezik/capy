@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 wgpu = "28"
 pollster = "0.4"
+capy_core = { path = "../core" }
 thiserror.workspace = true
 
 [lints]
