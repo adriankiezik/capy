@@ -1,0 +1,6 @@
+[package]
+name = "capy_game"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]

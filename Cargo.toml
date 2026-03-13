@@ -1,0 +1,20 @@
+[workspace]
+resolver = "3"
+
+members = [
+    "crates/core",
+    "crates/engine",
+    "crates/render",
+    "crates/audio",
+    "crates/physics",
+    "crates/input",
+    "crates/assets",
+    "crates/net",
+    "crates/ui",
+    "crates/game",
+    "crates/app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
