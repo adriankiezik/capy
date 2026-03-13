@@ -46,7 +46,7 @@ impl App {
     }
 
     fn run_schedule(&mut self, label: impl ScheduleLabel) -> std::result::Result<(), BevyError> {
-        self.world.run_schedule(label);
+        let _ = self.world.try_run_schedule(label);
         if let Some(err) = take_captured_error() {
             return Err(err);
         }

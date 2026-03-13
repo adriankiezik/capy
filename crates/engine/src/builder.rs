@@ -1,4 +1,6 @@
-use capy_core::{DefaultErrorHandler, IntoScheduleConfigs, ScheduleLabel, ScheduleSystem, World};
+use capy_core::{
+    DefaultErrorHandler, IntoScheduleConfigs, ScheduleLabel, ScheduleSystem, Schedules, World,
+};
 use winit::event_loop::{ControlFlow, EventLoop};
 
 use crate::Result;
@@ -24,9 +26,10 @@ impl EngineBuilder {
     ) -> Self {
         self.schedule_builders
             .push(Box::new(move |world: &mut World| {
-                world.schedule_scope(label, |_world, schedule| {
-                    schedule.add_systems(systems);
-                });
+                world
+                    .get_resource_or_init::<Schedules>()
+                    .entry(label)
+                    .add_systems(systems);
             }));
         self
     }
