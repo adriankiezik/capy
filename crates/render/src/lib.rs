@@ -1,6 +1,5 @@
 pub mod error;
 pub use error::{RenderError, Result};
-pub use wgpu::SurfaceError;
 
 pub struct Renderer {
     surface: wgpu::Surface<'static>,
@@ -42,16 +41,17 @@ impl Renderer {
             .formats
             .iter()
             .find(|f| f.is_srgb())
+            .or(caps.formats.first())
             .copied()
-            .unwrap_or(caps.formats[0]);
+            .ok_or(RenderError::InvalidAdapter)?;
 
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
             width,
             height,
-            present_mode: caps.present_modes[0],
-            alpha_mode: caps.alpha_modes[0],
+            present_mode: wgpu::PresentMode::AutoVsync,
+            alpha_mode: wgpu::CompositeAlphaMode::Auto,
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
@@ -74,7 +74,15 @@ impl Renderer {
     }
 
     pub fn render(&self) -> Result<()> {
-        let output = self.surface.get_current_texture()?;
+        let output = match self.surface.get_current_texture() {
+            Ok(o) => o,
+            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                self.surface.configure(&self.device, &self.config);
+                self.surface.get_current_texture()?
+            }
+            Err(wgpu::SurfaceError::Timeout | wgpu::SurfaceError::Other) => return Ok(()),
+            Err(e) => return Err(e.into()),
+        };
         let view = output
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());

@@ -10,7 +10,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{Window, WindowId};
 
 #[derive(Default)]
-pub struct App {
+pub(crate) struct App {
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     error: Option<EngineError>,
@@ -52,30 +52,10 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::RedrawRequested => {
-                let err = self.renderer.as_ref().and_then(|r| r.render().err());
-                match err {
-                    Some(capy_render::RenderError::Surface(
-                        capy_render::SurfaceError::Lost | capy_render::SurfaceError::Outdated,
-                    )) => {
-                        if let Some(window) = &self.window {
-                            let size = window.inner_size();
-                            if let Some(r) = &mut self.renderer {
-                                r.resize(size.width, size.height);
-                            }
-                        }
+                if let Some(renderer) = &self.renderer {
+                    if let Err(e) = renderer.render() {
+                        return self.fail(event_loop, e);
                     }
-                    Some(capy_render::RenderError::Surface(
-                        capy_render::SurfaceError::OutOfMemory,
-                    )) => {
-                        return self.fail(
-                            event_loop,
-                            capy_render::RenderError::Surface(
-                                capy_render::SurfaceError::OutOfMemory,
-                            ),
-                        );
-                    }
-                    Some(e) => eprintln!("Render error: {e}"),
-                    None => {}
                 }
                 if let Some(window) = &self.window {
                     window.request_redraw();
