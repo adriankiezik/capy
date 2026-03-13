@@ -22,8 +22,10 @@ Ensure every change respects Capy's architectural boundaries, Rust idioms, and p
 1. Read the diff — `git diff` for unstaged, `git diff --cached` for staged, or `git diff main...HEAD` for branch review.
 2. Identify which crates are touched. Read each crate's `AGENTS.md` to confirm scope.
 3. Walk through every section of the checklist below.
-4. Report findings grouped by severity: blocking, warning, nit.
+4. Report findings grouped by severity: blocking, warning. Do NOT include nitpicks or code style issues.
 5. For each finding, cite the file, line, and which rule it violates.
+6. Do NOT include positive comments, praise, or "looks good" notes — only report issues.
+7. If there are no issues, just say the changes look good and there are no issues. Do not pad the review.
 
 ## Architectural Principles
 
@@ -90,6 +92,16 @@ Each crate owns a specific domain. Flag code that crosses boundaries.
 - Feature flags only for genuinely optional capabilities, not to paper over design issues
 - No public exports that are unused
 
+### ECS Convention: `resources/` and `systems/` directories
+
+Rules:
+- Every ECS resource type (`#[derive(Resource)]` or non-send resource) goes in `resources/<name>.rs`
+- Every public system function goes in `systems/<name>.rs`
+- Each `mod.rs` only declares submodules and re-exports — no logic
+- Shared resource types used across multiple crates belong in `capy_core/src/resources/`
+- Schedule labels belong in `capy_core/src/schedule/`, one per file
+- Crate-internal types that aren't resources or systems live in their own files at `src/` level (e.g., `app.rs`, `builder.rs`)
+
 ## Public API Design
 
 - Minimize public surface — `pub(crate)` by default, `pub` only for cross-crate API
@@ -130,6 +142,9 @@ Architecture:
 - [ ] No new external crates without justification
 - [ ] Code lives in the correct crate per its AGENTS.md
 - [ ] No game-specific logic in engine crates
+- [ ] New resource types are in `resources/<name>.rs`, re-exported from `resources/mod.rs`
+- [ ] New system functions are in `systems/<name>.rs`, re-exported from `systems/mod.rs`
+- [ ] Cross-crate resources and schedule labels are in `capy_core`, not in subsystem crates
 
 Traits and abstractions:
 - [ ] Shared traits defined in `core`
