@@ -4,3 +4,5 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+wgpu = "28"
+pollster = "0.4"
