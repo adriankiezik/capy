@@ -6,3 +6,7 @@ edition.workspace = true
 [dependencies]
 winit = "0.30.13"
 capy_render = { path = "../render" }
+thiserror.workspace = true
+
+[lints]
+workspace = true

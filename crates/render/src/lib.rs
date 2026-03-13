@@ -1,3 +1,5 @@
+pub mod error;
+pub use error::{RenderError, Result};
 pub use wgpu::SurfaceError;
 
 pub struct Renderer {
@@ -8,29 +10,32 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    pub fn new(target: impl Into<wgpu::SurfaceTarget<'static>>, width: u32, height: u32) -> Self {
+    pub fn new(
+        target: impl Into<wgpu::SurfaceTarget<'static>>,
+        width: u32,
+        height: u32,
+    ) -> Result<Self> {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
             ..Default::default()
         });
 
-        let surface = instance.create_surface(target).unwrap();
+        let surface = instance.create_surface(target)?;
 
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::default(),
             compatible_surface: Some(&surface),
             force_fallback_adapter: false,
-        }))
-        .expect("No suitable GPU adapter found");
+        }))?;
 
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("Capy Device"),
-            required_features: wgpu::Features::empty(),
-            required_limits: wgpu::Limits::default(),
-            memory_hints: Default::default(),
-            ..Default::default()
-        }))
-        .expect("Failed to create GPU device");
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+                label: Some("Capy Device"),
+                required_features: wgpu::Features::empty(),
+                required_limits: wgpu::Limits::default(),
+                memory_hints: Default::default(),
+                ..Default::default()
+            }))?;
 
         let caps = surface.get_capabilities(&adapter);
         let format = caps
@@ -52,12 +57,12 @@ impl Renderer {
         };
         surface.configure(&device, &config);
 
-        Self {
+        Ok(Self {
             surface,
             device,
             queue,
             config,
-        }
+        })
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -68,7 +73,7 @@ impl Renderer {
         }
     }
 
-    pub fn render(&self) -> Result<(), wgpu::SurfaceError> {
+    pub fn render(&self) -> Result<()> {
         let output = self.surface.get_current_texture()?;
         let view = output
             .texture

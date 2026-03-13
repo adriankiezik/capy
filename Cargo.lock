@@ -74,6 +74,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "anyhow"
+version = "1.0.102"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
+
+[[package]]
 name = "arrayref"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -216,6 +222,7 @@ dependencies = [
 name = "capy_app"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "capy_engine",
 ]
 
@@ -236,6 +243,7 @@ name = "capy_engine"
 version = "0.1.0"
 dependencies = [
  "capy_render",
+ "thiserror 2.0.18",
  "winit",
 ]
 
@@ -260,6 +268,7 @@ name = "capy_render"
 version = "0.1.0"
 dependencies = [
  "pollster",
+ "thiserror 2.0.18",
  "wgpu",
 ]
 
