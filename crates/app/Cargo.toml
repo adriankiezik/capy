@@ -4,3 +4,4 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+capy_engine = { version = "0.1.0", path = "../engine" }
