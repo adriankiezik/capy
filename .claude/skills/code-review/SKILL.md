@@ -22,7 +22,12 @@ Ensure every change respects Capy's architectural boundaries, Rust idioms, and p
 1. Read the diff — `git diff` for unstaged, `git diff --cached` for staged, or `git diff main...HEAD` for branch review.
 2. Identify which crates are touched. Read each crate's `AGENTS.md` to confirm scope.
 3. Walk through every section of the checklist below.
-4. Report findings grouped by severity: blocking, warning. Do NOT include nitpicks or code style issues.
+4. Verify before flagging. For every potential finding:
+   - Trace actual producers and consumers across crates. A type or field that looks domain-specific may be the only correct solution given dependency constraints between sibling subsystems.
+   - When questioning placement in a crate, confirm which crates actually read and write the item. "Written by crate A, read by crate B" makes it cross-crate by definition, even if the content is domain-specific.
+   - When a pattern looks non-idiomatic, consider what the concrete alternatives would require. If every alternative introduces worse trade-offs (version coupling, dependency leaks, code duplication), the pattern is a justified design choice, not a violation.
+   - Do not flag something as wrong if you cannot name a strictly better alternative that works within the existing architectural constraints.
+5. Report findings grouped by severity: blocking, warning. Do NOT include nitpicks or code style issues.
 5. For each finding, cite the file, line, and which rule it violates.
 6. Do NOT include positive comments, praise, or "looks good" notes — only report issues.
 7. If there are no issues, just say the changes look good and there are no issues. Do not pad the review.
@@ -40,21 +45,40 @@ Guiding rules:
 
 ## Dependency Direction
 
-Dependencies flow inward. Higher-level crates depend on lower-level ones, never the reverse.
+Dependencies flow downward. Each layer may depend on any layer below it, never the reverse.
 
 ```
-app -> engine -> [render, audio, physics, input, assets, net, ui, game] -> core
+app                                                        <- binary, may depend on any crate
+  |
+[engine, game]                                             <- may depend on subsystems + core
+  |
+[render, audio, physics, input, assets, net, ui, world]    <- may depend on core only
+  |
+core                                                       <- no workspace dependencies
 ```
+
+`app` (and any future binaries) is the composition root — it wires together whichever crates it needs. `game` sits above the subsystem crates as game-specific composition. It is not a peer of subsystem crates.
 
 Review checks:
-- No reverse dependencies (e.g., `core` depending on `engine`)
-- No lateral dependencies between sibling subsystems unless architecturally justified (e.g., `render` must not depend on `physics`)
+- No reverse dependencies (e.g., `core` depending on `engine`, or a subsystem depending on `game`)
+- No lateral dependencies between sibling subsystems (e.g., `render` must not depend on `physics`)
+- `game` may depend on subsystem crates — it is game-specific composition, not a reusable subsystem
+- Binaries (`app`, editors, tools) may depend on any crate — they are composition roots
 - `core` has zero workspace dependencies — always
 - New external crate dependencies require justification
 
 ## Subsystem Responsibilities
 
 Each crate owns a specific domain. Flag code that crosses boundaries.
+
+### Orchestrator crates must not absorb subsystem logic
+
+A crate whose job is coordination (e.g., event loop, scheduling, lifecycle) must stay a pure orchestrator. It delegates work to subsystem crates — it never implements their logic inline.
+
+- No cross-domain state — a struct should only own state that belongs to its domain. If a field conceptually belongs to another subsystem, it should be an ECS resource managed by that subsystem's crate, not a field on the orchestrator.
+- Delegate, don't inline — when an orchestrator receives events or data meant for a subsystem, it forwards them. It does not interpret, transform, or act on them directly.
+- No hardcoded game-specific values in engine crates — literal key bindings, movement mappings, magic numbers, or policy decisions (e.g., cursor behavior) are game-level configuration. They belong in the game crate or in configurable resources, never baked into engine or subsystem crates.
+- Watch imports — if a crate starts importing types that belong to another subsystem's domain, the logic using those types almost certainly belongs in that other crate instead.
 
 ## Abstraction and Trait Rules
 
@@ -71,7 +95,8 @@ Each crate owns a specific domain. Flag code that crosses boundaries.
 - Event/message passing for loose coupling between subsystems (e.g., input events -> game logic)
 - Avoid global mutable state — pass context explicitly
 - Frame data flows: input -> game logic -> physics -> render. Respect this ordering.
-- Cross-crate data types belong in `core`
+- Cross-crate data types belong in `core` — a type that looks domain-specific is correctly placed in `core` if it serves as a data contract between sibling subsystems that cannot depend on each other. Always check whether a core type is consumed by multiple crates before flagging it as misplaced.
+- Core resource types must only contain fields consumed by more than one crate. If a field is only read by a single subsystem (e.g., a near-clip plane only used by render), it belongs in that subsystem, not in core.
 
 ## Ownership and Shared State
 
@@ -91,12 +116,14 @@ Each crate owns a specific domain. Flag code that crosses boundaries.
 - Avoid circular module dependencies within a crate
 - Feature flags only for genuinely optional capabilities, not to paper over design issues
 - No public exports that are unused
+- Workspace-level external dependencies (`bevy_ecs`, `glam`, etc.) are imported directly by each crate — `core` does not re-export third-party types, only its own types and traits
 
-### ECS Convention: `resources/` and `systems/` directories
+### ECS Convention: `resources/`, `plugins/` and `systems/` directories
 
 Rules:
 - Every ECS resource type (`#[derive(Resource)]` or non-send resource) goes in `resources/<name>.rs`
 - Every public system function goes in `systems/<name>.rs`
+- Every plugin implementation goes in `plugins/<name>.rs`
 - Each `mod.rs` only declares submodules and re-exports — no logic
 - Shared resource types used across multiple crates belong in `capy_core/src/resources/`
 - Schedule labels belong in `capy_core/src/schedule/`, one per file
@@ -109,7 +136,6 @@ Rules:
 - Return types that are useful without unwrapping — prefer `Result` over panicking
 - Constructors validate invariants — invalid states should be unrepresentable
 - Consistent method naming: `new`, `with_*`, `get_*` (only if ambiguous), `set_*`, `into_*`, `as_*`
-- Breaking API changes require discussion
 
 ## Performance Guidelines
 
@@ -138,13 +164,23 @@ Rules:
 Use this as a final pass. Each item maps to a section above.
 
 Architecture:
-- [ ] Dependencies flow inward only
+- [ ] Dependencies flow downward only — no reverse dependencies
+- [ ] No lateral dependencies between sibling subsystems
+- [ ] Binaries are composition roots — may depend on any crate
+- [ ] `game` depends only on `core` and subsystem crates — not on `engine` or `app`
 - [ ] No new external crates without justification
 - [ ] Code lives in the correct crate per its AGENTS.md
 - [ ] No game-specific logic in engine crates
 - [ ] New resource types are in `resources/<name>.rs`, re-exported from `resources/mod.rs`
 - [ ] New system functions are in `systems/<name>.rs`, re-exported from `systems/mod.rs`
+- [ ] New plugin types are in `plugins/<name>.rs`, re-exported from `plugins/mod.rs`
 - [ ] Cross-crate resources and schedule labels are in `capy_core`, not in subsystem crates
+- [ ] Core resource fields are consumed by more than one crate — single-consumer fields belong in the consuming crate
+- [ ] Structs only own state belonging to their domain — no cross-domain fields
+- [ ] Orchestrator crates delegate to subsystems, not inline their logic
+- [ ] No hardcoded game-specific values (key bindings, magic numbers, policy decisions) in engine crates
+- [ ] No imports from another subsystem's domain — if present, the logic belongs in that subsystem
+- [ ] External types (`bevy_ecs`, `glam`) imported directly, not re-exported through `core`
 
 Traits and abstractions:
 - [ ] Shared traits defined in `core`

@@ -2,6 +2,22 @@
 
 Game-specific logic. The only crate that should contain content and design decisions.
 
+## Layer
+
+`game` sits **above** the subsystem crates in the dependency graph:
+
+```
+app                                                        ← binary, may depend on any crate
+  ↓
+[engine, game]                                             ← may depend on subsystems + core
+  ↓
+[render, audio, physics, input, assets, net, ui, world]    ← may depend on core only
+  ↓
+core                                                       ← no workspace dependencies
+```
+
+It may depend on `core` plus any subsystem crate it needs (e.g., `world` for terrain generation). It is **not** a peer of subsystem crates — it composes them into gameplay.
+
 ## Scope
 
 - Gameplay systems (player, enemies, items, scoring, progression).

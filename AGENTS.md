@@ -17,20 +17,30 @@ crates/
   assets/    # Asset loading and caching
   net/       # Networking / multiplayer
   ui/        # In-game UI (menus, HUD)
+  world/     # Voxel terrain generation
   game/      # Game-specific logic and systems
 ```
 
 ## Dependency Direction
 
-Dependencies flow **inward** — higher-level crates depend on lower-level ones, never the reverse.
+Dependencies flow **downward** — each layer may depend on any layer below it, never the reverse.
 
 ```
-app → engine → [render, audio, physics, input, assets, net, ui, game] → core
+app                                                        ← binary, may depend on any crate
+  ↓
+[engine, game]                                             ← may depend on subsystems + core
+  ↓
+[render, audio, physics, input, assets, net, ui, world]    ← may depend on core only
+  ↓
+core                                                       ← no workspace dependencies
 ```
+
+`app` (and any future binaries like a level editor) is the **composition root** — it wires together whichever crates it needs. `game` sits above the subsystem crates as game-specific composition. Subsystem crates must not depend on each other or on `game`.
 
 ## Boundaries
 
 - **NEVER** add dependencies to `core` — it must remain dependency-free within the workspace.
+- **Workspace-level external dependencies** (`bevy_ecs`, `glam`, etc.) are declared in the root `Cargo.toml`. Each crate imports them directly via `dep.workspace = true` — `core` does not re-export third-party types.
 - **NEVER** put game-specific logic in engine crates (`engine`, `render`, `core`, etc.).
 - **Ask first** before adding new external dependencies.
 - **Ask first** before creating new crates.
