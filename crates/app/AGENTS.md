@@ -11,5 +11,5 @@ Binary entry point for the game. Thin launcher — delegates immediately to `cap
 ## What Does NOT Belong Here
 
 - Game logic, rendering, input handling, or any subsystem code.
-- Library code — this is the only binary crate.
+- Library code — this is a binary crate.
 - Direct dependencies on subsystem crates (only depend on `capy_engine`).

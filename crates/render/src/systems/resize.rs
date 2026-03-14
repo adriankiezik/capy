@@ -5,10 +5,13 @@ use crate::resources::{BlitPipeline, GpuContext, StreamingPipeline};
 
 pub(crate) fn resize_system(
     mut gpu: NonSendMut<GpuContext>,
-    mut streaming: NonSendMut<StreamingPipeline>,
-    mut blit: NonSendMut<BlitPipeline>,
+    streaming: Option<NonSendMut<StreamingPipeline>>,
+    blit: Option<NonSendMut<BlitPipeline>>,
     window: Res<GameWindow>,
 ) {
+    let (Some(mut streaming), Some(mut blit)) = (streaming, blit) else {
+        return;
+    };
     if window.width > 0
         && window.height > 0
         && (gpu.config.width != window.width || gpu.config.height != window.height)

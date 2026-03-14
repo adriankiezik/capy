@@ -5,9 +5,13 @@ use crate::resources::{BlitPipeline, GpuContext, StreamingPipeline};
 
 pub(crate) fn render_frame_system(
     gpu: NonSendMut<GpuContext>,
-    streaming: NonSendMut<StreamingPipeline>,
-    blit: NonSendMut<BlitPipeline>,
+    streaming: Option<NonSendMut<StreamingPipeline>>,
+    blit: Option<NonSendMut<BlitPipeline>>,
 ) -> Result<(), BevyError> {
+    let (Some(streaming), Some(blit)) = (streaming, blit) else {
+        return Ok(());
+    };
+
     let output = match gpu.surface.get_current_texture() {
         Ok(o) => o,
         Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {

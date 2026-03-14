@@ -1,0 +1,16 @@
+[package]
+name = "capy_world_editor"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+capy_core = { version = "0.1.0", path = "../core" }
+capy_engine = { version = "0.1.0", path = "../engine" }
+capy_world = { version = "0.1.0", path = "../world" }
+capy_input = { version = "0.1.0", path = "../input" }
+capy_render = { version = "0.1.0", path = "../render" }
+anyhow.workspace = true
+bevy_ecs.workspace = true
+
+[lints]
+workspace = true

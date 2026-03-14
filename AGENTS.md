@@ -7,18 +7,19 @@ Rust game and game engine. Workspace with crates under `crates/`.
 
 ```
 crates/
-  app/       # Binary entry point — calls capy_engine::run()
-  engine/    # Window, event loop, orchestrates subsystems
-  core/      # Shared types, math, ECS primitives
-  render/    # GPU rendering backend
-  audio/     # Audio playback
-  physics/   # Physics simulation, collision
-  input/     # Input abstraction (keyboard, mouse, gamepad)
-  assets/    # Asset loading and caching
-  net/       # Networking / multiplayer
-  ui/        # In-game UI (menus, HUD)
-  world/     # Voxel terrain generation
-  game/      # Game-specific logic and systems
+  app/            # Binary — game entry point
+  world_editor/   # Binary — developer world editing tool
+  engine/         # Window, event loop, orchestrates subsystems
+  core/           # Shared types, math, ECS primitives
+  render/         # GPU rendering backend
+  audio/          # Audio playback
+  physics/        # Physics simulation, collision
+  input/          # Input abstraction (keyboard, mouse, gamepad)
+  assets/         # Asset loading and caching
+  net/            # Networking / multiplayer
+  ui/             # In-game UI (menus, HUD)
+  world/          # Voxel terrain generation
+  game/           # Game-specific logic and systems
 ```
 
 ## Dependency Direction
@@ -26,7 +27,7 @@ crates/
 Dependencies flow **downward** — each layer may depend on any layer below it, never the reverse.
 
 ```
-app                                                        ← binary, may depend on any crate
+[app, world_editor]                                        ← binaries, may depend on any crate
   ↓
 [engine, game]                                             ← may depend on subsystems + core
   ↓
@@ -35,7 +36,7 @@ app                                                        ← binary, may depen
 core                                                       ← no workspace dependencies
 ```
 
-`app` (and any future binaries like a level editor) is the **composition root** — it wires together whichever crates it needs. `game` sits above the subsystem crates as game-specific composition. Subsystem crates must not depend on each other or on `game`.
+`app` and `world_editor` are **composition roots** — binaries that wire together whichever crates they need. `game` sits above the subsystem crates as game-specific composition. Subsystem crates must not depend on each other or on `game`.
 
 ## Boundaries
 
@@ -49,7 +50,7 @@ core                                                       ← no workspace depe
 ## Error Handling
 
 - **Library crates** use `thiserror` — each crate with fallible APIs defines its own error enum in `src/error.rs` with a `Result<T>` alias.
-- **Binary crate** (`capy_app`) uses `anyhow` at the boundary with `.context()` for human-readable messages.
+- **Binary crates** (`capy_app`, `capy_world_editor`) use `anyhow` at the boundary with `.context()` for human-readable messages.
 - **No `.unwrap()` / `.expect()`** — workspace clippy lints warn on both. Use `?` to propagate errors.
 - Errors aggregate upward: e.g. `RenderError` wraps wgpu errors, `EngineError` wraps `RenderError` + winit errors.
 - Empty crates get error types when they gain real fallible APIs, not before.

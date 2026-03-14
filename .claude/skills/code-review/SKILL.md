@@ -48,7 +48,7 @@ Guiding rules:
 Dependencies flow downward. Each layer may depend on any layer below it, never the reverse.
 
 ```
-app                                                        <- binary, may depend on any crate
+[app, world_editor]                                        <- binaries, may depend on any crate
   |
 [engine, game]                                             <- may depend on subsystems + core
   |
@@ -57,7 +57,7 @@ app                                                        <- binary, may depend
 core                                                       <- no workspace dependencies
 ```
 
-`app` (and any future binaries) is the composition root — it wires together whichever crates it needs. `game` sits above the subsystem crates as game-specific composition. It is not a peer of subsystem crates.
+`app` and `world_editor` are composition roots — binaries that wire together whichever crates they need. `game` sits above the subsystem crates as game-specific composition. It is not a peer of subsystem crates.
 
 Review checks:
 - No reverse dependencies (e.g., `core` depending on `engine`, or a subsystem depending on `game`)
@@ -199,7 +199,7 @@ API:
 
 Error handling:
 - [ ] Library crates use `thiserror` with a crate-level error enum in `src/error.rs`
-- [ ] Binary crate uses `anyhow` with `.context()` at the boundary
+- [ ] Binary crates use `anyhow` with `.context()` at the boundary
 - [ ] No `.unwrap()` or `.expect()` — use `?` to propagate
 - [ ] Errors wrap lower-level errors via `#[from]` — no information loss
 - [ ] No error types in crates that have no fallible APIs yet

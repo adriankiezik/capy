@@ -5,8 +5,11 @@ use crate::resources::{GpuContext, StreamingPipeline};
 
 pub(crate) fn upload_camera_system(
     gpu: NonSendMut<GpuContext>,
-    streaming: NonSendMut<StreamingPipeline>,
-    camera: Res<Camera>,
+    streaming: Option<NonSendMut<StreamingPipeline>>,
+    camera: Option<Res<Camera>>,
 ) {
+    let (Some(streaming), Some(camera)) = (streaming, camera) else {
+        return;
+    };
     streaming.upload_camera(&gpu.queue, &camera, gpu.config.width, gpu.config.height);
 }

@@ -10,3 +10,17 @@ pub struct VoxelMeshData {
     pub chunk_size: u32,
     pub material_palette: [[f32; 3]; 8],
 }
+
+impl VoxelMeshData {
+    pub fn empty() -> Self {
+        Self {
+            dag_buffer: vec![0],
+            avg_color_buffer: vec![0],
+            world_size: 0,
+            root_offset: 0,
+            depth: 0,
+            chunk_size: 1,
+            material_palette: [[0.0; 3]; 8],
+        }
+    }
+}
