@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 winit = "0.30.13"
 capy_core = { path = "../core" }
+bevy_ecs.workspace = true
 thiserror.workspace = true
 
 [lints]

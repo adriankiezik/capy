@@ -5,8 +5,9 @@ edition.workspace = true
 
 [dependencies]
 capy_engine = { version = "0.1.0", path = "../engine" }
+capy_game = { version = "0.1.0", path = "../game" }
+capy_input = { version = "0.1.0", path = "../input" }
 capy_render = { version = "0.1.0", path = "../render" }
-capy_core = { version = "0.1.0", path = "../core" }
 anyhow.workspace = true
 
 [lints]

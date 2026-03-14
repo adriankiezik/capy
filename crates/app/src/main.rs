@@ -1,14 +1,14 @@
 use anyhow::Context;
-use capy_core::IntoScheduleConfigs;
 use capy_engine::EngineBuilder;
+use capy_game::GamePlugin;
+use capy_input::InputPlugin;
+use capy_render::RenderPlugin;
 
 fn main() -> anyhow::Result<()> {
     EngineBuilder::new()
-        .add_systems(capy_core::Startup, capy_render::init_renderer)
-        .add_systems(
-            capy_core::Render,
-            (capy_render::resize_system, capy_render::render_system).chain(),
-        )
+        .add_plugin(InputPlugin)
+        .add_plugin(RenderPlugin)
+        .add_plugin(GamePlugin)
         .run()
         .context("failed to run engine")
 }

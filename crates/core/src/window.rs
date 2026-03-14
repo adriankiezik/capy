@@ -1,5 +1,7 @@
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
-/// Trait alias that decouples the engine from any specific windowing library.
-pub trait Window: HasWindowHandle + HasDisplayHandle + Send + Sync + 'static {}
-impl<T: HasWindowHandle + HasDisplayHandle + Send + Sync + 'static> Window for T {}
+pub trait Window: HasWindowHandle + HasDisplayHandle + Send + Sync + 'static {
+    fn set_cursor_visible(&self, visible: bool);
+    fn confine_or_lock_cursor(&self);
+    fn release_cursor(&self);
+}

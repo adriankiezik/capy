@@ -7,7 +7,10 @@ edition.workspace = true
 wgpu = "28"
 pollster = "0.4"
 capy_core = { path = "../core" }
+bevy_ecs.workspace = true
 thiserror.workspace = true
+bytemuck.workspace = true
+glam.workspace = true
 
 [lints]
 workspace = true

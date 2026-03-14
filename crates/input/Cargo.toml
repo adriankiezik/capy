@@ -4,3 +4,8 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+capy_core = { path = "../core" }
+bevy_ecs.workspace = true
+
+[lints]
+workspace = true

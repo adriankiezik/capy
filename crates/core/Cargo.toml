@@ -4,5 +4,9 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-bevy_ecs = "0.18"
+bevy_ecs.workspace = true
 raw-window-handle = "0.6"
+glam.workspace = true
+
+[lints]
+workspace = true

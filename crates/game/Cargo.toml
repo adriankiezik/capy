@@ -4,3 +4,10 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+capy_core = { path = "../core" }
+capy_world = { path = "../world" }
+bevy_ecs.workspace = true
+glam.workspace = true
+
+[lints]
+workspace = true

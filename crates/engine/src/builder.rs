@@ -1,6 +1,8 @@
-use capy_core::{
-    DefaultErrorHandler, IntoScheduleConfigs, ScheduleLabel, ScheduleSystem, Schedules, World,
-};
+use bevy_ecs::error::DefaultErrorHandler;
+use bevy_ecs::schedule::{IntoScheduleConfigs, ScheduleLabel, Schedules};
+use bevy_ecs::system::ScheduleSystem;
+use bevy_ecs::world::World;
+use capy_core::Plugin;
 use winit::event_loop::{ControlFlow, EventLoop};
 
 use crate::Result;
@@ -17,6 +19,14 @@ impl EngineBuilder {
         Self {
             schedule_builders: Vec::new(),
         }
+    }
+
+    pub fn add_plugin(mut self, plugin: impl Plugin + 'static) -> Self {
+        self.schedule_builders
+            .push(Box::new(move |world: &mut World| {
+                plugin.register(world);
+            }));
+        self
     }
 
     pub fn add_systems<M: 'static>(

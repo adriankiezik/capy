@@ -1,7 +1,9 @@
-mod init_renderer;
-mod render;
+pub(crate) mod blit;
+mod init_gpu;
+mod render_frame;
 mod resize;
+pub(crate) mod streaming;
 
-pub use init_renderer::init_renderer;
-pub use render::render_system;
-pub use resize::resize_system;
+pub(crate) use init_gpu::init_gpu;
+pub(crate) use render_frame::render_frame_system;
+pub(crate) use resize::resize_system;

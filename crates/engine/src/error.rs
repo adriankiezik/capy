@@ -1,4 +1,4 @@
-use capy_core::BevyError;
+use bevy_ecs::error::BevyError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
