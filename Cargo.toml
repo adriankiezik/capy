@@ -12,6 +12,7 @@ members = [
     "crates/assets",
     "crates/net",
     "crates/ui",
+    "crates/shared",
     "crates/game",
     "crates/app",
     "crates/world_editor",
@@ -30,6 +31,8 @@ glam = "0.30"
 bevy_ecs = "0.18"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+lz4_flex = "0.11"
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
 
 [workspace.lints.clippy]
 unwrap_used = "warn"

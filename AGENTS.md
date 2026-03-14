@@ -19,6 +19,7 @@ crates/
   net/            # Networking / multiplayer
   ui/             # In-game UI (menus, HUD)
   world/          # Voxel terrain generation
+  shared/         # Reusable systems shared across binaries
   game/           # Game-specific logic and systems
 ```
 
@@ -29,14 +30,14 @@ Dependencies flow **downward** — each layer may depend on any layer below it, 
 ```
 [app, world_editor]                                        ← binaries, may depend on any crate
   ↓
-[engine, game]                                             ← may depend on subsystems + core
+[engine, game, shared]                                     ← may depend on subsystems + core
   ↓
 [render, audio, physics, input, assets, net, ui, world]    ← may depend on core only
   ↓
 core                                                       ← no workspace dependencies
 ```
 
-`app` and `world_editor` are **composition roots** — binaries that wire together whichever crates they need. `game` sits above the subsystem crates as game-specific composition. Subsystem crates must not depend on each other or on `game`.
+`app` and `world_editor` are **composition roots** — binaries that wire together whichever crates they need. `game` and `shared` sit above the subsystem crates. `game` is game-specific composition; `shared` holds reusable cross-binary systems. Subsystem crates must not depend on each other or on `game`/`shared`.
 
 ## Boundaries
 

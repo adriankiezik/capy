@@ -4,3 +4,11 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+capy_core = { path = "../core" }
+thiserror.workspace = true
+lz4_flex.workspace = true
+xxhash-rust.workspace = true
+bevy_ecs.workspace = true
+
+[lints]
+workspace = true

@@ -1,6 +1,6 @@
 use crate::error::{Result, WorldError};
 
-pub struct VoxelGrid {
+pub(crate) struct VoxelGrid {
     pub data: Vec<u8>,
     pub size_x: u32,
     pub size_y: u32,

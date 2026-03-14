@@ -1,10 +1,15 @@
+use std::path::Path;
+
 use bevy_ecs::error::BevyError;
 use bevy_ecs::world::World;
 use capy_core::{Camera, CursorMode, GameWindow};
+use capy_shared::FlyCameraConfig;
 use glam::Vec3;
 
 pub(crate) fn game_startup(world: &mut World) -> Result<(), BevyError> {
-    let mesh = capy_world::generate_terrain(42)?;
+    let world_dir = Path::new(capy_assets::DEFAULT_WORLD_DIR);
+
+    let mesh = capy_assets::load_world_as_mesh_data(world_dir)?;
 
     let window = world.resource::<GameWindow>();
     let aspect = if window.height > 0 {
@@ -24,6 +29,7 @@ pub(crate) fn game_startup(world: &mut World) -> Result<(), BevyError> {
     world.insert_resource(mesh);
     world.insert_resource(camera);
     world.insert_resource(CursorMode::Confined);
+    world.insert_resource(FlyCameraConfig::default());
 
     Ok(())
 }

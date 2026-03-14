@@ -1,12 +1,12 @@
 use bevy_ecs::error::BevyError;
 use bevy_ecs::system::{Res, ResMut};
-use capy_core::{Camera, FrameTime, GameWindow, KeyCode, RawInput};
+use capy_core::{Camera, FrameTime, GameWindow, RawInput};
 
-const LOOK_SENSITIVITY: f32 = 0.003;
-const MOVE_SPEED_UNITS_PER_SEC: f32 = 80.0;
+use crate::FlyCameraConfig;
 
-pub(crate) fn update_camera_system(
+pub fn fly_camera_system(
     mut camera: ResMut<Camera>,
+    config: Res<FlyCameraConfig>,
     input: Res<RawInput>,
     time: Res<FrameTime>,
     window: Res<GameWindow>,
@@ -15,33 +15,33 @@ pub(crate) fn update_camera_system(
         camera.aspect = window.width as f32 / window.height as f32;
     }
 
-    camera.yaw += input.mouse_dx * LOOK_SENSITIVITY;
-    camera.pitch -= input.mouse_dy * LOOK_SENSITIVITY;
+    camera.yaw += input.mouse_dx * config.look_sensitivity;
+    camera.pitch -= input.mouse_dy * config.look_sensitivity;
     camera.pitch = camera.pitch.clamp(
         -std::f32::consts::FRAC_PI_2 + 0.01,
         std::f32::consts::FRAC_PI_2 - 0.01,
     );
 
-    let speed = MOVE_SPEED_UNITS_PER_SEC * time.dt;
+    let speed = config.move_speed * time.dt;
     let fwd = camera.forward();
     let right = camera.right();
 
-    if input.keys_held.contains(&KeyCode::KeyW) {
+    if input.keys_held.contains(&config.key_forward) {
         camera.position += fwd * speed;
     }
-    if input.keys_held.contains(&KeyCode::KeyS) {
+    if input.keys_held.contains(&config.key_back) {
         camera.position -= fwd * speed;
     }
-    if input.keys_held.contains(&KeyCode::KeyD) {
+    if input.keys_held.contains(&config.key_right) {
         camera.position += right * speed;
     }
-    if input.keys_held.contains(&KeyCode::KeyA) {
+    if input.keys_held.contains(&config.key_left) {
         camera.position -= right * speed;
     }
-    if input.keys_held.contains(&KeyCode::Space) {
+    if input.keys_held.contains(&config.key_up) {
         camera.position.y += speed;
     }
-    if input.keys_held.contains(&KeyCode::ShiftLeft) {
+    if input.keys_held.contains(&config.key_down) {
         camera.position.y -= speed;
     }
 

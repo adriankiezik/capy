@@ -1,14 +1,11 @@
 [package]
-name = "capy_game"
+name = "capy_shared"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
 capy_core = { path = "../core" }
-capy_assets = { path = "../assets" }
-capy_shared = { path = "../shared" }
 bevy_ecs.workspace = true
-glam.workspace = true
 
 [lints]
 workspace = true

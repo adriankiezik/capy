@@ -20,6 +20,6 @@ impl capy_core::Plugin for GamePlugin {
             .add_systems(crate::systems::game_startup);
         schedules
             .entry(capy_core::Update)
-            .add_systems(crate::systems::update_camera_system);
+            .add_systems(capy_shared::fly_camera_system);
     }
 }

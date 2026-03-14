@@ -1,5 +1,5 @@
-use crate::material::MATERIAL_COLORS;
 use crate::voxel_grid::VoxelGrid;
+use capy_core::MATERIAL_COLORS;
 
 const BRANCH: u32 = 4;
 const BRANCH_CUBED: usize = (BRANCH * BRANCH * BRANCH) as usize;

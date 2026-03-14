@@ -446,6 +446,13 @@ dependencies = [
 [[package]]
 name = "capy_assets"
 version = "0.1.0"
+dependencies = [
+ "bevy_ecs",
+ "capy_core",
+ "lz4_flex",
+ "thiserror 2.0.18",
+ "xxhash-rust",
+]
 
 [[package]]
 name = "capy_audio"
@@ -476,8 +483,9 @@ name = "capy_game"
 version = "0.1.0"
 dependencies = [
  "bevy_ecs",
+ "capy_assets",
  "capy_core",
- "capy_world",
+ "capy_shared",
  "glam",
 ]
 
@@ -512,6 +520,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "capy_shared"
+version = "0.1.0"
+dependencies = [
+ "bevy_ecs",
+ "capy_core",
+]
+
+[[package]]
 name = "capy_ui"
 version = "0.1.0"
 
@@ -531,11 +547,14 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bevy_ecs",
+ "capy_assets",
  "capy_core",
  "capy_engine",
  "capy_input",
  "capy_render",
+ "capy_shared",
  "capy_world",
+ "glam",
 ]
 
 [[package]]
@@ -1272,6 +1291,15 @@ name = "log"
 version = "0.4.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
+
+[[package]]
+name = "lz4_flex"
+version = "0.11.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "373f5eceeeab7925e0c1098212f2fbc4d416adec9d35051a6ab251e824c1854a"
+dependencies = [
+ "twox-hash",
+]
 
 [[package]]
 name = "malloc_buf"
@@ -2400,6 +2428,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
 
 [[package]]
+name = "twox-hash"
+version = "2.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ea3136b675547379c4bd395ca6b938e5ad3c3d20fad76e7fe85f9e0d011419c"
+
+[[package]]
 name = "typeid"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3366,6 +3400,12 @@ name = "xml-rs"
 version = "0.8.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ae8337f8a065cfc972643663ea4279e04e7256de865aa66fe25cec5fb912d3f"
+
+[[package]]
+name = "xxhash-rust"
+version = "0.8.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fdd20c5420375476fbd4394763288da7eb0cc0b8c11deed431a91562af7335d3"
 
 [[package]]
 name = "zerocopy"

@@ -50,19 +50,20 @@ Dependencies flow downward. Each layer may depend on any layer below it, never t
 ```
 [app, world_editor]                                        <- binaries, may depend on any crate
   |
-[engine, game]                                             <- may depend on subsystems + core
+[engine, game, shared]                                     <- may depend on subsystems + core
   |
 [render, audio, physics, input, assets, net, ui, world]    <- may depend on core only
   |
 core                                                       <- no workspace dependencies
 ```
 
-`app` and `world_editor` are composition roots — binaries that wire together whichever crates they need. `game` sits above the subsystem crates as game-specific composition. It is not a peer of subsystem crates.
+`app` and `world_editor` are composition roots — binaries that wire together whichever crates they need. `game` and `shared` sit above the subsystem crates. `game` is game-specific composition; `shared` holds reusable cross-binary systems (e.g., fly camera controller). Neither is a peer of subsystem crates.
 
 Review checks:
 - No reverse dependencies (e.g., `core` depending on `engine`, or a subsystem depending on `game`)
 - No lateral dependencies between sibling subsystems (e.g., `render` must not depend on `physics`)
 - `game` may depend on subsystem crates — it is game-specific composition, not a reusable subsystem
+- `shared` may depend on subsystem crates — it holds reusable cross-binary systems, not game-specific logic
 - Binaries (`app`, editors, tools) may depend on any crate — they are composition roots
 - `core` has zero workspace dependencies — always
 - New external crate dependencies require justification
@@ -167,7 +168,8 @@ Architecture:
 - [ ] Dependencies flow downward only — no reverse dependencies
 - [ ] No lateral dependencies between sibling subsystems
 - [ ] Binaries are composition roots — may depend on any crate
-- [ ] `game` depends only on `core` and subsystem crates — not on `engine` or `app`
+- [ ] `game` depends only on `core`, `shared`, and subsystem crates — not on `engine` or `app`
+- [ ] `shared` depends only on `core` and subsystem crates — not on `game`, `engine`, or `app`
 - [ ] No new external crates without justification
 - [ ] Code lives in the correct crate per its AGENTS.md
 - [ ] No game-specific logic in engine crates

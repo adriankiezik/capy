@@ -1,15 +1,11 @@
-use capy_core::VoxelMeshData;
 use noise::{NoiseFn, Perlin};
 
-use crate::dag::reduce_to_dag;
 use crate::error::Result;
-use crate::material::MATERIAL_COLORS;
-use crate::sparse64tree::{build_and_serialize_tree_with_heights, tree_to_gpu_data};
 use crate::voxel_grid::VoxelGrid;
 
 pub const CHUNK_SIZE: u32 = 256;
 
-pub fn generate_terrain(seed: u32) -> Result<VoxelMeshData> {
+pub(crate) fn generate_terrain_grid(seed: u32) -> Result<(VoxelGrid, Vec<u16>)> {
     let perlin = Perlin::new(seed);
 
     let cs = CHUNK_SIZE as usize;
@@ -45,17 +41,5 @@ pub fn generate_terrain(seed: u32) -> Result<VoxelMeshData> {
     }
 
     let voxel_grid = VoxelGrid::new(CHUNK_SIZE, CHUNK_SIZE, CHUNK_SIZE, grid)?;
-    let flat = build_and_serialize_tree_with_heights(&voxel_grid, Some(&col_heights));
-    let dag_flat = reduce_to_dag(&flat);
-    let (tree_info, dag_buffer, avg_color_buffer) = tree_to_gpu_data(&dag_flat);
-
-    Ok(VoxelMeshData {
-        dag_buffer,
-        avg_color_buffer,
-        world_size: tree_info.world_size,
-        root_offset: tree_info.root_offset,
-        depth: tree_info.depth,
-        chunk_size: CHUNK_SIZE,
-        material_palette: MATERIAL_COLORS,
-    })
+    Ok((voxel_grid, col_heights))
 }
