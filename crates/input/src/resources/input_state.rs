@@ -19,6 +19,7 @@ pub struct InputState {
     mouse_delta: (f64, f64),
     last_frame: Option<Instant>,
     cursor_grabbed: bool,
+    saved_cursor_pos: Option<(f64, f64)>,
 }
 
 impl InputState {
@@ -29,6 +30,7 @@ impl InputState {
             mouse_delta: (0.0, 0.0),
             last_frame: None,
             cursor_grabbed: false,
+            saved_cursor_pos: None,
         }
     }
 
@@ -53,15 +55,24 @@ impl InputState {
         self.mouse_delta.1 += event.dy;
     }
 
-    fn sync_cursor_mode(&mut self, desired: CursorMode, window: &dyn Window) {
+    fn sync_cursor_mode(
+        &mut self,
+        desired: CursorMode,
+        window: &dyn Window,
+        cursor: &CursorPosition,
+    ) {
         match desired {
             CursorMode::Confined if !self.cursor_grabbed => {
+                self.saved_cursor_pos = Some((cursor.x as f64, cursor.y as f64));
                 window.confine_or_lock_cursor();
                 window.set_cursor_visible(false);
                 self.cursor_grabbed = true;
             }
             CursorMode::Free if self.cursor_grabbed => {
                 window.release_cursor();
+                if let Some((x, y)) = self.saved_cursor_pos.take() {
+                    window.set_cursor_position(x, y);
+                }
                 window.set_cursor_visible(true);
                 self.cursor_grabbed = false;
             }
@@ -149,6 +160,7 @@ pub fn sync_cursor_mode_system(
     mut state: ResMut<InputState>,
     cursor_mode: Option<Res<CursorMode>>,
     game_window: Option<Res<GameWindow>>,
+    cursor: Res<CursorPosition>,
 ) {
     let Some(cursor_mode) = cursor_mode else {
         return;
@@ -157,15 +169,18 @@ pub fn sync_cursor_mode_system(
         return;
     };
 
-    state.sync_cursor_mode(*cursor_mode, game_window.handle.as_ref());
+    state.sync_cursor_mode(*cursor_mode, game_window.handle.as_ref(), &cursor);
 }
 
 pub fn update_cursor_position(
     mut cursor: ResMut<CursorPosition>,
     mut events: MessageReader<CursorMovedMessage>,
+    state: Res<InputState>,
 ) {
     for event in events.read() {
-        cursor.x = event.x as f32;
-        cursor.y = event.y as f32;
+        if !state.cursor_grabbed {
+            cursor.x = event.x as f32;
+            cursor.y = event.y as f32;
+        }
     }
 }

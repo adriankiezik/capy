@@ -43,4 +43,10 @@ impl CoreWindow for WindowAdapter {
     fn release_cursor(&self) {
         let _ = self.inner.set_cursor_grab(CursorGrabMode::None);
     }
+
+    fn set_cursor_position(&self, x: f64, y: f64) {
+        let _ = self
+            .inner
+            .set_cursor_position(winit::dpi::PhysicalPosition::new(x, y));
+    }
 }

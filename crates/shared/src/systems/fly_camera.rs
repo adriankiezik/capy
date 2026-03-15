@@ -1,6 +1,6 @@
 use bevy_ecs::error::BevyError;
 use bevy_ecs::system::{Res, ResMut};
-use capy_core::{Camera, CursorMode, FrameTime, GameWindow, MouseButton, RawInput};
+use capy_core::{Camera, CursorMode, FrameTime, GameWindow, RawInput};
 
 use crate::FlyCameraConfig;
 
@@ -17,7 +17,7 @@ pub fn fly_camera_system(
     }
 
     let looking = if config.hold_to_look {
-        let held = input.mouse_buttons_held.contains(&MouseButton::Left);
+        let held = input.mouse_buttons_held.contains(&config.look_button);
         if let Some(ref mut mode) = cursor_mode {
             let desired = if held {
                 CursorMode::Confined
