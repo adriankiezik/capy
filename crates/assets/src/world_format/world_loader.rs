@@ -5,9 +5,9 @@ use capy_core::{BakedChunkData, RegionCoord, VoxelMeshData};
 
 use crate::error::{AssetError, Result};
 
-use super::WorldHandle;
 use super::region_io;
 use super::types::{Compression, RegionEntry, WorldManifest};
+use crate::resources::WorldHandle;
 
 pub fn load_world_as_mesh_data(world_dir: &Path) -> Result<VoxelMeshData> {
     let manifest = WorldManifest::load(world_dir)?;
