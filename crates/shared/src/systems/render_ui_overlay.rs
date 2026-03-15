@@ -20,9 +20,6 @@ pub(crate) fn render_ui_overlay(
         surface_format,
         encoder,
         output_view,
-        &output.clipped_primitives,
-        &output.textures_delta,
-        output.pixels_per_point,
-        output.screen_size,
+        &output,
     )
 }

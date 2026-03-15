@@ -38,15 +38,12 @@ pub(crate) fn pick_encode(
 ) -> Result<(), BevyError> {
     ensure_pick_pipeline(world);
 
-    let Some(mut pick) = world.get_non_send_resource_mut::<PickPipeline>() else {
-        return Ok(());
-    };
+    let result = world
+        .get_non_send_resource_mut::<PickPipeline>()
+        .and_then(|mut pick| pick.try_read_result());
 
-    if let Some(result) = pick.try_read_result() {
-        drop(pick);
+    if let Some(result) = result {
         *world.resource_mut::<VoxelHit>() = result;
-    } else {
-        drop(pick);
     }
 
     let Some(cursor) = world.get_resource::<CursorPosition>() else {

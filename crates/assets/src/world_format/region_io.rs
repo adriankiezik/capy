@@ -210,7 +210,7 @@ fn bytes_to_u32_vec(data: &[u8]) -> Vec<u32> {
 }
 
 fn append_u32_slice_as_le_bytes(output: &mut Vec<u8>, data: &[u32]) {
-    output.reserve(data.len() * std::mem::size_of::<u32>());
+    output.reserve(std::mem::size_of_val(data));
     for value in data {
         output.extend_from_slice(&value.to_le_bytes());
     }

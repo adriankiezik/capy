@@ -13,7 +13,6 @@ impl capy_core::Plugin for GamePlugin {
             width: 1280,
             height: 720,
             vsync: false,
-            ..WindowConfig::default()
         });
 
         let mut schedules = world.get_resource_or_init::<Schedules>();

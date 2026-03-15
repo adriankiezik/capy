@@ -1,8 +1,62 @@
+use crate::gpu_texture::GpuTexture;
 use crate::shader_source;
+use crate::voxel_bind_group::bgl_sampler_filtering;
+
+pub(crate) struct BlitLayout {
+    layout: wgpu::BindGroupLayout,
+}
+
+impl BlitLayout {
+    pub(crate) fn new(device: &wgpu::Device) -> Self {
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Blit BGL"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                bgl_sampler_filtering(1),
+            ],
+        });
+        Self { layout }
+    }
+
+    pub(crate) fn bgl(&self) -> &wgpu::BindGroupLayout {
+        &self.layout
+    }
+
+    pub(crate) fn bind(
+        &self,
+        device: &wgpu::Device,
+        storage_texture: &GpuTexture,
+        sampler: &wgpu::Sampler,
+    ) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Blit Bind Group"),
+            layout: &self.layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&storage_texture.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(sampler),
+                },
+            ],
+        })
+    }
+}
 
 pub(crate) struct BlitPipeline {
     pub(crate) blit_pipeline: wgpu::RenderPipeline,
-    blit_bind_group_layout: wgpu::BindGroupLayout,
+    layout: BlitLayout,
     pub(crate) blit_bind_group: wgpu::BindGroup,
     blit_sampler: wgpu::Sampler,
     pub(crate) width: u32,
@@ -12,7 +66,7 @@ pub(crate) struct BlitPipeline {
 impl BlitPipeline {
     pub(crate) fn new(
         device: &wgpu::Device,
-        storage_texture: &wgpu::Texture,
+        storage_texture: &GpuTexture,
         surface_format: wgpu::TextureFormat,
         width: u32,
         height: u32,
@@ -22,32 +76,11 @@ impl BlitPipeline {
             source: wgpu::ShaderSource::Wgsl(shader_source::SHADER_BLIT.into()),
         });
 
-        let blit_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("Blit BGL"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                ],
-            });
+        let layout = BlitLayout::new(device);
 
         let blit_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Blit Pipeline Layout"),
-            bind_group_layouts: &[&blit_bind_group_layout],
+            bind_group_layouts: &[layout.bgl()],
             ..Default::default()
         });
 
@@ -84,16 +117,11 @@ impl BlitPipeline {
             ..Default::default()
         });
 
-        let blit_bind_group = Self::build_bind_group(
-            device,
-            &blit_bind_group_layout,
-            storage_texture,
-            &blit_sampler,
-        );
+        let blit_bind_group = layout.bind(device, storage_texture, &blit_sampler);
 
         Self {
             blit_pipeline,
-            blit_bind_group_layout,
+            layout,
             blit_bind_group,
             blit_sampler,
             width,
@@ -104,36 +132,10 @@ impl BlitPipeline {
     pub(crate) fn rebuild_bind_group(
         &mut self,
         device: &wgpu::Device,
-        storage_texture: &wgpu::Texture,
+        storage_texture: &GpuTexture,
     ) {
-        self.blit_bind_group = Self::build_bind_group(
-            device,
-            &self.blit_bind_group_layout,
-            storage_texture,
-            &self.blit_sampler,
-        );
-    }
-
-    fn build_bind_group(
-        device: &wgpu::Device,
-        layout: &wgpu::BindGroupLayout,
-        storage_texture: &wgpu::Texture,
-        sampler: &wgpu::Sampler,
-    ) -> wgpu::BindGroup {
-        let view = storage_texture.create_view(&wgpu::TextureViewDescriptor::default());
-        device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Blit Bind Group"),
-            layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(sampler),
-                },
-            ],
-        })
+        self.blit_bind_group = self
+            .layout
+            .bind(device, storage_texture, &self.blit_sampler);
     }
 }

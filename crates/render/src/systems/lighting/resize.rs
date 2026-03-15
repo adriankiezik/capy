@@ -19,8 +19,7 @@ pub(crate) fn resize_lighting_system(
             &trace.gbuf_normal,
             &trace.gbuf_depth,
             &voxels.render_settings_buffer,
-            gpu.config.width,
-            gpu.config.height,
+            [gpu.config.width, gpu.config.height],
         );
     }
 }

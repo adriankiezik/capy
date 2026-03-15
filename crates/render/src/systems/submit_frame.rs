@@ -24,10 +24,10 @@ pub(crate) fn submit_frame_system(world: &mut World) -> Result<(), BevyError> {
             .map(|callbacks| callbacks.list().to_vec())
             .unwrap_or_default();
         for callback in overlay_callbacks {
-            if let Err(e) = callback(world, &device, &queue, surface_format, &mut encoder, view) {
-                if first_error.is_none() {
-                    first_error = Some(e);
-                }
+            if let Err(e) = callback(world, &device, &queue, surface_format, &mut encoder, view)
+                && first_error.is_none()
+            {
+                first_error = Some(e);
             }
         }
     }
@@ -35,10 +35,10 @@ pub(crate) fn submit_frame_system(world: &mut World) -> Result<(), BevyError> {
     queue.submit(std::iter::once(encoder.finish()));
 
     for ps in post_submit {
-        if let Err(e) = ps(world) {
-            if first_error.is_none() {
-                first_error = Some(e);
-            }
+        if let Err(e) = ps(world)
+            && first_error.is_none()
+        {
+            first_error = Some(e);
         }
     }
 

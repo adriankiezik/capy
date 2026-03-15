@@ -4,12 +4,13 @@ use capy_core::{Camera, VoxelMeshData};
 
 use crate::camera::CameraUniform;
 use crate::resources::RendererSettings;
-use crate::settings::{StreamingInfoUniform, to_render_settings_uniform};
+use crate::settings::{RenderSettingsUniform, StreamingInfoUniform, to_render_settings_uniform};
+use crate::uniform_buffer::UniformBuffer;
 
 pub(crate) struct VoxelSceneBuffers {
-    pub(crate) camera_buffer: wgpu::Buffer,
-    pub(crate) render_settings_buffer: wgpu::Buffer,
-    pub(crate) streaming_info_buffer: wgpu::Buffer,
+    pub(crate) camera_buffer: UniformBuffer<CameraUniform>,
+    pub(crate) render_settings_buffer: UniformBuffer<RenderSettingsUniform>,
+    pub(crate) streaming_info_buffer: UniformBuffer<StreamingInfoUniform>,
     pub(crate) pool_buffer: wgpu::Buffer,
     pub(crate) avg_pool_buffer: wgpu::Buffer,
     pub(crate) indirection_buffer: wgpu::Buffer,
@@ -25,17 +26,11 @@ impl VoxelSceneBuffers {
         settings: &RendererSettings,
     ) -> Self {
         let camera_uniform = CameraUniform::from_camera(camera, width, height, settings.lod_bias);
-        let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Camera Uniform"),
-            contents: bytemuck::bytes_of(&camera_uniform),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let camera_buffer = UniformBuffer::new(device, "Camera Uniform", &camera_uniform);
 
-        let render_settings_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Render Settings Uniform"),
-            contents: bytemuck::bytes_of(&to_render_settings_uniform(settings)),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let render_settings_uniform = to_render_settings_uniform(settings);
+        let render_settings_buffer =
+            UniformBuffer::new(device, "Render Settings Uniform", &render_settings_uniform);
 
         let pool_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Chunk Pool"),
@@ -66,11 +61,7 @@ impl VoxelSceneBuffers {
             _pad0: 0,
             _pad1: 0,
         };
-        let streaming_info_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Streaming Info"),
-            contents: bytemuck::bytes_of(&streaming_info),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let streaming_info_buffer = UniformBuffer::new(device, "Streaming Info", &streaming_info);
 
         Self {
             camera_buffer,
@@ -91,15 +82,12 @@ impl VoxelSceneBuffers {
         lod_bias: f32,
     ) {
         let uniform = CameraUniform::from_camera(camera, width, height, lod_bias);
-        queue.write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&uniform));
+        self.camera_buffer.write(queue, &uniform);
     }
 
     pub(crate) fn upload_render_settings(&self, queue: &wgpu::Queue, settings: &RendererSettings) {
-        queue.write_buffer(
-            &self.render_settings_buffer,
-            0,
-            bytemuck::bytes_of(&to_render_settings_uniform(settings)),
-        );
+        self.render_settings_buffer
+            .write(queue, &to_render_settings_uniform(settings));
     }
 
     pub(crate) fn shared_voxel_buffers(&self) -> crate::resources::SharedVoxelBuffers {
@@ -107,8 +95,8 @@ impl VoxelSceneBuffers {
             pool_buffer: self.pool_buffer.clone(),
             avg_pool_buffer: self.avg_pool_buffer.clone(),
             indirection_buffer: self.indirection_buffer.clone(),
-            streaming_info_buffer: self.streaming_info_buffer.clone(),
-            render_settings_buffer: self.render_settings_buffer.clone(),
+            streaming_info_buffer: self.streaming_info_buffer.buffer().clone(),
+            render_settings_buffer: self.render_settings_buffer.buffer().clone(),
         }
     }
 }

@@ -1,7 +1,7 @@
 use bevy_ecs::error::BevyError;
 use bevy_ecs::world::World;
 
-use super::resources::EguiOverlayRenderer;
+use super::resources::{EguiOverlayRenderer, EguiRenderOutput};
 
 pub fn render_egui_overlay(
     world: &mut World,
@@ -10,11 +10,12 @@ pub fn render_egui_overlay(
     surface_format: wgpu::TextureFormat,
     encoder: &mut wgpu::CommandEncoder,
     output_view: &wgpu::TextureView,
-    clipped_primitives: &[egui::ClippedPrimitive],
-    textures_delta: &egui::TexturesDelta,
-    pixels_per_point: f32,
-    screen_size: [u32; 2],
+    output: &EguiRenderOutput,
 ) -> Result<(), BevyError> {
+    let clipped_primitives = &output.clipped_primitives;
+    let textures_delta = &output.textures_delta;
+    let pixels_per_point = output.pixels_per_point;
+    let screen_size = output.screen_size;
     let should_recreate = world
         .get_non_send_resource::<EguiOverlayRenderer>()
         .map(|renderer| renderer.surface_format != surface_format)

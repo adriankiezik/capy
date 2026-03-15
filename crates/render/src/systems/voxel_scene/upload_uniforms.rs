@@ -26,9 +26,9 @@ pub(crate) fn upload_uniforms_system(
         );
     }
 
-    if let Some(settings) = settings {
-        if settings.is_changed() {
-            scene.upload_render_settings(&gpu.queue, &settings);
-        }
+    if let Some(settings) = settings
+        && settings.is_changed()
+    {
+        scene.upload_render_settings(&gpu.queue, &settings);
     }
 }
