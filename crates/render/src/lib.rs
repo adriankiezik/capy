@@ -8,3 +8,4 @@ mod systems;
 
 pub(crate) use error::{RenderError, Result};
 pub use plugins::RenderPlugin;
+pub use resources::{RenderOverlayCallback, RenderOverlayCallbacks};

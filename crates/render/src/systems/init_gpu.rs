@@ -2,7 +2,7 @@ use bevy_ecs::error::BevyError;
 use bevy_ecs::world::World;
 use capy_core::{GameWindow, WindowConfig};
 
-use crate::resources::GpuContext;
+use crate::resources::{FrameInProgress, GpuContext};
 
 pub(crate) fn init_gpu(world: &mut World) -> Result<(), BevyError> {
     let window = world.resource::<GameWindow>();
@@ -16,5 +16,6 @@ pub(crate) fn init_gpu(world: &mut World) -> Result<(), BevyError> {
 
     let gpu = GpuContext::new(handle, width, height, vsync)?;
     world.insert_non_send_resource(gpu);
+    world.insert_non_send_resource(FrameInProgress::empty());
     Ok(())
 }

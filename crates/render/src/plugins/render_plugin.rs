@@ -20,7 +20,8 @@ impl capy_core::Plugin for RenderPlugin {
             (
                 crate::systems::streaming::upload_camera_system,
                 crate::systems::resize_system,
-                crate::systems::render_frame_system,
+                crate::systems::render_passes_system,
+                crate::systems::submit_frame_system,
             )
                 .chain(),
         );

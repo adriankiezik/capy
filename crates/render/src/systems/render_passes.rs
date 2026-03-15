@@ -1,26 +1,28 @@
 use bevy_ecs::error::BevyError;
 use bevy_ecs::system::NonSendMut;
 
-use crate::resources::{BlitPipeline, GpuContext, StreamingPipeline};
+use crate::resources::{BlitPipeline, FrameData, FrameInProgress, GpuContext, StreamingPipeline};
 
-pub(crate) fn render_frame_system(
+pub(crate) fn render_passes_system(
     gpu: NonSendMut<GpuContext>,
     streaming: Option<NonSendMut<StreamingPipeline>>,
     blit: Option<NonSendMut<BlitPipeline>>,
+    mut frame: NonSendMut<FrameInProgress>,
 ) -> Result<(), BevyError> {
     let (Some(streaming), Some(blit)) = (streaming, blit) else {
         return Ok(());
     };
 
     let output = match gpu.surface.get_current_texture() {
-        Ok(o) => o,
+        Ok(output) => output,
         Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
             gpu.surface.configure(&gpu.device, &gpu.config);
             gpu.surface.get_current_texture()?
         }
         Err(wgpu::SurfaceError::Timeout | wgpu::SurfaceError::Other) => return Ok(()),
-        Err(e) => return Err(e.into()),
+        Err(error) => return Err(error.into()),
     };
+
     let output_view = output
         .texture
         .create_view(&wgpu::TextureViewDescriptor::default());
@@ -31,7 +33,6 @@ pub(crate) fn render_frame_system(
             label: Some("Render Encoder"),
         });
 
-    // Compute pass — ray marching
     {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("Trace Pass"),
@@ -40,13 +41,12 @@ pub(crate) fn render_frame_system(
         pass.set_pipeline(&streaming.compute_pipeline);
         pass.set_bind_group(0, &streaming.compute_bind_group, &[]);
         pass.dispatch_workgroups(
-            gpu.config.width.div_ceil(8),
-            gpu.config.height.div_ceil(8),
+            output.texture.width().div_ceil(8),
+            output.texture.height().div_ceil(8),
             1,
         );
     }
 
-    // Render pass — blit to screen
     {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Blit Pass"),
@@ -67,8 +67,14 @@ pub(crate) fn render_frame_system(
         pass.draw(0..3, 0..1);
     }
 
-    gpu.queue.submit(std::iter::once(encoder.finish()));
-    output.present();
+    frame.data = Some(FrameData {
+        encoder,
+        output,
+        output_view,
+        device: gpu.device.clone(),
+        queue: gpu.queue.clone(),
+        surface_format: gpu.config.format,
+    });
 
     Ok(())
 }
