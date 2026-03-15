@@ -4,3 +4,14 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+capy_core = { path = "../core" }
+
+bevy_ecs.workspace = true
+egui.workspace = true
+egui-winit.workspace = true
+wgpu.workspace = true
+egui-wgpu.workspace = true
+winit.workspace = true
+
+[lints]
+workspace = true
