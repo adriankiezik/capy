@@ -16,6 +16,7 @@ impl capy_core::Plugin for InputPlugin {
                 crate::apply_keyboard_messages,
                 crate::apply_mouse_button_messages,
                 crate::apply_mouse_motion_messages,
+                crate::update_cursor_position,
                 crate::flush_input_system,
                 crate::sync_cursor_mode_system,
             )

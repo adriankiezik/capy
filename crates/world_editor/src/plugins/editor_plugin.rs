@@ -14,6 +14,7 @@ impl capy_core::Plugin for EditorPlugin {
             height: 900,
             vsync: true,
         });
+
         let mut schedules = world.get_resource_or_init::<Schedules>();
         schedules
             .entry(capy_core::PreStartup)
@@ -21,5 +22,11 @@ impl capy_core::Plugin for EditorPlugin {
         schedules
             .entry(capy_core::Update)
             .add_systems((capy_shared::fly_camera_system, systems::editor_ui));
+
+        capy_render::ComputePassCallbacks::register_callback(
+            world,
+            systems::pick::pick_encode,
+            Some(systems::pick::pick_post_submit),
+        );
     }
 }

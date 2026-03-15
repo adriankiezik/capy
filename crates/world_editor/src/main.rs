@@ -7,6 +7,7 @@ use capy_window::WindowPlugin;
 use plugins::EditorPlugin;
 
 mod plugins;
+mod resources;
 mod systems;
 
 fn main() -> anyhow::Result<()> {

@@ -2,7 +2,7 @@ use bevy_ecs::resource::Resource;
 
 use glam::Vec3;
 
-#[derive(Resource)]
+#[derive(Resource, Clone, Copy)]
 pub struct Camera {
     pub position: Vec3,
     pub yaw: f32,

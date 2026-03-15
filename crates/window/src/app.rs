@@ -3,8 +3,8 @@ use std::sync::Arc;
 use bevy_ecs::schedule::ScheduleLabel;
 use bevy_ecs::world::World;
 use capy_core::{
-    GameWindow, KeyboardInputMessage, MouseButton, MouseButtonMessage, MouseMotionMessage,
-    Window as CoreWindow,
+    CursorMovedMessage, GameWindow, KeyboardInputMessage, MouseButton, MouseButtonMessage,
+    MouseMotionMessage, Window as CoreWindow,
 };
 use winit::application::ApplicationHandler;
 use winit::event::{DeviceEvent, DeviceId, WindowEvent};
@@ -160,6 +160,12 @@ impl ApplicationHandler for App {
                         pressed: state.is_pressed(),
                     });
                 }
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                self.world.write_message(CursorMovedMessage {
+                    x: position.x,
+                    y: position.y,
+                });
             }
             WindowEvent::RedrawRequested => {
                 if let Some(window) = self.window.clone() {

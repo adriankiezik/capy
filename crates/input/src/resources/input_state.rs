@@ -6,9 +6,11 @@ use bevy_ecs::resource::Resource;
 use bevy_ecs::system::{Res, ResMut};
 use bevy_ecs::world::World;
 use capy_core::{
-    CursorMode, FrameTime, GameWindow, KeyCode, KeyboardInputMessage, MouseButton,
-    MouseButtonMessage, MouseMotionMessage, RawInput, Window,
+    CursorMode, CursorMovedMessage, FrameTime, GameWindow, KeyCode, KeyboardInputMessage,
+    MouseButton, MouseButtonMessage, MouseMotionMessage, RawInput, Window,
 };
+
+use super::CursorPosition;
 
 #[derive(Resource)]
 pub struct InputState {
@@ -99,9 +101,11 @@ pub fn init_input_resources(world: &mut World) {
     }
     world.get_resource_or_init::<RawInput>();
     world.get_resource_or_init::<FrameTime>();
+    world.get_resource_or_init::<CursorPosition>();
     MessageRegistry::register_message::<KeyboardInputMessage>(world);
     MessageRegistry::register_message::<MouseButtonMessage>(world);
     MessageRegistry::register_message::<MouseMotionMessage>(world);
+    MessageRegistry::register_message::<CursorMovedMessage>(world);
 }
 
 pub fn apply_keyboard_messages(
@@ -154,4 +158,14 @@ pub fn sync_cursor_mode_system(
     };
 
     state.sync_cursor_mode(*cursor_mode, game_window.handle.as_ref());
+}
+
+pub fn update_cursor_position(
+    mut cursor: ResMut<CursorPosition>,
+    mut events: MessageReader<CursorMovedMessage>,
+) {
+    for event in events.read() {
+        cursor.x = event.x as f32;
+        cursor.y = event.y as f32;
+    }
 }

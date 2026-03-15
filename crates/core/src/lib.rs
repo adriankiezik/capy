@@ -10,7 +10,7 @@ mod world_coords;
 
 pub use baked_chunk_data::BakedChunkData;
 pub use input_messages::{
-    KeyboardInputMessage, MouseButton, MouseButtonMessage, MouseMotionMessage,
+    CursorMovedMessage, KeyboardInputMessage, MouseButton, MouseButtonMessage, MouseMotionMessage,
 };
 pub use key_code::KeyCode;
 pub use material::MATERIAL_COLORS;

@@ -357,6 +357,16 @@ impl StreamingPipeline {
             ],
         })
     }
+
+    pub(crate) fn shared_voxel_buffers(&self) -> crate::resources::SharedVoxelBuffers {
+        crate::resources::SharedVoxelBuffers {
+            pool_buffer: self.pool_buffer.clone(),
+            avg_pool_buffer: self.avg_pool_buffer.clone(),
+            indirection_buffer: self.indirection_buffer.clone(),
+            streaming_info_buffer: self.streaming_info_buffer.clone(),
+            render_settings_buffer: self.render_settings_buffer.clone(),
+        }
+    }
 }
 
 fn create_storage_texture(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture {

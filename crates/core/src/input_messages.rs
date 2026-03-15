@@ -24,3 +24,9 @@ pub struct MouseButtonMessage {
     pub button: MouseButton,
     pub pressed: bool,
 }
+
+#[derive(bevy_ecs::prelude::Message, Debug, Clone, Copy, PartialEq)]
+pub struct CursorMovedMessage {
+    pub x: f64,
+    pub y: f64,
+}

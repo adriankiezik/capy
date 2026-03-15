@@ -29,5 +29,6 @@ pub(crate) fn init_streaming(world: &mut World) {
         camera,
     );
 
+    world.insert_resource(pipeline.shared_voxel_buffers());
     world.insert_non_send_resource(pipeline);
 }

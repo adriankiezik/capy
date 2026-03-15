@@ -1,3 +1,5 @@
+use wgpu::util::DeviceExt;
+
 use capy_core::Camera;
 use glam::{Mat4, Vec3, Vec4};
 
@@ -70,4 +72,31 @@ impl CameraUniform {
             _pad4: 0.0,
         }
     }
+}
+
+pub fn create_camera_buffer(
+    device: &wgpu::Device,
+    camera: &Camera,
+    width: u32,
+    height: u32,
+    lod_bias: f32,
+) -> wgpu::Buffer {
+    let uniform = CameraUniform::from_camera(camera, width, height, lod_bias);
+    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Camera Uniform"),
+        contents: bytemuck::bytes_of(&uniform),
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+    })
+}
+
+pub fn write_camera_buffer(
+    queue: &wgpu::Queue,
+    buffer: &wgpu::Buffer,
+    camera: &Camera,
+    width: u32,
+    height: u32,
+    lod_bias: f32,
+) {
+    let uniform = CameraUniform::from_camera(camera, width, height, lod_bias);
+    queue.write_buffer(buffer, 0, bytemuck::bytes_of(&uniform));
 }
