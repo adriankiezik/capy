@@ -1,22 +1,7 @@
 [workspace]
 resolver = "3"
 
-members = [
-    "crates/core",
-    "crates/engine",
-    "crates/render",
-    "crates/world",
-    "crates/audio",
-    "crates/physics",
-    "crates/input",
-    "crates/assets",
-    "crates/net",
-    "crates/ui",
-    "crates/shared",
-    "crates/game",
-    "crates/app",
-    "crates/world_editor",
-]
+members = ["crates/*"]
 
 [workspace.package]
 version = "0.1.0"
@@ -33,6 +18,14 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 lz4_flex = "0.11"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
+egui = "0.33"
+egui-winit = "0.33"
+egui-wgpu = "0.33"
+# Locked to wgpu 27 until egui-wgpu updates its compatibility.
+wgpu = "27"
+winit = "0.30.13"
+raw-window-handle = "0.6"
+pollster = "0.4"
 
 [workspace.lints.clippy]
 unwrap_used = "warn"

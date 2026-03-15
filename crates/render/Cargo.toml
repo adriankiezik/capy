@@ -4,9 +4,10 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-wgpu = "28"
-pollster = "0.4"
 capy_core = { path = "../core" }
+
+wgpu.workspace = true
+pollster.workspace = true
 bevy_ecs.workspace = true
 thiserror.workspace = true
 bytemuck.workspace = true
