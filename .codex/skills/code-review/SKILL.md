@@ -48,23 +48,24 @@ Guiding rules:
 Dependencies flow downward. Each layer may depend on any layer below it, never the reverse.
 
 ```
-[app, world_editor]                                        <- binaries, may depend on any crate
+[game, world_editor]                                       <- binaries, may depend on any crate
   |
-[engine, game, shared]                                     <- may depend on subsystems + core
+shared                                                     <- may depend on engine, subsystems, + core
+  |
+engine                                                     <- may depend on subsystems + core
   |
 [render, audio, physics, input, assets, net, ui, world]    <- may depend on core only
   |
 core                                                       <- no workspace dependencies
 ```
 
-`app` and `world_editor` are composition roots — binaries that wire together whichever crates they need. `game` and `shared` sit above the subsystem crates. `game` is game-specific composition; `shared` holds reusable cross-binary systems (e.g., fly camera controller). Neither is a peer of subsystem crates.
+`game` and `world_editor` are composition roots — binaries that wire together whichever crates they need. `engine` owns the event loop and plugin lifecycle. `shared` holds reusable cross-binary systems and engine plugin adapters that glue subsystems to engine lifecycle hooks.
 
 Review checks:
-- No reverse dependencies (e.g., `core` depending on `engine`, or a subsystem depending on `game`)
+- No reverse dependencies (e.g., `core` depending on `engine`, or a subsystem depending on `shared`)
 - No lateral dependencies between sibling subsystems (e.g., `render` must not depend on `physics`)
-- `game` may depend on subsystem crates — it is game-specific composition, not a reusable subsystem
-- `shared` may depend on subsystem crates — it holds reusable cross-binary systems, not game-specific logic
-- Binaries (`app`, editors, tools) may depend on any crate — they are composition roots
+- `shared` may depend on `engine` and subsystem crates — it holds reusable cross-binary systems and engine plugin adapters
+- Binaries (`game`, `world_editor`) may depend on any crate — they are composition roots
 - `core` has zero workspace dependencies — always
 - New external crate dependencies require justification
 
@@ -122,7 +123,7 @@ A crate whose job is coordination (e.g., event loop, scheduling, lifecycle) must
 ### ECS Convention: `resources/`, `plugins/` and `systems/` directories
 
 Rules:
-- Every ECS resource type (`#[derive(Resource)]` or non-send resource) goes in `resources/<name>.rs`
+- Every ECS resource type goes in `resources/<name>.rs`. This includes structs with `#[derive(Resource)]`, non-send resources (inserted via `insert_non_send_resource`), and any struct used as `Res<T>`, `ResMut<T>`, `init_resource::<T>()`, or `insert_resource(T)` — even if the struct has no `Resource` derive
 - Every public system function goes in `systems/<name>.rs`
 - Every plugin implementation goes in `plugins/<name>.rs`
 - Each `mod.rs` only declares submodules and re-exports — no logic
@@ -167,13 +168,12 @@ Use this as a final pass. Each item maps to a section above.
 Architecture:
 - [ ] Dependencies flow downward only — no reverse dependencies
 - [ ] No lateral dependencies between sibling subsystems
-- [ ] Binaries are composition roots — may depend on any crate
-- [ ] `game` depends only on `core`, `shared`, and subsystem crates — not on `engine` or `app`
-- [ ] `shared` depends only on `core` and subsystem crates — not on `game`, `engine`, or `app`
+- [ ] Binaries (`game`, `world_editor`) are composition roots — may depend on any crate
+- [ ] `shared` depends only on `core`, `engine`, and subsystem crates — not on binaries
 - [ ] No new external crates without justification
 - [ ] Code lives in the correct crate per its AGENTS.md
 - [ ] No game-specific logic in engine crates
-- [ ] New resource types are in `resources/<name>.rs`, re-exported from `resources/mod.rs`
+- [ ] All resource types (including non-send resources and structs used as `Res<T>`/`ResMut<T>`) are in `resources/<name>.rs`, re-exported from `resources/mod.rs`
 - [ ] New system functions are in `systems/<name>.rs`, re-exported from `systems/mod.rs`
 - [ ] New plugin types are in `plugins/<name>.rs`, re-exported from `plugins/mod.rs`
 - [ ] Cross-crate resources and schedule labels are in `capy_core`, not in subsystem crates
