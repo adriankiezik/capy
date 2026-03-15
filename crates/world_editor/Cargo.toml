@@ -4,16 +4,21 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-capy_core = { version = "0.1.0", path = "../core" }
-capy_engine = { version = "0.1.0", path = "../engine" }
-capy_world = { version = "0.1.0", path = "../world" }
-capy_assets = { version = "0.1.0", path = "../assets" }
-capy_shared = { version = "0.1.0", path = "../shared" }
-capy_input = { version = "0.1.0", path = "../input" }
-capy_render = { version = "0.1.0", path = "../render" }
+capy_core = { path = "../core" }
+capy_engine = { path = "../engine" }
+capy_world = { path = "../world" }
+capy_assets = { path = "../assets" }
+capy_shared = { path = "../shared" }
+capy_input = { path = "../input" }
+capy_render = { path = "../render" }
+capy_ui = { path = "../ui" }
+
 anyhow.workspace = true
 bevy_ecs.workspace = true
 glam.workspace = true
+egui.workspace = true
+wgpu.workspace = true
+winit.workspace = true
 
 [lints]
 workspace = true

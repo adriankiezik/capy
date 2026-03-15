@@ -5,7 +5,13 @@ edition.workspace = true
 
 [dependencies]
 capy_core = { path = "../core" }
+capy_engine = { path = "../engine" }
+capy_render = { path = "../render" }
+capy_ui = { path = "../ui" }
+
 bevy_ecs.workspace = true
+wgpu.workspace = true
+winit.workspace = true
 
 [lints]
 workspace = true

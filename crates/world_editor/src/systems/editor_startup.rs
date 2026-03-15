@@ -1,34 +1,12 @@
 use std::path::Path;
 
 use bevy_ecs::error::BevyError;
-use bevy_ecs::schedule::Schedules;
 use bevy_ecs::world::World;
-use capy_core::{Camera, CursorMode, GameWindow, MATERIAL_COLORS, WindowConfig};
+use capy_core::{Camera, CursorMode, GameWindow, MATERIAL_COLORS};
 use capy_shared::FlyCameraConfig;
 use glam::Vec3;
 
-pub struct EditorPlugin;
-
-impl capy_core::Plugin for EditorPlugin {
-    fn register(&self, world: &mut World) {
-        world.insert_resource(WindowConfig {
-            title: String::from("Capy World Editor"),
-            width: 1600,
-            height: 900,
-            vsync: true,
-        });
-
-        let mut schedules = world.get_resource_or_init::<Schedules>();
-        schedules
-            .entry(capy_core::PreStartup)
-            .add_systems(editor_startup);
-        schedules
-            .entry(capy_core::Update)
-            .add_systems(capy_shared::fly_camera_system);
-    }
-}
-
-fn editor_startup(world: &mut World) -> Result<(), BevyError> {
+pub(crate) fn editor_startup(world: &mut World) -> Result<(), BevyError> {
     let world_dir = Path::new(capy_assets::DEFAULT_WORLD_DIR);
 
     if !world_dir.join("world.manifest").exists() {
