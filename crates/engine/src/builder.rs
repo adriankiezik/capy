@@ -7,26 +7,30 @@ use winit::event_loop::{ControlFlow, EventLoop};
 
 use crate::Result;
 use crate::app::{App, capture_error};
+use crate::plugins::EnginePlugin;
 
 type ScheduleBuilder = Box<dyn FnOnce(&mut World)>;
 
 pub struct EngineBuilder {
+    plugins: Vec<Box<dyn EnginePlugin>>,
     schedule_builders: Vec<ScheduleBuilder>,
 }
 
 impl EngineBuilder {
     pub fn new() -> Self {
         Self {
+            plugins: Vec::new(),
             schedule_builders: Vec::new(),
         }
     }
 
-    pub fn add_plugin(mut self, plugin: impl Plugin + 'static) -> Self {
-        self.schedule_builders
-            .push(Box::new(move |world: &mut World| {
-                plugin.register(world);
-            }));
+    pub fn add_plugin(mut self, plugin: impl EnginePlugin + 'static) -> Self {
+        self.plugins.push(Box::new(plugin));
         self
+    }
+
+    pub fn add_core_plugin(self, plugin: impl Plugin + 'static) -> Self {
+        self.add_plugin(crate::plugins::CorePluginAdapter::new(plugin))
     }
 
     pub fn add_systems<M: 'static>(
@@ -56,13 +60,22 @@ impl EngineBuilder {
 
         world.insert_resource(DefaultErrorHandler(capture_error));
 
-        for builder in self.schedule_builders {
+        let Self {
+            plugins,
+            schedule_builders,
+        } = self;
+
+        for plugin in &plugins {
+            plugin.register(&mut world);
+        }
+
+        for builder in schedule_builders {
             builder(&mut world);
         }
 
         let event_loop = EventLoop::new()?;
         event_loop.set_control_flow(ControlFlow::Poll);
-        let mut app = App::new(world);
+        let mut app = App::new(world, plugins);
         event_loop.run_app(&mut app)?;
         if let Some(error) = app.error {
             return Err(error);

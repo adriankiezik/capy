@@ -13,6 +13,7 @@ use winit::window::{Window as WinitWindow, WindowId};
 
 use crate::EngineError;
 use crate::keys::convert_key;
+use crate::plugins::EnginePlugin;
 use crate::window::EngineWindow;
 
 thread_local! {
@@ -31,14 +32,16 @@ fn take_captured_error() -> Option<BevyError> {
 
 pub(crate) struct App {
     pub(crate) world: World,
+    plugins: Vec<Box<dyn EnginePlugin>>,
     window: Option<Arc<WinitWindow>>,
     pub(crate) error: Option<EngineError>,
 }
 
 impl App {
-    pub(crate) fn new(world: World) -> Self {
+    pub(crate) fn new(world: World, plugins: Vec<Box<dyn EnginePlugin>>) -> Self {
         Self {
             world,
+            plugins,
             window: None,
             error: None,
         }
@@ -57,6 +60,38 @@ impl App {
             return Err(err);
         }
         Ok(())
+    }
+
+    fn dispatch_resumed(&mut self, event_loop: &ActiveEventLoop) {
+        for plugin in &self.plugins {
+            plugin.on_app_resumed(&mut self.world, event_loop);
+        }
+    }
+
+    fn dispatch_window_event(&mut self, window: &WinitWindow, event: &WindowEvent) -> bool {
+        let mut consumed = false;
+        for plugin in &self.plugins {
+            consumed |= plugin.on_window_event(&mut self.world, window, event);
+        }
+        consumed
+    }
+
+    fn dispatch_begin_frame(&mut self, window: &WinitWindow) {
+        for plugin in &self.plugins {
+            plugin.on_begin_frame(&mut self.world, window);
+        }
+    }
+
+    fn dispatch_end_frame(&mut self, window: &WinitWindow) {
+        for plugin in &self.plugins {
+            plugin.on_end_frame(&mut self.world, window);
+        }
+    }
+
+    fn plugins_want_pointer_input(&self) -> bool {
+        self.plugins
+            .iter()
+            .any(|plugin| plugin.wants_pointer_input(&self.world))
     }
 }
 
@@ -84,6 +119,7 @@ impl ApplicationHandler for App {
                 width: size.width,
                 height: size.height,
             });
+            self.dispatch_resumed(event_loop);
 
             self.window = Some(window);
 
@@ -97,6 +133,12 @@ impl ApplicationHandler for App {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        let event_consumed = if let Some(window) = self.window.clone() {
+            self.dispatch_window_event(window.as_ref(), &event)
+        } else {
+            false
+        };
+
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => {
@@ -108,6 +150,7 @@ impl ApplicationHandler for App {
             WindowEvent::KeyboardInput { event, .. } => {
                 if let PhysicalKey::Code(winit_key) = event.physical_key
                     && let Some(key) = convert_key(winit_key)
+                    && (!event_consumed || !event.state.is_pressed())
                 {
                     self.world.write_message(KeyboardInputMessage {
                         key,
@@ -116,9 +159,18 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::RedrawRequested => {
+                if let Some(window) = self.window.clone() {
+                    self.dispatch_begin_frame(window.as_ref());
+                }
+
                 if let Err(e) = self.run_schedule(capy_core::Update) {
                     return self.fail(event_loop, e);
                 }
+
+                if let Some(window) = self.window.clone() {
+                    self.dispatch_end_frame(window.as_ref());
+                }
+
                 if let Err(e) = self.run_schedule(capy_core::Render) {
                     return self.fail(event_loop, e);
                 }
@@ -137,6 +189,9 @@ impl ApplicationHandler for App {
         event: DeviceEvent,
     ) {
         if let DeviceEvent::MouseMotion { delta } = event {
+            if self.plugins_want_pointer_input() {
+                return;
+            }
             self.world.write_message(MouseMotionMessage {
                 dx: delta.0,
                 dy: delta.1,

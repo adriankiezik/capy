@@ -4,8 +4,9 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-winit = "0.30.13"
 capy_core = { path = "../core" }
+
+winit.workspace = true
 bevy_ecs.workspace = true
 thiserror.workspace = true
 tracing-subscriber.workspace = true
