@@ -1,6 +1,6 @@
 use bevy_ecs::error::BevyError;
 use bevy_ecs::system::{Res, ResMut};
-use capy_core::{Camera, FrameTime, GameWindow, RawInput};
+use capy_core::{Camera, CursorMode, FrameTime, GameWindow, MouseButton, RawInput};
 
 use crate::FlyCameraConfig;
 
@@ -10,17 +10,37 @@ pub fn fly_camera_system(
     input: Res<RawInput>,
     time: Res<FrameTime>,
     window: Res<GameWindow>,
+    mut cursor_mode: Option<ResMut<CursorMode>>,
 ) -> Result<(), BevyError> {
     if window.height > 0 {
         camera.aspect = window.width as f32 / window.height as f32;
     }
 
-    camera.yaw += input.mouse_dx * config.look_sensitivity;
-    camera.pitch -= input.mouse_dy * config.look_sensitivity;
-    camera.pitch = camera.pitch.clamp(
-        -std::f32::consts::FRAC_PI_2 + 0.01,
-        std::f32::consts::FRAC_PI_2 - 0.01,
-    );
+    let looking = if config.hold_to_look {
+        let held = input.mouse_buttons_held.contains(&MouseButton::Left);
+        if let Some(ref mut mode) = cursor_mode {
+            let desired = if held {
+                CursorMode::Confined
+            } else {
+                CursorMode::Free
+            };
+            if **mode != desired {
+                **mode = desired;
+            }
+        }
+        held
+    } else {
+        true
+    };
+
+    if looking {
+        camera.yaw += input.mouse_dx * config.look_sensitivity;
+        camera.pitch -= input.mouse_dy * config.look_sensitivity;
+        camera.pitch = camera.pitch.clamp(
+            -std::f32::consts::FRAC_PI_2 + 0.01,
+            std::f32::consts::FRAC_PI_2 - 0.01,
+        );
+    }
 
     let speed = config.move_speed * time.dt;
     let fwd = camera.forward();

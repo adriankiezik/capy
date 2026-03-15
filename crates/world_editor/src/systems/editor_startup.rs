@@ -37,8 +37,11 @@ pub(crate) fn editor_startup(world: &mut World) -> Result<(), BevyError> {
         aspect,
         ..Camera::default()
     });
-    world.insert_resource(CursorMode::Confined);
-    world.insert_resource(FlyCameraConfig::default());
+    world.insert_resource(CursorMode::Free);
+    world.insert_resource(FlyCameraConfig {
+        hold_to_look: true,
+        ..FlyCameraConfig::default()
+    });
     world.insert_resource(handle);
 
     Ok(())

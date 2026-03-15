@@ -2,7 +2,10 @@ use std::sync::Arc;
 
 use bevy_ecs::schedule::ScheduleLabel;
 use bevy_ecs::world::World;
-use capy_core::{GameWindow, KeyboardInputMessage, MouseMotionMessage, Window as CoreWindow};
+use capy_core::{
+    GameWindow, KeyboardInputMessage, MouseButton, MouseButtonMessage, MouseMotionMessage,
+    Window as CoreWindow,
+};
 use winit::application::ApplicationHandler;
 use winit::event::{DeviceEvent, DeviceId, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
@@ -141,6 +144,20 @@ impl ApplicationHandler for App {
                     self.world.write_message(KeyboardInputMessage {
                         key,
                         pressed: event.state.is_pressed(),
+                    });
+                }
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                let core_button = match button {
+                    winit::event::MouseButton::Left => Some(MouseButton::Left),
+                    winit::event::MouseButton::Right => Some(MouseButton::Right),
+                    winit::event::MouseButton::Middle => Some(MouseButton::Middle),
+                    _ => None,
+                };
+                if let Some(btn) = core_button {
+                    self.world.write_message(MouseButtonMessage {
+                        button: btn,
+                        pressed: state.is_pressed(),
                     });
                 }
             }

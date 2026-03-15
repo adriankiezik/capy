@@ -6,6 +6,7 @@ use capy_core::KeyCode;
 pub struct FlyCameraConfig {
     pub look_sensitivity: f32,
     pub move_speed: f32,
+    pub hold_to_look: bool,
     pub key_forward: KeyCode,
     pub key_back: KeyCode,
     pub key_left: KeyCode,
@@ -19,6 +20,7 @@ impl Default for FlyCameraConfig {
         Self {
             look_sensitivity: 0.003,
             move_speed: 80.0,
+            hold_to_look: false,
             key_forward: KeyCode::KeyW,
             key_back: KeyCode::KeyS,
             key_left: KeyCode::KeyA,

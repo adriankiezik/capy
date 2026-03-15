@@ -9,7 +9,9 @@ mod window;
 mod world_coords;
 
 pub use baked_chunk_data::BakedChunkData;
-pub use input_messages::{KeyboardInputMessage, MouseMotionMessage};
+pub use input_messages::{
+    KeyboardInputMessage, MouseButton, MouseButtonMessage, MouseMotionMessage,
+};
 pub use key_code::KeyCode;
 pub use material::MATERIAL_COLORS;
 pub use plugin::Plugin;
