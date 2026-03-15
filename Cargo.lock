@@ -515,7 +515,6 @@ dependencies = [
  "capy_core",
  "thiserror 2.0.18",
  "tracing-subscriber",
- "winit",
 ]
 
 [[package]]
@@ -530,6 +529,7 @@ dependencies = [
  "capy_input",
  "capy_render",
  "capy_shared",
+ "capy_window",
  "glam",
 ]
 
@@ -572,8 +572,8 @@ dependencies = [
  "capy_engine",
  "capy_render",
  "capy_ui",
+ "capy_window",
  "wgpu",
- "winit",
 ]
 
 [[package]]
@@ -586,6 +586,17 @@ dependencies = [
  "egui-wgpu",
  "egui-winit",
  "wgpu",
+ "winit",
+]
+
+[[package]]
+name = "capy_window"
+version = "0.1.0"
+dependencies = [
+ "bevy_ecs",
+ "capy_core",
+ "capy_engine",
+ "thiserror 2.0.18",
  "winit",
 ]
 
@@ -612,6 +623,7 @@ dependencies = [
  "capy_render",
  "capy_shared",
  "capy_ui",
+ "capy_window",
  "capy_world",
  "egui",
  "glam",

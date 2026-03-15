@@ -1,3 +1,3 @@
-mod ui_engine_plugin;
+mod egui_plugin;
 
-pub use ui_engine_plugin::UiEnginePlugin;
+pub use egui_plugin::EguiIntegrationPlugin;

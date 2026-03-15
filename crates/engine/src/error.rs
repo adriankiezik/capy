@@ -1,16 +1,15 @@
-use bevy_ecs::error::BevyError;
-use thiserror::Error;
+use std::error::Error;
 
-#[derive(Debug, Error)]
+use bevy_ecs::error::BevyError;
+use thiserror::Error as ThisError;
+
+#[derive(Debug, ThisError)]
 pub enum EngineError {
     #[error("{0}")]
     System(BevyError),
 
-    #[error(transparent)]
-    EventLoop(#[from] winit::error::EventLoopError),
-
-    #[error(transparent)]
-    Window(#[from] winit::error::OsError),
+    #[error("{0}")]
+    Runner(Box<dyn Error + Send + Sync>),
 }
 
 impl From<BevyError> for EngineError {

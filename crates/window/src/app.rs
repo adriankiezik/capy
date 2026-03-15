@@ -1,7 +1,5 @@
-use std::cell::RefCell;
 use std::sync::Arc;
 
-use bevy_ecs::error::{BevyError, ErrorContext};
 use bevy_ecs::schedule::ScheduleLabel;
 use bevy_ecs::world::World;
 use capy_core::{GameWindow, KeyboardInputMessage, MouseMotionMessage, Window as CoreWindow};
@@ -11,87 +9,75 @@ use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::PhysicalKey;
 use winit::window::{Window as WinitWindow, WindowId};
 
-use crate::EngineError;
+use crate::WindowError;
 use crate::keys::convert_key;
-use crate::plugins::EnginePlugin;
-use crate::window::EngineWindow;
-
-thread_local! {
-    static CAPTURED_ERROR: RefCell<Option<BevyError>> = const { RefCell::new(None) };
-}
-
-pub(crate) fn capture_error(error: BevyError, _ctx: ErrorContext) {
-    CAPTURED_ERROR.with(|e| {
-        *e.borrow_mut() = Some(error);
-    });
-}
-
-fn take_captured_error() -> Option<BevyError> {
-    CAPTURED_ERROR.with(|e| e.borrow_mut().take())
-}
+use crate::resources::{OnAppResumed, OnBeginFrame, OnEndFrame, OnWindowEvent, WantsPointerInput};
+use crate::window::WindowAdapter;
 
 pub(crate) struct App {
     pub(crate) world: World,
-    plugins: Vec<Box<dyn EnginePlugin>>,
     window: Option<Arc<WinitWindow>>,
-    pub(crate) error: Option<EngineError>,
+    pub(crate) error: Option<WindowError>,
 }
 
 impl App {
-    pub(crate) fn new(world: World, plugins: Vec<Box<dyn EnginePlugin>>) -> Self {
+    pub(crate) fn new(world: World) -> Self {
         Self {
             world,
-            plugins,
             window: None,
             error: None,
         }
     }
 
-    fn fail(&mut self, event_loop: &ActiveEventLoop, error: impl Into<EngineError>) {
+    fn fail(&mut self, event_loop: &ActiveEventLoop, error: impl Into<WindowError>) {
         if self.error.is_none() {
             self.error = Some(error.into());
         }
         event_loop.exit();
     }
 
-    fn run_schedule(&mut self, label: impl ScheduleLabel) -> std::result::Result<(), BevyError> {
-        let _ = self.world.try_run_schedule(label);
-        if let Some(err) = take_captured_error() {
-            return Err(err);
-        }
-        Ok(())
+    fn run_schedule(
+        &mut self,
+        label: impl ScheduleLabel,
+    ) -> std::result::Result<(), bevy_ecs::error::BevyError> {
+        capy_engine::schedule_runner::run_schedule(&mut self.world, label)
     }
 
     fn dispatch_resumed(&mut self, event_loop: &ActiveEventLoop) {
-        for plugin in &self.plugins {
-            plugin.on_app_resumed(&mut self.world, event_loop);
+        if let Some(hooks) = self.world.remove_resource::<OnAppResumed>() {
+            hooks.invoke(&mut self.world, event_loop);
+            self.world.insert_resource(hooks);
         }
     }
 
     fn dispatch_window_event(&mut self, window: &WinitWindow, event: &WindowEvent) -> bool {
-        let mut consumed = false;
-        for plugin in &self.plugins {
-            consumed |= plugin.on_window_event(&mut self.world, window, event);
+        if let Some(hooks) = self.world.remove_resource::<OnWindowEvent>() {
+            let consumed = hooks.invoke(&mut self.world, window, event);
+            self.world.insert_resource(hooks);
+            consumed
+        } else {
+            false
         }
-        consumed
     }
 
     fn dispatch_begin_frame(&mut self, window: &WinitWindow) {
-        for plugin in &self.plugins {
-            plugin.on_begin_frame(&mut self.world, window);
+        if let Some(hooks) = self.world.remove_resource::<OnBeginFrame>() {
+            hooks.invoke(&mut self.world, window);
+            self.world.insert_resource(hooks);
         }
     }
 
     fn dispatch_end_frame(&mut self, window: &WinitWindow) {
-        for plugin in &self.plugins {
-            plugin.on_end_frame(&mut self.world, window);
+        if let Some(hooks) = self.world.remove_resource::<OnEndFrame>() {
+            hooks.invoke(&mut self.world, window);
+            self.world.insert_resource(hooks);
         }
     }
 
-    fn plugins_want_pointer_input(&self) -> bool {
-        self.plugins
-            .iter()
-            .any(|plugin| plugin.wants_pointer_input(&self.world))
+    fn wants_pointer_input(&self) -> bool {
+        self.world
+            .get_resource::<WantsPointerInput>()
+            .is_some_and(|hooks| hooks.invoke(&self.world))
     }
 }
 
@@ -112,7 +98,7 @@ impl ApplicationHandler for App {
                 Err(e) => return self.fail(event_loop, e),
             };
             let size = window.inner_size();
-            let shared_window: Arc<dyn CoreWindow> = Arc::new(EngineWindow::new(window.clone()));
+            let shared_window: Arc<dyn CoreWindow> = Arc::new(WindowAdapter::new(window.clone()));
 
             self.world.insert_resource(GameWindow {
                 handle: shared_window,
@@ -174,6 +160,10 @@ impl ApplicationHandler for App {
                 if let Err(e) = self.run_schedule(capy_core::Render) {
                     return self.fail(event_loop, e);
                 }
+                if self.world.get_resource::<capy_core::AppExit>().is_some() {
+                    event_loop.exit();
+                    return;
+                }
                 if let Some(window) = &self.window {
                     window.request_redraw();
                 }
@@ -189,7 +179,7 @@ impl ApplicationHandler for App {
         event: DeviceEvent,
     ) {
         if let DeviceEvent::MouseMotion { delta } = event {
-            if self.plugins_want_pointer_input() {
+            if self.wants_pointer_input() {
                 return;
             }
             self.world.write_message(MouseMotionMessage {

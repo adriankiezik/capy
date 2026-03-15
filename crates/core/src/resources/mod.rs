@@ -1,3 +1,4 @@
+mod app_exit;
 mod camera;
 mod cursor_mode;
 mod frame_time;
@@ -6,6 +7,7 @@ mod raw_input;
 mod voxel_mesh_data;
 mod window_config;
 
+pub use app_exit::AppExit;
 pub use camera::Camera;
 pub use cursor_mode::CursorMode;
 pub use frame_time::FrameTime;

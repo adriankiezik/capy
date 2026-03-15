@@ -6,29 +6,29 @@ use capy_core::{
 };
 use winit::window::{CursorGrabMode, Window as WinitWindow};
 
-pub(crate) struct EngineWindow {
+pub(crate) struct WindowAdapter {
     inner: Arc<WinitWindow>,
 }
 
-impl EngineWindow {
+impl WindowAdapter {
     pub(crate) fn new(inner: Arc<WinitWindow>) -> Self {
         Self { inner }
     }
 }
 
-impl HasWindowHandle for EngineWindow {
+impl HasWindowHandle for WindowAdapter {
     fn window_handle(&self) -> Result<WindowHandle<'_>, HandleError> {
         self.inner.window_handle()
     }
 }
 
-impl HasDisplayHandle for EngineWindow {
+impl HasDisplayHandle for WindowAdapter {
     fn display_handle(&self) -> Result<DisplayHandle<'_>, HandleError> {
         self.inner.display_handle()
     }
 }
 
-impl CoreWindow for EngineWindow {
+impl CoreWindow for WindowAdapter {
     fn set_cursor_visible(&self, visible: bool) {
         self.inner.set_cursor_visible(visible);
     }

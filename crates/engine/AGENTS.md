@@ -1,16 +1,17 @@
 # capy_engine
 
-Main engine crate. Orchestrates subsystem initialization, the main loop, and shutdown.
+Abstract engine orchestrator. Manages plugin lifecycle, schedule registration, and runner dispatch.
 
 ## Scope
 
-- Window creation and management.
-- Event loop and frame timing.
-- Subsystem orchestration (init, update, shutdown ordering).
-- Engine configuration and lifecycle.
+- Plugin registration and lifecycle (`EngineBuilder`).
+- Schedule setup and runner abstraction (`Runner` resource).
+- Schedule execution utilities (`schedule_runner`).
+- Engine-level error types.
 
 ## What Does NOT Belong Here
 
+- Windowing, event loop, or winit integration (belongs in `capy_window`).
 - Rendering implementation (belongs in `capy_render`).
 - Physics, audio, networking, or other subsystem internals.
 - Game-specific logic or content.

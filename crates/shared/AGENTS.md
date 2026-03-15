@@ -10,7 +10,7 @@ Reusable systems and utilities shared across multiple binaries.
 
 - Cross-binary systems that don't belong in any single subsystem (e.g., fly camera controller).
 - Shared utility systems used by multiple composition roots.
-- Engine plugin adapters that glue subsystem crates to `capy_engine` lifecycle hooks (e.g., `UiEnginePlugin` bridges `capy_ui` and `capy_engine`).
+- Engine plugin adapters that glue subsystem crates to `capy_engine` lifecycle hooks (e.g., `EguiIntegrationPlugin` bridges `capy_ui` and `capy_engine`).
 
 ## What Does NOT Belong Here
 
