@@ -1,18 +1,19 @@
-pub(crate) struct FrameInProgress {
-    pub(crate) data: Option<FrameData>,
-}
+use crate::resources::ComputePassPostSubmit;
 
-pub(crate) struct FrameData {
-    pub(crate) encoder: wgpu::CommandEncoder,
-    pub(crate) output: wgpu::SurfaceTexture,
-    pub(crate) output_view: wgpu::TextureView,
-    pub(crate) device: wgpu::Device,
-    pub(crate) queue: wgpu::Queue,
-    pub(crate) surface_format: wgpu::TextureFormat,
+pub(crate) struct FrameInProgress {
+    pub(crate) encoder: Option<wgpu::CommandEncoder>,
+    pub(crate) output: Option<wgpu::SurfaceTexture>,
+    pub(crate) output_view: Option<wgpu::TextureView>,
+    pub(crate) post_submit: Vec<ComputePassPostSubmit>,
 }
 
 impl FrameInProgress {
     pub(crate) fn empty() -> Self {
-        Self { data: None }
+        Self {
+            encoder: None,
+            output: None,
+            output_view: None,
+            post_submit: Vec::new(),
+        }
     }
 }

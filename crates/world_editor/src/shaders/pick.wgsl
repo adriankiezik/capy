@@ -1,9 +1,4 @@
-@group(0) @binding(0) var<uniform> camera: CameraUniform;
-@group(0) @binding(1) var<uniform> streaming: StreamingInfo;
-@group(0) @binding(2) var<storage, read> chunk_pool: array<u32>;
-@group(0) @binding(3) var<storage, read> chunk_avg_pool: array<u32>;
-@group(0) @binding(4) var<storage, read> indirection: array<u32>;
-@group(0) @binding(5) var<uniform> render_settings: RenderSettingsUniform;
+
 
 struct PickInput {
     pixel_x: u32,

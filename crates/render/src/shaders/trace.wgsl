@@ -1,5 +1,6 @@
-@group(0) @binding(0) var output: texture_storage_2d<rgba8unorm, write>;
-@group(0) @binding(7) var depth_output: texture_storage_2d<r32float, write>;
+@group(0) @binding(0) var gbuf_color_out: texture_storage_2d<rgba8unorm, write>;
+@group(0) @binding(7) var gbuf_depth_out: texture_storage_2d<r32float, write>;
+@group(0) @binding(9) var gbuf_normal_out: texture_storage_2d<rgba8snorm, write>;
 
 @group(0) @binding(1) var<uniform> camera: CameraUniform;
 @group(0) @binding(2) var<uniform> streaming: StreamingInfo;
@@ -11,7 +12,7 @@
 
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let dims = textureDimensions(output);
+    let dims = textureDimensions(gbuf_color_out);
 
     let actual_x = gid.x;
     let actual_y = gid.y;
@@ -34,22 +35,21 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         lod_debug_buf[pixel_idx] = hit.lod_scale_exp;
     }
 
-    let sun_dir = normalize(render_settings.sun_direction.xyz);
     let pixel = vec2<i32>(i32(actual_x), i32(actual_y));
     if hit.hit {
-        let n_dot_l = max(dot(hit.normal, sun_dir), 0.0);
-        let light = render_settings.ambient_light + render_settings.sun_contribution * n_dot_l;
         var base: vec3<f32>;
         if hit.is_lod_hit {
             base = hit.color_override;
         } else {
             base = render_settings.material_colors[min(hit.material, 7u)].rgb;
         }
-        textureStore(output, pixel, vec4<f32>(base * light, 1.0));
+        textureStore(gbuf_color_out, pixel, vec4<f32>(base, 1.0));
+        textureStore(gbuf_normal_out, pixel, vec4<f32>(hit.normal, 1.0));
         let depth_val = length(hit.hit_pos_local - ray_origin);
-        textureStore(depth_output, pixel, vec4<f32>(depth_val, 0.0, 0.0, 0.0));
+        textureStore(gbuf_depth_out, pixel, vec4<f32>(depth_val, 0.0, 0.0, 0.0));
     } else {
-        textureStore(output, pixel, vec4<f32>(render_settings.sky_color.rgb, 1.0));
-        textureStore(depth_output, pixel, vec4<f32>(0.0, 0.0, 0.0, 0.0));
+        textureStore(gbuf_color_out, pixel, vec4<f32>(0.0, 0.0, 0.0, 0.0));
+        textureStore(gbuf_normal_out, pixel, vec4<f32>(0.0, 0.0, 0.0, -1.0));
+        textureStore(gbuf_depth_out, pixel, vec4<f32>(0.0, 0.0, 0.0, 0.0));
     }
 }

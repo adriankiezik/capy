@@ -1,15 +1,17 @@
 use bevy_ecs::error::BevyError;
 use bevy_ecs::system::NonSendMut;
 
-use crate::resources::{BlitPipeline, FrameData, FrameInProgress, GpuContext, StreamingPipeline};
+use crate::resources::trace::TracePipeline;
+use crate::resources::{BlitPipeline, FrameInProgress, GpuContext, LightingPipeline};
 
 pub(crate) fn render_passes_system(
     gpu: NonSendMut<GpuContext>,
-    streaming: Option<NonSendMut<StreamingPipeline>>,
+    trace: Option<NonSendMut<TracePipeline>>,
+    lighting: Option<NonSendMut<LightingPipeline>>,
     blit: Option<NonSendMut<BlitPipeline>>,
     mut frame: NonSendMut<FrameInProgress>,
 ) -> Result<(), BevyError> {
-    let (Some(streaming), Some(blit)) = (streaming, blit) else {
+    let (Some(trace), Some(lighting), Some(blit)) = (trace, lighting, blit) else {
         return Ok(());
     };
 
@@ -27,24 +29,31 @@ pub(crate) fn render_passes_system(
         .texture
         .create_view(&wgpu::TextureViewDescriptor::default());
 
-    let mut encoder = gpu
-        .device
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Render Encoder"),
-        });
+    let mut encoder = frame.encoder.take().unwrap_or_else(|| {
+        gpu.device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Frame Encoder"),
+            })
+    });
 
     {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("Trace Pass"),
             ..Default::default()
         });
-        pass.set_pipeline(&streaming.compute_pipeline);
-        pass.set_bind_group(0, &streaming.compute_bind_group, &[]);
-        pass.dispatch_workgroups(
-            output.texture.width().div_ceil(8),
-            output.texture.height().div_ceil(8),
-            1,
-        );
+        pass.set_pipeline(&trace.compute_pipeline);
+        pass.set_bind_group(0, &trace.compute_bind_group, &[]);
+        pass.dispatch_workgroups(trace.width.div_ceil(8), trace.height.div_ceil(8), 1);
+    }
+
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("Lighting Pass"),
+            ..Default::default()
+        });
+        pass.set_pipeline(&lighting.compute_pipeline);
+        pass.set_bind_group(0, &lighting.bind_group, &[]);
+        pass.dispatch_workgroups(lighting.width.div_ceil(8), lighting.height.div_ceil(8), 1);
     }
 
     {
@@ -67,14 +76,9 @@ pub(crate) fn render_passes_system(
         pass.draw(0..3, 0..1);
     }
 
-    frame.data = Some(FrameData {
-        encoder,
-        output,
-        output_view,
-        device: gpu.device.clone(),
-        queue: gpu.queue.clone(),
-        surface_format: gpu.config.format,
-    });
+    frame.encoder = Some(encoder);
+    frame.output = Some(output);
+    frame.output_view = Some(output_view);
 
     Ok(())
 }

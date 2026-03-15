@@ -26,8 +26,8 @@ No existing files need modification beyond the plugin registration.
 
 ### Render frame order
 
-Startup: init gpu → init streaming → init blit (chained, order matters).
-Per frame: upload camera → resize → custom compute passes → render frame → overlays + present.
+Startup: init gpu → init voxel scene → init trace → init lighting → init blit (chained, order matters).
+Per frame: upload uniforms → resize surface → resize trace → resize lighting → resize blit → custom compute passes → trace + lighting + blit → overlays + present.
 
 ## Usage from External Binaries
 

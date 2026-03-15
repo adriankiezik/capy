@@ -65,18 +65,13 @@ impl PickPipeline {
         let shader_module =
             capy_render::create_compute_shader(device, "Pick Compute Shader", PICK_SHADER);
 
+        let mut layout_entries = capy_render::voxel_scene_bind_group_layout_entries();
+        layout_entries.push(capy_render::bgl_uniform(6));
+        layout_entries.push(capy_render::bgl_storage_rw(7));
+
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Pick BGL"),
-            entries: &[
-                bgl_uniform(0),
-                bgl_uniform(1),
-                bgl_storage_ro(2),
-                bgl_storage_ro(3),
-                bgl_storage_ro(4),
-                bgl_uniform(5),
-                bgl_uniform(6),
-                bgl_storage_rw(7),
-            ],
+            entries: &layout_entries,
         });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -94,43 +89,20 @@ impl PickPipeline {
             cache: None,
         });
 
+        let mut bg_entries = capy_render::voxel_scene_bind_group_entries(&camera_buffer, voxels);
+        bg_entries.push(wgpu::BindGroupEntry {
+            binding: 6,
+            resource: pick_input_buffer.as_entire_binding(),
+        });
+        bg_entries.push(wgpu::BindGroupEntry {
+            binding: 7,
+            resource: pick_output_buffer.as_entire_binding(),
+        });
+
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Pick Bind Group"),
             layout: &bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: camera_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: voxels.streaming_info_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: voxels.pool_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: voxels.avg_pool_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: voxels.indirection_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 5,
-                    resource: voxels.render_settings_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 6,
-                    resource: pick_input_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 7,
-                    resource: pick_output_buffer.as_entire_binding(),
-                },
-            ],
+            entries: &bg_entries,
         });
 
         Self {
@@ -177,44 +149,5 @@ impl PickPipeline {
             }
             Err(std::sync::mpsc::TryRecvError::Disconnected) => None,
         }
-    }
-}
-
-fn bgl_uniform(binding: u32) -> wgpu::BindGroupLayoutEntry {
-    wgpu::BindGroupLayoutEntry {
-        binding,
-        visibility: wgpu::ShaderStages::COMPUTE,
-        ty: wgpu::BindingType::Buffer {
-            ty: wgpu::BufferBindingType::Uniform,
-            has_dynamic_offset: false,
-            min_binding_size: None,
-        },
-        count: None,
-    }
-}
-
-fn bgl_storage_ro(binding: u32) -> wgpu::BindGroupLayoutEntry {
-    wgpu::BindGroupLayoutEntry {
-        binding,
-        visibility: wgpu::ShaderStages::COMPUTE,
-        ty: wgpu::BindingType::Buffer {
-            ty: wgpu::BufferBindingType::Storage { read_only: true },
-            has_dynamic_offset: false,
-            min_binding_size: None,
-        },
-        count: None,
-    }
-}
-
-fn bgl_storage_rw(binding: u32) -> wgpu::BindGroupLayoutEntry {
-    wgpu::BindGroupLayoutEntry {
-        binding,
-        visibility: wgpu::ShaderStages::COMPUTE,
-        ty: wgpu::BindingType::Buffer {
-            ty: wgpu::BufferBindingType::Storage { read_only: false },
-            has_dynamic_offset: false,
-            min_binding_size: None,
-        },
-        count: None,
     }
 }

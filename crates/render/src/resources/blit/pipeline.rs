@@ -5,6 +5,8 @@ pub(crate) struct BlitPipeline {
     blit_bind_group_layout: wgpu::BindGroupLayout,
     pub(crate) blit_bind_group: wgpu::BindGroup,
     blit_sampler: wgpu::Sampler,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
 }
 
 impl BlitPipeline {
@@ -12,6 +14,8 @@ impl BlitPipeline {
         device: &wgpu::Device,
         storage_texture: &wgpu::Texture,
         surface_format: wgpu::TextureFormat,
+        width: u32,
+        height: u32,
     ) -> Self {
         let blit_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Blit Shader"),
@@ -92,6 +96,8 @@ impl BlitPipeline {
             blit_bind_group_layout,
             blit_bind_group,
             blit_sampler,
+            width,
+            height,
         }
     }
 
