@@ -10,8 +10,11 @@ In-game user interface system.
 - Text rendering and font management.
 - Theming and styling.
 
+## Directory Layout
+
+- `src/debug/` — Self-enclosed egui integration for developer tools (world editor, debug overlays). Owns the full egui pipeline including GPU rendering via `egui-wgpu`. This is intentional: keeping egui rendering here avoids leaking egui dependencies into `capy_render`, and debug UI is only wired in by binaries that opt into it.
+
 ## What Does NOT Belong Here
 
 - Game-specific screen flow or menu content (belongs in `capy_game`).
-- Low-level draw calls (belongs in `capy_render` — this crate describes *what* to draw, render draws it).
-- Debug/editor tooling (consider a separate `editor` crate if needed).
+- Debug/editor-specific UI content — the UI *systems* (panels, widgets) belong in the binary or plugin that uses them (e.g., `world_editor`). This crate provides the egui platform and rendering infrastructure.
