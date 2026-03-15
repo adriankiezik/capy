@@ -7,9 +7,9 @@ use capy_core::{BakedChunkData, RegionCoord};
 use crate::error::{AssetError, Result};
 
 use super::binary_io::{read_bytes, read_u8, read_u16_le, read_u32_le};
-use super::codec;
+use super::file_system::FileSystem;
 use super::hash;
-use super::types::Compression;
+use super::types::{Compression, CompressionCodec};
 
 const MAGIC: [u8; 4] = *b"WREG";
 const FORMAT_VERSION: u16 = 1;
@@ -21,12 +21,13 @@ pub fn load_region(
     coord: RegionCoord,
     path: &Path,
     expected_hash: Option<&[u8; 16]>,
+    fs: &impl FileSystem,
 ) -> Result<HashMap<(u8, u8, u8), BakedChunkData>> {
-    if !path.exists() {
+    if !fs.exists(path) {
         return Err(AssetError::RegionNotFound(path.to_path_buf()));
     }
 
-    let file_data = std::fs::read(path)?;
+    let file_data = fs.read(path)?;
 
     if let Some(expected) = expected_hash {
         let actual = hash::content_hash(&file_data);
@@ -69,10 +70,7 @@ pub fn load_region(
     let _reserved = read_u32_le(&mut header)?;
 
     let compressed_payload = &file_data[FILE_HEADER_SIZE..];
-    let payload = match compression {
-        Compression::None => compressed_payload.to_vec(),
-        Compression::Lz4 => codec::decompress_lz4(compressed_payload)?,
-    };
+    let payload = compression.decompress(compressed_payload)?;
 
     if payload.len() < chunk_count * CHUNK_HEADER_SIZE {
         return Err(AssetError::CorruptRegion {
@@ -133,9 +131,10 @@ pub fn save_region(
     path: &Path,
     chunks: &HashMap<(u8, u8, u8), BakedChunkData>,
     compression: Compression,
+    fs: &impl FileSystem,
 ) -> Result<[u8; 16]> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+        fs.create_dir_all(parent)?;
     }
 
     let chunk_count = chunks.len();
@@ -188,10 +187,7 @@ pub fn save_region(
 
     let uncompressed_size = payload.len() as u32;
 
-    let compressed = match compression {
-        Compression::None => payload,
-        Compression::Lz4 => codec::compress_lz4(&payload),
-    };
+    let compressed = compression.compress(&payload);
 
     let mut file_data = Vec::with_capacity(FILE_HEADER_SIZE + compressed.len());
     file_data.extend_from_slice(&MAGIC);
@@ -202,7 +198,7 @@ pub fn save_region(
     file_data.extend_from_slice(&0u32.to_le_bytes());
     file_data.extend_from_slice(&compressed);
 
-    std::fs::write(path, &file_data)?;
+    fs.write(path, &file_data)?;
 
     Ok(hash::content_hash(&file_data))
 }

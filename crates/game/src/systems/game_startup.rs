@@ -8,8 +8,9 @@ use glam::Vec3;
 
 pub(crate) fn game_startup(world: &mut World) -> Result<(), BevyError> {
     let world_dir = Path::new(capy_assets::DEFAULT_WORLD_DIR);
+    let fs = capy_assets::OsFileSystem;
 
-    let mesh = capy_assets::load_world_as_mesh_data(world_dir)?;
+    let mesh = capy_assets::load_world_as_mesh_data(world_dir, &fs)?;
 
     let window = world.resource::<GameWindow>();
     let aspect = if window.height > 0 {

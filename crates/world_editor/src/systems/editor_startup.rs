@@ -8,6 +8,7 @@ use glam::Vec3;
 
 pub(crate) fn editor_startup(world: &mut World) -> Result<(), BevyError> {
     let world_dir = Path::new(capy_assets::DEFAULT_WORLD_DIR);
+    let fs = capy_assets::OsFileSystem;
 
     if !world_dir.join("world.manifest").exists() {
         let baked = capy_world::generate_baked_terrain(42)?;
@@ -16,11 +17,12 @@ pub(crate) fn editor_startup(world: &mut World) -> Result<(), BevyError> {
             capy_world::CHUNK_SIZE,
             MATERIAL_COLORS.to_vec(),
             world_dir,
+            &fs,
         )?;
     }
 
-    let mesh = capy_assets::load_world_as_mesh_data(world_dir)?;
-    let handle = capy_assets::open_world_handle(world_dir)?;
+    let mesh = capy_assets::load_world_as_mesh_data(world_dir, &fs)?;
+    let handle = capy_assets::open_world_handle(world_dir, &fs)?;
 
     let window = world.resource::<GameWindow>();
     let aspect = if window.height > 0 {

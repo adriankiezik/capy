@@ -2,6 +2,15 @@ use std::collections::HashMap;
 
 use capy_core::RegionCoord;
 
+use crate::error::Result;
+
+use super::codec;
+
+pub trait CompressionCodec {
+    fn compress(&self, data: &[u8]) -> Vec<u8>;
+    fn decompress(&self, data: &[u8]) -> Result<Vec<u8>>;
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Compression {
@@ -15,6 +24,22 @@ impl Compression {
             0 => Some(Self::None),
             1 => Some(Self::Lz4),
             _ => None,
+        }
+    }
+}
+
+impl CompressionCodec for Compression {
+    fn compress(&self, data: &[u8]) -> Vec<u8> {
+        match self {
+            Self::None => data.to_vec(),
+            Self::Lz4 => codec::compress_lz4(data),
+        }
+    }
+
+    fn decompress(&self, data: &[u8]) -> Result<Vec<u8>> {
+        match self {
+            Self::None => Ok(data.to_vec()),
+            Self::Lz4 => codec::decompress_lz4(data),
         }
     }
 }

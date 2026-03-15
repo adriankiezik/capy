@@ -7,6 +7,7 @@ use capy_core::RegionCoord;
 use crate::error::{AssetError, Result};
 
 use super::binary_io::{read_bytes, read_u8, read_u16_le, read_u32_le};
+use super::file_system::FileSystem;
 use super::types::{Compression, RegionEntry, WorldManifest};
 
 const MAGIC: [u8; 4] = *b"CAPY";
@@ -29,20 +30,20 @@ impl WorldManifest {
         }
     }
 
-    pub fn load(world_dir: &Path) -> Result<Self> {
+    pub fn load(world_dir: &Path, fs: &impl FileSystem) -> Result<Self> {
         let path = world_dir.join("world.manifest");
-        if !path.exists() {
+        if !fs.exists(&path) {
             return Err(AssetError::ManifestNotFound(path));
         }
-        let data = std::fs::read(&path)?;
+        let data = fs.read(&path)?;
         Self::from_bytes(&data)
     }
 
-    pub fn save(&self, world_dir: &Path) -> Result<()> {
-        std::fs::create_dir_all(world_dir)?;
+    pub fn save(&self, world_dir: &Path, fs: &impl FileSystem) -> Result<()> {
+        fs.create_dir_all(world_dir)?;
         let path = world_dir.join("world.manifest");
         let data = self.to_bytes();
-        std::fs::write(&path, &data)?;
+        fs.write(&path, &data)?;
         Ok(())
     }
 

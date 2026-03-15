@@ -6,9 +6,8 @@ mod terrain;
 mod voxel_grid;
 
 pub use error::WorldError;
-pub use terrain::CHUNK_SIZE;
+pub use terrain::{CHUNK_SIZE, PerlinTerrain, TerrainGenerator};
 
 pub fn generate_baked_terrain(seed: u32) -> error::Result<capy_core::BakedChunkData> {
-    let (grid, heights) = terrain::generate_terrain_grid(seed)?;
-    bake::bake_chunk(&grid, Some(&heights))
+    PerlinTerrain::default().generate(seed)
 }

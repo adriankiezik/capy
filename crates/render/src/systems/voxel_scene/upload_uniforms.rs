@@ -1,3 +1,4 @@
+use bevy_ecs::change_detection::DetectChanges;
 use bevy_ecs::system::{NonSendMut, Res};
 use capy_core::Camera;
 

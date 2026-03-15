@@ -5,12 +5,13 @@ use capy_core::{BakedChunkData, RegionCoord, VoxelMeshData};
 
 use crate::error::{AssetError, Result};
 
+use super::file_system::FileSystem;
 use super::region_io;
 use super::types::{Compression, RegionEntry, WorldManifest};
 use crate::resources::WorldHandle;
 
-pub fn load_world_as_mesh_data(world_dir: &Path) -> Result<VoxelMeshData> {
-    let manifest = WorldManifest::load(world_dir)?;
+pub fn load_world_as_mesh_data(world_dir: &Path, fs: &impl FileSystem) -> Result<VoxelMeshData> {
+    let manifest = WorldManifest::load(world_dir, fs)?;
 
     let first_entry =
         manifest
@@ -26,6 +27,7 @@ pub fn load_world_as_mesh_data(world_dir: &Path) -> Result<VoxelMeshData> {
         first_entry.coord,
         &region_path,
         Some(&first_entry.content_hash),
+        fs,
     )?;
 
     let (_key, chunk) = chunks
@@ -51,8 +53,8 @@ pub fn load_world_as_mesh_data(world_dir: &Path) -> Result<VoxelMeshData> {
     })
 }
 
-pub fn open_world_handle(world_dir: &Path) -> Result<WorldHandle> {
-    WorldManifest::load(world_dir)?;
+pub fn open_world_handle(world_dir: &Path, fs: &impl FileSystem) -> Result<WorldHandle> {
+    WorldManifest::load(world_dir, fs)?;
     Ok(WorldHandle::new(world_dir.to_path_buf()))
 }
 
@@ -61,6 +63,7 @@ pub fn save_generated_world(
     chunk_size: u32,
     material_palette: Vec<[f32; 3]>,
     world_dir: &Path,
+    fs: &impl FileSystem,
 ) -> Result<()> {
     let mut chunks = HashMap::new();
     chunks.insert((0u8, 0u8, 0u8), baked);
@@ -69,7 +72,7 @@ pub fn save_generated_world(
 
     let coord = RegionCoord { x: 0, y: 0, z: 0 };
     let path = manifest.region_file_path(world_dir, coord);
-    let content_hash = region_io::save_region(&path, &chunks, Compression::Lz4)?;
+    let content_hash = region_io::save_region(&path, &chunks, Compression::Lz4, fs)?;
 
     manifest.regions.insert(
         coord,
@@ -78,7 +81,7 @@ pub fn save_generated_world(
             content_hash,
         },
     );
-    manifest.save(world_dir)?;
+    manifest.save(world_dir, fs)?;
 
     Ok(())
 }
