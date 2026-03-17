@@ -11,5 +11,5 @@ struct RenderSettingsUniform {
     ray_epsilon: f32,
     max_chunk_steps: f32,
     max_node_steps: f32,
-    _pad0: f32,
+    _padding0: f32,
 };

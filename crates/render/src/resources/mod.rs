@@ -3,6 +3,7 @@ mod compute_pass_callbacks;
 mod frame_in_progress;
 mod gpu_access;
 mod gpu_context;
+pub(crate) mod gtao;
 mod lighting;
 mod render_overlay_callbacks;
 mod renderer_settings;
@@ -17,6 +18,7 @@ pub use compute_pass_callbacks::{
 pub(crate) use frame_in_progress::FrameInProgress;
 pub use gpu_access::GpuAccess;
 pub(crate) use gpu_context::GpuContext;
+pub(crate) use gtao::GtaoPipeline;
 pub(crate) use lighting::LightingPipeline;
 pub use render_overlay_callbacks::{RenderOverlayCallback, RenderOverlayCallbacks};
 pub use renderer_settings::{MATERIAL_PALETTE_SIZE, RendererSettings};

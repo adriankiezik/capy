@@ -122,6 +122,7 @@ impl VoxelSceneBuffers {
             indirection_buffer: self.indirection_buffer.clone(),
             streaming_info_buffer: self.streaming_info_buffer.buffer().clone(),
             render_settings_buffer: self.render_settings_buffer.buffer().clone(),
+            camera_buffer: self.camera_buffer.buffer().clone(),
         }
     }
 }

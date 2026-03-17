@@ -21,6 +21,7 @@ impl LightingLayout {
                     wgpu::StorageTextureAccess::WriteOnly,
                 ),
                 bgl_uniform(4),
+                bgl_sampled_texture(5),
             ],
         });
         Self { layout }
@@ -30,6 +31,7 @@ impl LightingLayout {
         &self.layout
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn bind(
         &self,
         device: &wgpu::Device,
@@ -38,6 +40,7 @@ impl LightingLayout {
         gbuf_depth: &GpuTexture,
         output_color: &GpuTexture,
         render_settings_buffer: &wgpu::Buffer,
+        ao_texture: &GpuTexture,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Lighting Bind Group"),
@@ -63,6 +66,10 @@ impl LightingLayout {
                     binding: 4,
                     resource: render_settings_buffer.as_entire_binding(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::TextureView(&ao_texture.view),
+                },
             ],
         })
     }
@@ -78,12 +85,14 @@ pub(crate) struct LightingPipeline {
 }
 
 impl LightingPipeline {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         device: &wgpu::Device,
         gbuf_color: &GpuTexture,
         gbuf_normal: &GpuTexture,
         gbuf_depth: &GpuTexture,
         render_settings_buffer: &wgpu::Buffer,
+        ao_texture: &GpuTexture,
         width: u32,
         height: u32,
     ) -> Self {
@@ -112,6 +121,7 @@ impl LightingPipeline {
             gbuf_depth,
             &output_color,
             render_settings_buffer,
+            ao_texture,
         );
 
         Self {
@@ -124,6 +134,7 @@ impl LightingPipeline {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn resize(
         &mut self,
         device: &wgpu::Device,
@@ -131,6 +142,7 @@ impl LightingPipeline {
         gbuf_normal: &GpuTexture,
         gbuf_depth: &GpuTexture,
         render_settings_buffer: &wgpu::Buffer,
+        ao_texture: &GpuTexture,
         size: [u32; 2],
     ) {
         let [width, height] = size;
@@ -150,6 +162,7 @@ impl LightingPipeline {
             gbuf_depth,
             &self.output_color,
             render_settings_buffer,
+            ao_texture,
         );
     }
 }

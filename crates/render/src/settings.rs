@@ -35,7 +35,7 @@ pub(crate) fn to_render_settings_uniform(settings: &RendererSettings) -> RenderS
         ray_epsilon: settings.ray_epsilon.max(0.0),
         max_chunk_steps: settings.max_chunk_steps.max(1) as f32,
         max_node_steps: settings.max_node_steps.max(1) as f32,
-        _pad0: 0.0,
+        _padding0: 0.0,
     }
 }
 
@@ -54,7 +54,7 @@ pub(crate) struct RenderSettingsUniform {
     ray_epsilon: f32,
     max_chunk_steps: f32,
     max_node_steps: f32,
-    _pad0: f32,
+    _padding0: f32,
 }
 
 const _: () = assert!(std::mem::size_of::<RenderSettingsUniform>() == 16448);

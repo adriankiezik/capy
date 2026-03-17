@@ -12,6 +12,7 @@ impl capy_core::Plugin for RenderPlugin {
                 crate::systems::init_gpu,
                 crate::systems::voxel_scene::init_voxel_scene,
                 crate::systems::trace::init_trace,
+                crate::systems::gtao::init_gtao,
                 crate::systems::lighting::init_lighting,
                 crate::systems::blit::init_blit,
             )
@@ -23,6 +24,7 @@ impl capy_core::Plugin for RenderPlugin {
                 crate::systems::voxel_scene::upload_uniforms_system,
                 crate::systems::resize_surface_system,
                 crate::systems::trace::resize_trace_system,
+                crate::systems::gtao::resize_gtao_system,
                 crate::systems::lighting::resize_lighting_system,
                 crate::systems::blit::resize_blit_system,
                 crate::systems::run_compute_passes,

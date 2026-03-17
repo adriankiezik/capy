@@ -3,6 +3,7 @@
 @group(0) @binding(2) var gbuf_depth: texture_2d<f32>;
 @group(0) @binding(3) var output_color: texture_storage_2d<rgba8unorm, write>;
 @group(0) @binding(4) var<uniform> render_settings: RenderSettingsUniform;
+@group(0) @binding(5) var ao_texture: texture_2d<f32>;
 
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -22,12 +23,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
 
-    let base_color = textureLoad(gbuf_color, pixel, 0).rgb;
+    let color_sample = textureLoad(gbuf_color, pixel, 0);
+    let base_color = color_sample.rgb;
+    let shadow = color_sample.a;
     let normal = normal_sample.xyz;
+
+    let ao = textureLoad(ao_texture, pixel, 0).r;
 
     let sun_dir = normalize(render_settings.sun_direction.xyz);
     let n_dot_l = max(dot(normal, sun_dir), 0.0);
-    let light = render_settings.ambient_light + render_settings.sun_contribution * n_dot_l;
+    let light = render_settings.ambient_light * ao + render_settings.sun_contribution * n_dot_l * shadow;
 
     textureStore(output_color, pixel, vec4<f32>(base_color * light, 1.0));
 }

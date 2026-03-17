@@ -17,6 +17,11 @@ pub struct RendererSettings {
     pub chunk_lod_scale: f32,
     pub node_lod_scale: f32,
     pub lod_bias: f32,
+
+    pub ao_radius: f32,
+    pub ao_intensity: f32,
+    pub ao_samples: u32,
+    pub ao_steps: u32,
 }
 
 impl RendererSettings {
@@ -42,6 +47,10 @@ impl Default for RendererSettings {
             chunk_lod_scale: 0.25,
             node_lod_scale: 1.0,
             lod_bias: 1.0,
+            ao_radius: 2.0,
+            ao_intensity: 1.0,
+            ao_samples: 4,
+            ao_steps: 4,
         }
     }
 }

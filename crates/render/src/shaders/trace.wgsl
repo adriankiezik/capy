@@ -43,7 +43,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         } else {
             base = render_settings.material_colors[min(hit.material, 1023u)].rgb;
         }
-        textureStore(gbuf_color_out, pixel, vec4<f32>(base, 1.0));
+
+        let sun_dir = normalize(render_settings.sun_direction.xyz);
+        let shadow_origin = hit.hit_pos_local + hit.normal * render_settings.ray_epsilon;
+        let in_shadow = trace_shadow_ray(shadow_origin, sun_dir);
+        let shadow = select(1.0, 0.0, in_shadow);
+
+        textureStore(gbuf_color_out, pixel, vec4<f32>(base, shadow));
         textureStore(gbuf_normal_out, pixel, vec4<f32>(hit.normal, 1.0));
         let depth_val = length(hit.hit_pos_local - ray_origin);
         textureStore(gbuf_depth_out, pixel, vec4<f32>(depth_val, 0.0, 0.0, 0.0));

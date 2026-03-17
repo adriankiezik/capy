@@ -7,4 +7,5 @@ pub struct SharedVoxelBuffers {
     pub indirection_buffer: wgpu::Buffer,
     pub streaming_info_buffer: wgpu::Buffer,
     pub render_settings_buffer: wgpu::Buffer,
+    pub camera_buffer: wgpu::Buffer,
 }

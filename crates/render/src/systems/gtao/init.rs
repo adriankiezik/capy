@@ -1,31 +1,26 @@
 use bevy_ecs::world::World;
 
 use crate::resources::trace::TracePipeline;
-use crate::resources::{GpuContext, GtaoPipeline, LightingPipeline, SharedVoxelBuffers};
+use crate::resources::{GpuContext, GtaoPipeline, RendererSettings, SharedVoxelBuffers};
 
-pub(crate) fn init_lighting(world: &mut World) {
+pub(crate) fn init_gtao(world: &mut World) {
     let Some(trace) = world.get_non_send_resource::<TracePipeline>() else {
         tracing::warn!("Missing TracePipeline resource.");
         return;
     };
 
-    let Some(gtao) = world.get_non_send_resource::<GtaoPipeline>() else {
-        tracing::warn!("Missing GtaoPipeline resource.");
-        return;
-    };
-
     let voxels = world.resource::<SharedVoxelBuffers>();
     let gpu = world.non_send_resource::<GpuContext>();
+    let settings = world.resource::<RendererSettings>();
 
-    let pipeline = LightingPipeline::new(
+    let pipeline = GtaoPipeline::new(
         &gpu.device,
-        &trace.gbuf_color,
-        &trace.gbuf_normal,
         &trace.gbuf_depth,
-        &voxels.render_settings_buffer,
-        &gtao.ao_output,
+        &trace.gbuf_normal,
+        &voxels.camera_buffer,
         gpu.config.width,
         gpu.config.height,
+        settings,
     );
 
     world.insert_non_send_resource(pipeline);

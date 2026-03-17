@@ -1,5 +1,6 @@
 pub(crate) mod blit;
 mod compute_passes;
+pub(crate) mod gtao;
 mod init_gpu;
 pub(crate) mod lighting;
 mod render_passes;

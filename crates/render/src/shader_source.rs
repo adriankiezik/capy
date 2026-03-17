@@ -1,6 +1,7 @@
 pub const SHADER_BLIT: &str = include_str!("shaders/blit.wgsl");
 const SHADER_TRACE: &str = include_str!("shaders/trace.wgsl");
 const SHADER_LIGHTING: &str = include_str!("shaders/lighting.wgsl");
+const SHADER_GTAO: &str = include_str!("shaders/gtao.wgsl");
 
 const COMMON_CAMERA: &str = include_str!("shaders/common/camera.wgsl");
 const COMMON_AABB: &str = include_str!("shaders/common/aabb.wgsl");
@@ -58,5 +59,13 @@ pub(crate) fn build_lighting_shader_source() -> String {
     out.push_str(COMMON_RENDER_SETTINGS);
     out.push('\n');
     out.push_str(SHADER_LIGHTING.trim_start_matches('\u{feff}'));
+    out
+}
+
+pub(crate) fn build_gtao_shader_source() -> String {
+    let mut out = String::new();
+    out.push_str(COMMON_CAMERA);
+    out.push('\n');
+    out.push_str(SHADER_GTAO.trim_start_matches('\u{feff}'));
     out
 }

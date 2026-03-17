@@ -2,16 +2,18 @@ use bevy_ecs::error::BevyError;
 use bevy_ecs::system::NonSendMut;
 
 use crate::resources::trace::TracePipeline;
-use crate::resources::{BlitPipeline, FrameInProgress, GpuContext, LightingPipeline};
+use crate::resources::{BlitPipeline, FrameInProgress, GpuContext, GtaoPipeline, LightingPipeline};
 
 pub(crate) fn render_passes_system(
     gpu: NonSendMut<GpuContext>,
     trace: Option<NonSendMut<TracePipeline>>,
+    gtao: Option<NonSendMut<GtaoPipeline>>,
     lighting: Option<NonSendMut<LightingPipeline>>,
     blit: Option<NonSendMut<BlitPipeline>>,
     mut frame: NonSendMut<FrameInProgress>,
 ) -> Result<(), BevyError> {
-    let (Some(trace), Some(lighting), Some(blit)) = (trace, lighting, blit) else {
+    let (Some(trace), Some(gtao), Some(lighting), Some(blit)) = (trace, gtao, lighting, blit)
+    else {
         return Ok(());
     };
 
@@ -44,6 +46,16 @@ pub(crate) fn render_passes_system(
         pass.set_pipeline(&trace.compute_pipeline);
         pass.set_bind_group(0, &trace.compute_bind_group, &[]);
         pass.dispatch_workgroups(trace.width.div_ceil(8), trace.height.div_ceil(8), 1);
+    }
+
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("GTAO Pass"),
+            ..Default::default()
+        });
+        pass.set_pipeline(&gtao.compute_pipeline);
+        pass.set_bind_group(0, &gtao.bind_group, &[]);
+        pass.dispatch_workgroups(gtao.width.div_ceil(8), gtao.height.div_ceil(8), 1);
     }
 
     {
