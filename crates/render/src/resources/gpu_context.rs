@@ -29,15 +29,17 @@ impl GpuContext {
             force_fallback_adapter: false,
         }))?;
 
+        let adapter_limits = adapter.limits();
+        let mut required_limits = wgpu::Limits::default();
+        required_limits.max_storage_buffer_binding_size =
+            adapter_limits.max_storage_buffer_binding_size;
+        required_limits.max_buffer_size = adapter_limits.max_buffer_size;
+
         let (device, queue) =
             pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
                 label: Some("Capy Device"),
                 required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits {
-                    max_storage_buffer_binding_size: 256 * 1024 * 1024,
-                    max_buffer_size: 256 * 1024 * 1024,
-                    ..wgpu::Limits::default()
-                },
+                required_limits,
                 memory_hints: Default::default(),
                 ..Default::default()
             }))?;

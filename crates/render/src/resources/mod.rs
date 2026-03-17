@@ -21,3 +21,4 @@ pub(crate) use lighting::LightingPipeline;
 pub use render_overlay_callbacks::{RenderOverlayCallback, RenderOverlayCallbacks};
 pub use renderer_settings::{MATERIAL_PALETTE_SIZE, RendererSettings};
 pub use shared_voxel_buffers::SharedVoxelBuffers;
+pub use voxel_scene::PreparedVoxelSceneUpload;

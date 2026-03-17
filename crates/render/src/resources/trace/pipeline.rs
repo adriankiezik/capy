@@ -180,6 +180,17 @@ impl TracePipeline {
         }
     }
 
+    pub(crate) fn rebind(&mut self, device: &wgpu::Device, scene: &VoxelSceneBuffers) {
+        self.compute_bind_group = self.layout.bind(
+            device,
+            &self.gbuf_color,
+            &self.gbuf_normal,
+            &self.gbuf_depth,
+            scene,
+            &self.lod_debug_buffer,
+        );
+    }
+
     pub(crate) fn resize(
         &mut self,
         device: &wgpu::Device,

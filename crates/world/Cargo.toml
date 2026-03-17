@@ -7,7 +7,6 @@ edition.workspace = true
 capy_core = { path = "../core" }
 
 bytemuck = { workspace = true, features = ["derive"] }
-noise.workspace = true
 thiserror.workspace = true
 
 [lints]

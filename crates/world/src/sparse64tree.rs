@@ -1,10 +1,9 @@
 use crate::voxel_grid::VoxelGrid;
-use capy_core::MATERIAL_COLORS;
+use capy_core::{MATERIAL_COLORS, MATERIAL_PALETTE_SIZE, MaterialId};
 
 const BRANCH: u32 = 4;
 const BRANCH_CUBED: usize = (BRANCH * BRANCH * BRANCH) as usize;
-
-fn local_to_bit(lx: u32, ly: u32, lz: u32) -> u32 {
+pub(crate) fn local_to_bit(lx: u32, ly: u32, lz: u32) -> u32 {
     lx + ly * BRANCH + lz * BRANCH * BRANCH
 }
 
@@ -58,14 +57,145 @@ pub(crate) fn build_and_serialize_tree_with_heights(
     }
 }
 
+/// Cached occupancy state for incremental chunk baking.
+/// Maintains a multi-level occupancy mip that tracks which 4×4×4 blocks
+/// contain voxels. Can be updated incrementally for small edits instead
+/// of rescanning the entire grid.
+#[derive(Clone)]
+pub struct ChunkOccupancy {
+    mip: OccupancyMip,
+    world_size: u32,
+    depth: u32,
+}
+
+impl ChunkOccupancy {
+    /// Build initial occupancy from a voxel grid.
+    pub fn build(grid: &VoxelGrid, col_heights: Option<&[u16]>) -> Self {
+        let max_dim = grid.size_x.max(grid.size_y).max(grid.size_z);
+        let world_size = next_power_of_4(max_dim);
+        let depth = depth_for_size(max_dim);
+        let mip = OccupancyMip::build(grid, col_heights, world_size, depth);
+        Self {
+            mip,
+            world_size,
+            depth,
+        }
+    }
+
+    /// Update occupancy for the region affected by an edit.
+    /// `min` and `max` define an axis-aligned bounding box in voxel coordinates (max is exclusive).
+    pub fn update(&mut self, grid: &VoxelGrid, min: [i32; 3], max: [i32; 3]) {
+        let leaf_size = BRANCH;
+        let blocks_x = self.mip.blocks_x;
+        let blocks_y = self.mip.blocks_y;
+        let blocks_z = self.mip.blocks_z;
+
+        // Clamp to grid bounds and compute affected block range
+        let bx_min = (min[0].max(0) as u32 / leaf_size).min(blocks_x);
+        let by_min = (min[1].max(0) as u32 / leaf_size).min(blocks_y);
+        let bz_min = (min[2].max(0) as u32 / leaf_size).min(blocks_z);
+        let bx_max = (max[0].max(0) as u32).div_ceil(leaf_size).min(blocks_x);
+        let by_max = (max[1].max(0) as u32).div_ceil(leaf_size).min(blocks_y);
+        let bz_max = (max[2].max(0) as u32).div_ceil(leaf_size).min(blocks_z);
+
+        // Update L0: re-check each affected leaf block
+        for bz in bz_min..bz_max {
+            for by in by_min..by_max {
+                for bx in bx_min..bx_max {
+                    let ox = bx * leaf_size;
+                    let oy = by * leaf_size;
+                    let oz = bz * leaf_size;
+                    let (mask, _) = grid.read_leaf_block(ox, oy, oz);
+                    let idx = (bx + by * blocks_x + bz * blocks_x * blocks_y) as usize;
+                    self.mip.levels[0][idx] = mask != 0;
+                }
+            }
+        }
+
+        // Propagate to higher mip levels
+        let mut prev_bx = blocks_x;
+        let mut prev_by = blocks_y;
+        let mut prev_bz = blocks_z;
+        let mut prev_min = [bx_min, by_min, bz_min];
+        let mut prev_max = [bx_max, by_max, bz_max];
+
+        for level in 1..self.mip.levels.len() {
+            let cur_bx = prev_bx / BRANCH;
+            let cur_by = prev_by / BRANCH;
+            let cur_bz = prev_bz / BRANCH;
+            if cur_bx == 0 || cur_by == 0 || cur_bz == 0 {
+                break;
+            }
+
+            // Block range at this level that could be affected
+            let gx_min = prev_min[0] / BRANCH;
+            let gy_min = prev_min[1] / BRANCH;
+            let gz_min = prev_min[2] / BRANCH;
+            let gx_max = prev_max[0].div_ceil(BRANCH).min(cur_bx);
+            let gy_max = prev_max[1].div_ceil(BRANCH).min(cur_by);
+            let gz_max = prev_max[2].div_ceil(BRANCH).min(cur_bz);
+
+            let (prev_levels, cur_levels) = self.mip.levels.split_at_mut(level);
+            let prev_level = &prev_levels[level - 1];
+            let cur_level = &mut cur_levels[0];
+            for gz in gz_min..gz_max {
+                for gy in gy_min..gy_max {
+                    for gx in gx_min..gx_max {
+                        let mut occupied = false;
+                        'scan: for lz in 0..BRANCH {
+                            for ly in 0..BRANCH {
+                                for lx in 0..BRANCH {
+                                    let px = gx * BRANCH + lx;
+                                    let py = gy * BRANCH + ly;
+                                    let pz = gz * BRANCH + lz;
+                                    let idx = (px + py * prev_bx + pz * prev_bx * prev_by) as usize;
+                                    if idx < prev_level.len() && prev_level[idx] {
+                                        occupied = true;
+                                        break 'scan;
+                                    }
+                                }
+                            }
+                        }
+                        cur_level[(gx + gy * cur_bx + gz * cur_bx * cur_by) as usize] = occupied;
+                    }
+                }
+            }
+
+            prev_bx = cur_bx;
+            prev_by = cur_by;
+            prev_bz = cur_bz;
+            prev_min = [gx_min, gy_min, gz_min];
+            prev_max = [gx_max, gy_max, gz_max];
+        }
+    }
+}
+
+/// Build a flat tree using a pre-built occupancy mip (skips the mip scan).
+pub(crate) fn build_tree_from_mip(grid: &VoxelGrid, occ: &ChunkOccupancy) -> FlatTree {
+    let mut builder = TreeBuilder {
+        grid,
+        occ: &occ.mip,
+        buffer: Vec::new(),
+        avg_color_buf: Vec::new(),
+    };
+
+    let root_offset = builder.build_subtree([0, 0, 0], occ.world_size, occ.depth);
+
+    FlatTree {
+        buffer: builder.buffer,
+        avg_color_buf: builder.avg_color_buf,
+        root_offset,
+        world_size: occ.world_size,
+        depth: occ.depth,
+    }
+}
+
+#[derive(Clone)]
 struct OccupancyMip {
     levels: Vec<Vec<bool>>,
     blocks_x: u32,
     blocks_y: u32,
-    #[allow(dead_code)]
     blocks_z: u32,
-    #[allow(dead_code)]
-    depth: u32,
 }
 
 impl OccupancyMip {
@@ -83,6 +213,9 @@ impl OccupancyMip {
                 for bx in 0..blocks_x {
                     let ox = bx * leaf_size;
                     let oz = bz * leaf_size;
+                    if ox >= grid.size_x || oz >= grid.size_z {
+                        continue;
+                    }
                     let mut max_h = 0u16;
                     for lz in 0..leaf_size.min(grid.size_z - oz) {
                         for lx in 0..leaf_size.min(grid.size_x - ox) {
@@ -101,15 +234,33 @@ impl OccupancyMip {
             }
             l0
         } else {
+            // Single sequential pass over grid data — much more cache-friendly
+            // than per-block random access via volume_has_voxels_direct.
+            let sx = grid.size_x as usize;
+            let sy = grid.size_y as usize;
+            let sz = grid.size_z as usize;
+            let sxy = sx * sy;
+            let ls = leaf_size as usize;
+            let bx_count = blocks_x as usize;
+            let bxy_count = (blocks_x * blocks_y) as usize;
             let mut l0 = vec![false; total_blocks];
-            for bz in 0..blocks_z {
-                for by in 0..blocks_y {
-                    for bx in 0..blocks_x {
-                        let ox = bx * leaf_size;
-                        let oy = by * leaf_size;
-                        let oz = bz * leaf_size;
-                        let has = volume_has_voxels_direct(grid, ox, oy, oz, leaf_size);
-                        l0[(bx + by * blocks_x + bz * blocks_x * blocks_y) as usize] = has;
+
+            for z in 0..sz {
+                let bz = z / ls;
+                let z_offset = z * sxy;
+                for y in 0..sy {
+                    let by = y / ls;
+                    let row_start = z_offset + y * sx;
+                    let block_yz = by * bx_count + bz * bxy_count;
+                    for bx in 0..bx_count {
+                        if l0[bx + block_yz] {
+                            continue;
+                        }
+                        let chunk_start = row_start + bx * ls;
+                        let chunk_end = (chunk_start + ls).min(row_start + sx);
+                        if grid.data[chunk_start..chunk_end].iter().any(|&v| v != 0) {
+                            l0[bx + block_yz] = true;
+                        }
                     }
                 }
             }
@@ -174,7 +325,6 @@ impl OccupancyMip {
             blocks_x,
             blocks_y,
             blocks_z,
-            depth,
         }
     }
 
@@ -204,23 +354,6 @@ impl OccupancyMip {
     }
 }
 
-fn volume_has_voxels_direct(grid: &VoxelGrid, ox: u32, oy: u32, oz: u32, size: u32) -> bool {
-    let max_x = (ox + size).min(grid.size_x);
-    let max_y = (oy + size).min(grid.size_y);
-    let max_z = (oz + size).min(grid.size_z);
-
-    for z in oz..max_z {
-        for y in oy..max_y {
-            for x in ox..max_x {
-                if grid.get(x as i32, y as i32, z as i32) != 0 {
-                    return true;
-                }
-            }
-        }
-    }
-    false
-}
-
 struct TreeBuilder<'a> {
     grid: &'a VoxelGrid,
     occ: &'a OccupancyMip,
@@ -235,24 +368,7 @@ impl TreeBuilder<'_> {
         if remaining_depth == 1 {
             let offset = self.buffer.len() as u32;
 
-            let mut mask = 0u64;
-            let mut materials = [0u8; BRANCH_CUBED];
-
-            for lz in 0..BRANCH {
-                for ly in 0..BRANCH {
-                    for lx in 0..BRANCH {
-                        let wx = ox + lx;
-                        let wy = oy + ly;
-                        let wz = oz + lz;
-                        let mat = self.grid.get(wx as i32, wy as i32, wz as i32);
-                        if mat != 0 {
-                            let bit = local_to_bit(lx, ly, lz);
-                            mask |= 1u64 << bit;
-                            materials[bit as usize] = mat;
-                        }
-                    }
-                }
-            }
+            let (mask, materials) = self.grid.read_leaf_block(ox, oy, oz);
 
             let avg_color = compute_leaf_avg_color(&materials, mask);
 
@@ -260,14 +376,10 @@ impl TreeBuilder<'_> {
             self.buffer.push((mask >> 32) as u32);
             self.buffer.push(1);
 
-            for chunk in materials.chunks(4) {
-                let word = u32::from_le_bytes([
-                    chunk[0],
-                    if chunk.len() > 1 { chunk[1] } else { 0 },
-                    if chunk.len() > 2 { chunk[2] } else { 0 },
-                    if chunk.len() > 3 { chunk[3] } else { 0 },
-                ]);
-                self.buffer.push(word);
+            for chunk in materials.chunks(2) {
+                let first = chunk[0] as u32;
+                let second = chunk[1] as u32;
+                self.buffer.push(first | (second << 16));
             }
 
             self.avg_color_buf
@@ -344,7 +456,7 @@ impl TreeBuilder<'_> {
     }
 }
 
-fn compute_leaf_avg_color(materials: &[u8; BRANCH_CUBED], mask: u64) -> [u8; 3] {
+pub(crate) fn compute_leaf_avg_color(materials: &[MaterialId; BRANCH_CUBED], mask: u64) -> [u8; 3] {
     let occupied = mask.count_ones() as usize;
     if occupied == 0 {
         return [0, 0, 0];
@@ -353,7 +465,7 @@ fn compute_leaf_avg_color(materials: &[u8; BRANCH_CUBED], mask: u64) -> [u8; 3] 
     for (bit, &mat_id) in materials.iter().enumerate().take(BRANCH_CUBED) {
         if (mask & (1u64 << bit)) != 0 {
             let mat = mat_id as usize;
-            if mat < MATERIAL_COLORS.len() {
+            if mat < MATERIAL_PALETTE_SIZE {
                 sum[0] += MATERIAL_COLORS[mat][0];
                 sum[1] += MATERIAL_COLORS[mat][1];
                 sum[2] += MATERIAL_COLORS[mat][2];
@@ -386,14 +498,15 @@ pub(crate) struct TreeInfoUniform {
     pub _pad: u32,
 }
 
-pub(crate) fn tree_to_gpu_data(flat: &FlatTree) -> (TreeInfoUniform, Vec<u32>, Vec<u32>) {
+pub(crate) fn tree_to_gpu_data(flat: FlatTree) -> (TreeInfoUniform, Vec<u32>, Vec<u32>) {
     let info = TreeInfoUniform {
         world_size: flat.world_size,
         root_offset: flat.root_offset,
         depth: flat.depth,
         _pad: 0,
     };
-    let mut avg_color = flat.avg_color_buf.clone();
-    avg_color.resize(flat.buffer.len(), 0);
-    (info, flat.buffer.clone(), avg_color)
+    let buf_len = flat.buffer.len();
+    let mut avg_color = flat.avg_color_buf;
+    avg_color.resize(buf_len, 0);
+    (info, flat.buffer, avg_color)
 }

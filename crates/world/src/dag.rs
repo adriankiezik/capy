@@ -1,27 +1,70 @@
 use std::collections::HashMap;
+use std::hash::{BuildHasherDefault, Hasher};
 
 use crate::sparse64tree::FlatTree;
 
-const LEAF_DATA_WORDS: u32 = 16;
+const LEAF_DATA_WORDS: u32 = 32;
 
-pub(crate) fn reduce_to_dag(flat: &FlatTree) -> FlatTree {
+// Fast integer hasher — uses multiply-by-golden-ratio for u32/u64 keys.
+// Much faster than SipHash for integer keys where DoS resistance is unnecessary.
+#[derive(Default)]
+struct FxHasher(u64);
+
+impl Hasher for FxHasher {
+    #[inline]
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.0 = (self.0.rotate_left(5) ^ b as u64).wrapping_mul(0x517cc1b727220a95);
+        }
+    }
+
+    #[inline]
+    fn write_u32(&mut self, i: u32) {
+        self.0 = (i as u64).wrapping_mul(0x517cc1b727220a95);
+    }
+
+    #[inline]
+    fn write_u64(&mut self, i: u64) {
+        self.0 = i.wrapping_mul(0x517cc1b727220a95);
+    }
+
+    #[inline]
+    fn write_usize(&mut self, i: usize) {
+        self.0 = (i as u64).wrapping_mul(0x517cc1b727220a95);
+    }
+
+    #[inline]
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
+type FxBuildHasher = BuildHasherDefault<FxHasher>;
+type FxHashMap<K, V> = HashMap<K, V, FxBuildHasher>;
+
+pub(crate) fn reduce_to_dag(flat: FlatTree) -> FlatTree {
     let buf = &flat.buffer;
 
     if buf.is_empty() {
-        return flat.clone();
+        return flat;
     }
 
     let depth = flat.depth as usize;
 
     let est_nodes = buf.len() / 8;
     let mut ctx = DagReduceCtx {
-        old_to_new: HashMap::with_capacity(est_nodes),
+        old_to_new: FxHashMap::with_capacity_and_hasher(est_nodes, FxBuildHasher::default()),
         level_dedup: (0..=depth)
-            .map(|_| HashMap::with_capacity(est_nodes / (depth + 1).max(1)))
+            .map(|_| {
+                FxHashMap::with_capacity_and_hasher(
+                    est_nodes / (depth + 1).max(1),
+                    FxBuildHasher::default(),
+                )
+            })
             .collect(),
-        node_hash: HashMap::with_capacity(est_nodes),
+        node_hash: FxHashMap::with_capacity_and_hasher(est_nodes, FxBuildHasher::default()),
         unique_nodes_ordered: Vec::with_capacity(est_nodes),
-        node_depth: HashMap::with_capacity(est_nodes),
+        node_depth: FxHashMap::with_capacity_and_hasher(est_nodes, FxBuildHasher::default()),
     };
 
     dfs_post_order(buf, flat.root_offset, depth, &mut ctx);
@@ -32,7 +75,8 @@ pub(crate) fn reduce_to_dag(flat: &FlatTree) -> FlatTree {
         usize::MAX - d
     });
 
-    let mut new_offset_map: HashMap<u32, u32> = HashMap::with_capacity(bfs_order.len());
+    let mut new_offset_map: FxHashMap<u32, u32> =
+        FxHashMap::with_capacity_and_hasher(bfs_order.len(), FxBuildHasher::default());
     let mut cursor: u32 = 0;
     for &old_off in &bfs_order {
         new_offset_map.insert(old_off, cursor);
@@ -100,6 +144,7 @@ struct NodeView {
     is_leaf: bool,
 }
 
+#[inline]
 fn read_node(buf: &[u32], offset: u32) -> NodeView {
     let o = offset as usize;
     debug_assert!(
@@ -128,6 +173,7 @@ fn read_node(buf: &[u32], offset: u32) -> NodeView {
     }
 }
 
+#[inline]
 fn node_word_size(mask_lo: u32, mask_hi: u32, is_leaf: bool) -> u32 {
     if is_leaf {
         3 + LEAF_DATA_WORDS
@@ -149,6 +195,7 @@ fn fnv_mix(mut hash: u64, word: u32) -> u64 {
     hash
 }
 
+#[inline]
 fn hash_leaf(buf: &[u32], offset: u32) -> u64 {
     let o = offset as usize;
     let mut h = FNV_OFFSET;
@@ -160,7 +207,8 @@ fn hash_leaf(buf: &[u32], offset: u32) -> u64 {
     h
 }
 
-fn hash_inner(buf: &[u32], offset: u32, node_hash: &HashMap<u32, u64>) -> u64 {
+#[inline]
+fn hash_inner(buf: &[u32], offset: u32, node_hash: &FxHashMap<u32, u64>) -> u64 {
     let o = offset as usize;
     let mask_lo = buf[o];
     let mask_hi = buf[o + 1];
@@ -187,7 +235,8 @@ fn hash_inner(buf: &[u32], offset: u32, node_hash: &HashMap<u32, u64>) -> u64 {
     h
 }
 
-fn resolve_canonical(old_to_new: &HashMap<u32, u32>, off: u32) -> u32 {
+#[inline]
+fn resolve_canonical(old_to_new: &FxHashMap<u32, u32>, off: u32) -> u32 {
     debug_assert!(
         old_to_new.contains_key(&off),
         "node at offset {off} was never visited during DFS"
@@ -196,11 +245,11 @@ fn resolve_canonical(old_to_new: &HashMap<u32, u32>, off: u32) -> u32 {
 }
 
 struct DagReduceCtx {
-    old_to_new: HashMap<u32, u32>,
-    level_dedup: Vec<HashMap<u64, u32>>,
-    node_hash: HashMap<u32, u64>,
+    old_to_new: FxHashMap<u32, u32>,
+    level_dedup: Vec<FxHashMap<u64, u32>>,
+    node_hash: FxHashMap<u32, u64>,
     unique_nodes_ordered: Vec<u32>,
-    node_depth: HashMap<u32, usize>,
+    node_depth: FxHashMap<u32, usize>,
 }
 
 fn dfs_post_order(buf: &[u32], offset: u32, remaining_depth: usize, ctx: &mut DagReduceCtx) {

@@ -10,6 +10,7 @@ capy_render = { path = "../render" }
 capy_window = { path = "../window" }
 capy_core = { path = "../core" }
 capy_assets = { path = "../assets" }
+capy_world = { path = "../world" }
 capy_shared = { path = "../shared" }
 
 anyhow.workspace = true

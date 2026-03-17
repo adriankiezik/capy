@@ -41,7 +41,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         if hit.is_lod_hit {
             base = hit.color_override;
         } else {
-            base = render_settings.material_colors[min(hit.material, 7u)].rgb;
+            base = render_settings.material_colors[min(hit.material, 1023u)].rgb;
         }
         textureStore(gbuf_color_out, pixel, vec4<f32>(base, 1.0));
         textureStore(gbuf_normal_out, pixel, vec4<f32>(hit.normal, 1.0));

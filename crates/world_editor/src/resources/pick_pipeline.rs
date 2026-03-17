@@ -18,6 +18,7 @@ pub(crate) struct PickInputUniform {
 
 pub(crate) struct PickPipeline {
     pub compute_pipeline: wgpu::ComputePipeline,
+    bind_group_layout: wgpu::BindGroupLayout,
     pub bind_group: wgpu::BindGroup,
 
     pub pick_input_buffer: wgpu::Buffer,
@@ -89,24 +90,18 @@ impl PickPipeline {
             cache: None,
         });
 
-        let mut bg_entries = capy_render::voxel_scene_bind_group_entries(&camera_buffer, voxels);
-        bg_entries.push(wgpu::BindGroupEntry {
-            binding: 6,
-            resource: pick_input_buffer.as_entire_binding(),
-        });
-        bg_entries.push(wgpu::BindGroupEntry {
-            binding: 7,
-            resource: pick_output_buffer.as_entire_binding(),
-        });
-
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Pick Bind Group"),
-            layout: &bind_group_layout,
-            entries: &bg_entries,
-        });
+        let bind_group = create_pick_bind_group(
+            device,
+            &bind_group_layout,
+            &camera_buffer,
+            &pick_input_buffer,
+            &pick_output_buffer,
+            voxels,
+        );
 
         Self {
             compute_pipeline,
+            bind_group_layout,
             bind_group,
             pick_input_buffer,
             pick_output_buffer,
@@ -114,6 +109,17 @@ impl PickPipeline {
             camera_buffer,
             pending_rx: None,
         }
+    }
+
+    pub(crate) fn rebind(&mut self, device: &wgpu::Device, voxels: &SharedVoxelBuffers) {
+        self.bind_group = create_pick_bind_group(
+            device,
+            &self.bind_group_layout,
+            &self.camera_buffer,
+            &self.pick_input_buffer,
+            &self.pick_output_buffer,
+            voxels,
+        );
     }
 
     pub(crate) fn try_read_result(&mut self) -> Option<VoxelHit> {
@@ -150,4 +156,29 @@ impl PickPipeline {
             Err(std::sync::mpsc::TryRecvError::Disconnected) => None,
         }
     }
+}
+
+fn create_pick_bind_group(
+    device: &wgpu::Device,
+    bind_group_layout: &wgpu::BindGroupLayout,
+    camera_buffer: &wgpu::Buffer,
+    pick_input_buffer: &wgpu::Buffer,
+    pick_output_buffer: &wgpu::Buffer,
+    voxels: &SharedVoxelBuffers,
+) -> wgpu::BindGroup {
+    let mut bg_entries = capy_render::voxel_scene_bind_group_entries(camera_buffer, voxels);
+    bg_entries.push(wgpu::BindGroupEntry {
+        binding: 6,
+        resource: pick_input_buffer.as_entire_binding(),
+    });
+    bg_entries.push(wgpu::BindGroupEntry {
+        binding: 7,
+        resource: pick_output_buffer.as_entire_binding(),
+    });
+
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Pick Bind Group"),
+        layout: bind_group_layout,
+        entries: &bg_entries,
+    })
 }

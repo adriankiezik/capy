@@ -1,7 +1,7 @@
 struct RenderSettingsUniform {
     sun_direction: vec4<f32>,
     sky_color: vec4<f32>,
-    material_colors: array<vec4<f32>, 8>,
+    material_colors: array<vec4<f32>, 1024>,
 
     ambient_light: f32,
     sun_contribution: f32,

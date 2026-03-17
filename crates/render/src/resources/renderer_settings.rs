@@ -1,6 +1,6 @@
 use bevy_ecs::resource::Resource;
 
-pub const MATERIAL_PALETTE_SIZE: usize = 8;
+pub const MATERIAL_PALETTE_SIZE: usize = capy_core::MATERIAL_PALETTE_SIZE;
 
 #[derive(Resource, Clone, Debug)]
 pub struct RendererSettings {
@@ -35,16 +35,7 @@ impl Default for RendererSettings {
             ambient_light: 0.2,
             sun_contribution: 0.8,
             sky_color: [0.4, 0.6, 0.9],
-            material_palette: [
-                [0.0, 0.0, 0.0],
-                [0.8, 0.2, 0.2],
-                [0.2, 0.8, 0.2],
-                [0.2, 0.2, 0.8],
-                [0.8, 0.8, 0.2],
-                [0.8, 0.2, 0.8],
-                [0.2, 0.8, 0.8],
-                [0.8, 0.8, 0.8],
-            ],
+            material_palette: capy_core::MATERIAL_COLORS,
             ray_epsilon: 0.0001,
             max_chunk_steps: 64,
             max_node_steps: 512,

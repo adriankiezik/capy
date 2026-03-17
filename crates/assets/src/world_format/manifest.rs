@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::io::{self, Cursor, Read};
 use std::path::{Path, PathBuf};
 
-use capy_core::RegionCoord;
+use capy_core::{MATERIAL_PALETTE_SIZE, RegionCoord};
 
 use crate::error::{AssetError, Result};
 
@@ -11,7 +11,8 @@ use super::file_system::FileSystem;
 use super::types::{Compression, RegionEntry, WorldManifest};
 
 const MAGIC: [u8; 4] = *b"CAPY";
-const FORMAT_VERSION: u16 = 1;
+const FORMAT_VERSION: u16 = 2;
+const LEGACY_FORMAT_VERSION: u16 = 1;
 
 impl WorldManifest {
     pub fn new(
@@ -65,7 +66,7 @@ impl WorldManifest {
         }
 
         let version = read_u16_le(&mut r)?;
-        if version != FORMAT_VERSION {
+        if version != LEGACY_FORMAT_VERSION && version != FORMAT_VERSION {
             return Err(AssetError::UnsupportedVersion(version));
         }
 
@@ -78,8 +79,20 @@ impl WorldManifest {
         let chunk_size = read_u32_le(&mut r)?;
         let region_dim = read_u32_le(&mut r)?;
 
-        let material_count = read_u8(&mut r)? as usize;
-        let _pad = read_bytes::<3>(&mut r)?;
+        let material_count = if version == LEGACY_FORMAT_VERSION {
+            let raw_mat_count = read_u8(&mut r)?;
+            let material_count = if raw_mat_count == 0 {
+                256usize
+            } else {
+                raw_mat_count as usize
+            };
+            let _pad = read_bytes::<3>(&mut r)?;
+            material_count
+        } else {
+            let material_count = read_u16_le(&mut r)? as usize;
+            let _pad = read_bytes::<2>(&mut r)?;
+            material_count
+        };
 
         let mut material_palette = Vec::with_capacity(material_count);
         for _ in 0..material_count {
@@ -127,11 +140,11 @@ impl WorldManifest {
         write_u32_le(&mut w, self.chunk_size);
         write_u32_le(&mut w, self.region_dim);
 
-        let mat_count = self.material_palette.len().min(255) as u8;
-        write_u8(&mut w, mat_count);
-        write_all(&mut w, &[0u8; 3]);
+        let mat_count = self.material_palette.len().min(MATERIAL_PALETTE_SIZE);
+        write_u16_le(&mut w, mat_count as u16);
+        write_all(&mut w, &[0u8; 2]);
 
-        for color in &self.material_palette[..mat_count as usize] {
+        for color in &self.material_palette[..mat_count] {
             write_f32_le(&mut w, color[0]);
             write_f32_le(&mut w, color[1]);
             write_f32_le(&mut w, color[2]);

@@ -35,6 +35,14 @@ pub(crate) fn init_voxel_scene(world: &mut World) {
         settings,
     );
 
+    let scene = match scene {
+        Ok(scene) => scene,
+        Err(err) => {
+            tracing::error!("Failed to initialize voxel scene buffers: {err}");
+            return;
+        }
+    };
+
     world.insert_resource(scene.shared_voxel_buffers());
     world.insert_non_send_resource(scene);
 }

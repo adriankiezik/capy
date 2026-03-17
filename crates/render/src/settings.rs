@@ -57,7 +57,7 @@ pub(crate) struct RenderSettingsUniform {
     _pad0: f32,
 }
 
-const _: () = assert!(std::mem::size_of::<RenderSettingsUniform>() == 192);
+const _: () = assert!(std::mem::size_of::<RenderSettingsUniform>() == 16448);
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -65,11 +65,11 @@ pub(crate) struct StreamingInfoUniform {
     pub(crate) grid_min_x: i32,
     pub(crate) grid_min_y: i32,
     pub(crate) grid_min_z: i32,
-    pub(crate) grid_dim: u32,
-    pub(crate) chunk_size: u32,
-    pub(crate) pool_slot_count: u32,
-    pub(crate) _pad0: u32,
-    pub(crate) _pad1: u32,
+    pub(crate) grid_dim_x: u32,
+    pub(crate) grid_dim_y: u32,
+    pub(crate) grid_dim_z: u32,
+    pub(crate) chunk_size_xz: u32,
+    pub(crate) chunk_size_y: u32,
 }
 
 const _: () = assert!(std::mem::size_of::<StreamingInfoUniform>() == 32);

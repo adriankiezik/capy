@@ -1,72 +1,45 @@
-use noise::{NoiseFn, Perlin};
-
-use capy_core::BakedChunkData;
+use capy_core::{BakedChunkData, MaterialId};
 
 use crate::bake;
 use crate::error::Result;
 use crate::voxel_grid::VoxelGrid;
 
-pub const CHUNK_SIZE: u32 = 256;
+/// Horizontal chunk extent (X and Z axes).
+pub const CHUNK_XZ: u32 = 256;
 
-pub trait TerrainGenerator {
-    fn generate(&self, seed: u32) -> Result<BakedChunkData>;
-}
+/// Vertical chunk extent (Y axis). Power of 4 for optimal DAG tree alignment.
+pub const CHUNK_Y: u32 = 1024;
 
-pub struct PerlinTerrain {
-    pub height_scale: f64,
-    pub base_height: f64,
-    pub frequency: f64,
-    pub detail_ratio: f64,
-}
+/// Default solid-fill height for unedited flat terrain.
+pub const FLAT_FILL_HEIGHT: u32 = 128;
 
-impl Default for PerlinTerrain {
-    fn default() -> Self {
-        Self {
-            height_scale: 0.45,
-            base_height: 0.25,
-            frequency: 6.0 / 1024.0,
-            detail_ratio: 4.0,
-        }
+/// Material ID used for the flat-fill solid layer (0 = air).
+pub const FLAT_FILL_MATERIAL: MaterialId = 1;
+
+/// Generate a flat-world voxel grid: solid from y=0..FLAT_FILL_HEIGHT, air above.
+pub fn generate_flat_grid() -> Result<(VoxelGrid, Vec<u16>)> {
+    let xs = CHUNK_XZ as usize;
+    let ys = CHUNK_Y as usize;
+    let zs = CHUNK_XZ as usize;
+    let fill = FLAT_FILL_HEIGHT as usize;
+
+    let total = xs * ys * zs;
+    let mut data = vec![0 as MaterialId; total];
+
+    // Fill y=0..fill with contiguous memset per z-slice (256 × 32KB fills vs 8.4M scattered writes)
+    for z in 0..zs {
+        let slice_start = z * xs * ys;
+        let fill_end = slice_start + fill * xs;
+        data[slice_start..fill_end].fill(FLAT_FILL_MATERIAL);
     }
+
+    let col_heights = vec![FLAT_FILL_HEIGHT as u16; xs * zs];
+    let grid = VoxelGrid::new(CHUNK_XZ, CHUNK_Y, CHUNK_XZ, data)?;
+    Ok((grid, col_heights))
 }
 
-impl TerrainGenerator for PerlinTerrain {
-    fn generate(&self, seed: u32) -> Result<BakedChunkData> {
-        let perlin = Perlin::new(seed);
-
-        let cs = CHUNK_SIZE as usize;
-        let global_height = CHUNK_SIZE as f64;
-        let height_scale = global_height * self.height_scale;
-        let base_height = global_height * self.base_height;
-        let freq = self.frequency;
-        let freq2 = freq * self.detail_ratio;
-
-        let mut col_heights = vec![0u16; cs * cs];
-        let total = cs * cs * cs;
-        let mut grid = vec![0u8; total];
-
-        for lz in 0..cs {
-            let wz = lz as f64;
-            let row_base = lz * cs;
-            for lx in 0..cs {
-                let wx = lx as f64;
-
-                let coarse = perlin.get([wx * freq, wz * freq]);
-                let fine = perlin.get([wx * freq2, wz * freq2]);
-                let h = base_height + (coarse * 0.7 + fine * 0.3) * height_scale;
-                let fill = h.clamp(0.0, CHUNK_SIZE as f64) as usize;
-                col_heights[row_base + lx] = fill as u16;
-
-                if fill > 0 {
-                    let base_idx = lx + lz * cs * cs;
-                    for ly in 0..fill.min(cs) {
-                        grid[base_idx + ly * cs] = 1;
-                    }
-                }
-            }
-        }
-
-        let voxel_grid = VoxelGrid::new(CHUNK_SIZE, CHUNK_SIZE, CHUNK_SIZE, grid)?;
-        bake::bake_chunk(&voxel_grid, Some(&col_heights))
-    }
+/// Generate a flat-world chunk, fully baked and ready for rendering.
+pub fn generate_flat_baked() -> Result<BakedChunkData> {
+    let (grid, col_heights) = generate_flat_grid()?;
+    bake::bake_chunk(&grid, Some(&col_heights))
 }

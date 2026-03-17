@@ -3,9 +3,26 @@ use wgpu::util::DeviceExt;
 use capy_core::{Camera, VoxelMeshData};
 
 use crate::camera::CameraUniform;
+use crate::error::{RenderError, Result};
 use crate::resources::RendererSettings;
 use crate::settings::{RenderSettingsUniform, StreamingInfoUniform, to_render_settings_uniform};
 use crate::uniform_buffer::UniformBuffer;
+
+pub struct PreparedVoxelSceneUpload {
+    pool_buffer: wgpu::Buffer,
+    avg_pool_buffer: wgpu::Buffer,
+    indirection_buffer: wgpu::Buffer,
+}
+
+impl PreparedVoxelSceneUpload {
+    pub(crate) fn build(device: &wgpu::Device, mesh: &VoxelMeshData) -> Result<Self> {
+        Ok(Self {
+            pool_buffer: create_storage_buffer(device, "Chunk Pool", &mesh.pool_dag)?,
+            avg_pool_buffer: create_storage_buffer(device, "Avg Color Pool", &mesh.pool_avg)?,
+            indirection_buffer: create_storage_buffer(device, "Indirection", &mesh.indirection)?,
+        })
+    }
+}
 
 pub(crate) struct VoxelSceneBuffers {
     pub(crate) camera_buffer: UniformBuffer<CameraUniform>,
@@ -24,7 +41,7 @@ impl VoxelSceneBuffers {
         width: u32,
         height: u32,
         settings: &RendererSettings,
-    ) -> Self {
+    ) -> Result<Self> {
         let camera_uniform = CameraUniform::from_camera(camera, width, height, settings.lod_bias);
         let camera_buffer = UniformBuffer::new(device, "Camera Uniform", &camera_uniform);
 
@@ -32,45 +49,53 @@ impl VoxelSceneBuffers {
         let render_settings_buffer =
             UniformBuffer::new(device, "Render Settings Uniform", &render_settings_uniform);
 
-        let pool_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Chunk Pool"),
-            contents: bytemuck::cast_slice(&mesh.dag_buffer),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
-
-        let avg_pool_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Avg Color Pool"),
-            contents: bytemuck::cast_slice(&mesh.avg_color_buffer),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
-
-        let indirection_data: [u32; 4] = [mesh.world_size, mesh.root_offset, mesh.depth, 0];
-        let indirection_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Indirection"),
-            contents: bytemuck::cast_slice(&indirection_data),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
+        let upload = PreparedVoxelSceneUpload::build(device, mesh)?;
 
         let streaming_info = StreamingInfoUniform {
-            grid_min_x: 0,
-            grid_min_y: 0,
-            grid_min_z: 0,
-            grid_dim: 1,
-            chunk_size: mesh.chunk_size,
-            pool_slot_count: 1,
-            _pad0: 0,
-            _pad1: 0,
+            grid_min_x: mesh.grid_min[0],
+            grid_min_y: mesh.grid_min[1],
+            grid_min_z: mesh.grid_min[2],
+            grid_dim_x: mesh.grid_dim[0],
+            grid_dim_y: mesh.grid_dim[1],
+            grid_dim_z: mesh.grid_dim[2],
+            chunk_size_xz: mesh.chunk_size_xz,
+            chunk_size_y: mesh.chunk_size_y,
         };
         let streaming_info_buffer = UniformBuffer::new(device, "Streaming Info", &streaming_info);
 
-        Self {
+        Ok(Self {
             camera_buffer,
             render_settings_buffer,
             streaming_info_buffer,
-            pool_buffer,
-            avg_pool_buffer,
-            indirection_buffer,
-        }
+            pool_buffer: upload.pool_buffer,
+            avg_pool_buffer: upload.avg_pool_buffer,
+            indirection_buffer: upload.indirection_buffer,
+        })
+    }
+
+    pub(crate) fn apply_prepared_upload(
+        &mut self,
+        queue: &wgpu::Queue,
+        mesh: &VoxelMeshData,
+        upload: PreparedVoxelSceneUpload,
+    ) -> bool {
+        self.pool_buffer = upload.pool_buffer;
+        self.avg_pool_buffer = upload.avg_pool_buffer;
+        self.indirection_buffer = upload.indirection_buffer;
+
+        let streaming_info = StreamingInfoUniform {
+            grid_min_x: mesh.grid_min[0],
+            grid_min_y: mesh.grid_min[1],
+            grid_min_z: mesh.grid_min[2],
+            grid_dim_x: mesh.grid_dim[0],
+            grid_dim_y: mesh.grid_dim[1],
+            grid_dim_z: mesh.grid_dim[2],
+            chunk_size_xz: mesh.chunk_size_xz,
+            chunk_size_y: mesh.chunk_size_y,
+        };
+        self.streaming_info_buffer.write(queue, &streaming_info);
+
+        true
     }
 
     pub(crate) fn upload_camera(
@@ -99,4 +124,43 @@ impl VoxelSceneBuffers {
             render_settings_buffer: self.render_settings_buffer.buffer().clone(),
         }
     }
+}
+
+fn create_storage_buffer(
+    device: &wgpu::Device,
+    label: &str,
+    contents: &[u32],
+) -> Result<wgpu::Buffer> {
+    validate_storage_buffer_size(device, label, contents)?;
+
+    Ok(
+        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(label),
+            contents: bytemuck::cast_slice(contents),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        }),
+    )
+}
+
+fn validate_storage_buffer_size(
+    device: &wgpu::Device,
+    label: &str,
+    contents: &[u32],
+) -> Result<()> {
+    let bytes = std::mem::size_of_val(contents) as u64;
+    let limits = device.limits();
+    let max_size = limits
+        .max_buffer_size
+        .min(limits.max_storage_buffer_binding_size as u64);
+
+    if bytes > max_size {
+        return Err(RenderError::BufferTooLarge {
+            label: label.to_owned(),
+            size: bytes,
+            max_storage_buffer_binding_size: limits.max_storage_buffer_binding_size,
+            max_buffer_size: limits.max_buffer_size,
+        });
+    }
+
+    Ok(())
 }

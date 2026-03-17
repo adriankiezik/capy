@@ -1,6 +1,22 @@
+mod edit_apply;
 mod editor_startup;
 mod editor_ui;
+mod input_edges;
 pub(crate) mod pick;
+mod prefab_sync;
+mod rebake;
+mod selection;
+mod shortcuts;
+mod undo_redo;
+mod world_save;
 
+pub(crate) use edit_apply::edit_apply;
 pub(crate) use editor_startup::editor_startup;
 pub(crate) use editor_ui::editor_ui;
+pub(crate) use input_edges::input_edges;
+pub(crate) use prefab_sync::prefab_sync;
+pub(crate) use rebake::rebake;
+pub(crate) use selection::selection_system;
+pub(crate) use shortcuts::shortcuts;
+pub(crate) use undo_redo::undo_redo;
+pub(crate) use world_save::world_save;

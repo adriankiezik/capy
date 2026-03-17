@@ -12,4 +12,7 @@ pub const DEFAULT_WORLD_DIR: &str = "assets/worlds/default";
 pub use file_system::{FileSystem, OsFileSystem};
 pub use region_io::{load_region, save_region};
 pub use types::{Compression, CompressionCodec, RegionEntry, WorldManifest};
-pub use world_loader::{load_world_as_mesh_data, open_world_handle, save_generated_world};
+pub use world_loader::{
+    load_world_as_mesh_data, load_world_chunks, open_world_handle, save_edited_world,
+    save_generated_world,
+};

@@ -6,5 +6,6 @@ repo_root="$(git rev-parse --show-toplevel)"
 
 "$repo_root/scripts/check-agent-links.sh"
 
-# Run cargo fmt and fail the commit if code isn't formatted.
-exec cargo fmt --manifest-path "$repo_root/Cargo.toml" --all -- --check
+# Auto-format code and re-stage changed files before committing.
+cargo fmt --manifest-path "$repo_root/Cargo.toml" --all
+git diff --name-only --diff-filter=d | xargs -r git add

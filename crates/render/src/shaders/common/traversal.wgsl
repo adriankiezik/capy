@@ -2,11 +2,11 @@ struct StreamingInfo {
     grid_min_x: i32,
     grid_min_y: i32,
     grid_min_z: i32,
-    grid_dim: u32,
-    chunk_size: u32,
-    pool_slot_count: u32,
-    _pad0: u32,
-    _pad1: u32,
+    grid_dim_x: u32,
+    grid_dim_y: u32,
+    grid_dim_z: u32,
+    chunk_size_xz: u32,
+    chunk_size_y: u32,
 };
 
 struct SlotTreeInfo {
@@ -16,11 +16,11 @@ struct SlotTreeInfo {
     pool_offset: u32,
 };
 
-fn world_to_chunk_coord(world_pos: vec3<f32>, chunk_size: f32) -> vec3<i32> {
+fn world_to_chunk_coord(world_pos: vec3<f32>, cs_xz: f32, cs_y: f32) -> vec3<i32> {
     return vec3<i32>(
-        i32(floor(world_pos.x / chunk_size)),
-        i32(floor(world_pos.y / chunk_size)),
-        i32(floor(world_pos.z / chunk_size)),
+        i32(floor(world_pos.x / cs_xz)),
+        i32(floor(world_pos.y / cs_y)),
+        i32(floor(world_pos.z / cs_xz)),
     );
 }
 
@@ -42,11 +42,13 @@ fn lookup_chunk_info(cc: vec3<i32>) -> SlotTreeInfo {
     let lx = cc.x - streaming.grid_min_x;
     let ly = cc.y - streaming.grid_min_y;
     let lz = cc.z - streaming.grid_min_z;
-    let dim = i32(streaming.grid_dim);
-    if lx < 0 || ly < 0 || lz < 0 || lx >= dim || ly >= dim || lz >= dim {
+    if lx < 0 || ly < 0 || lz < 0
+        || lx >= i32(streaming.grid_dim_x)
+        || ly >= i32(streaming.grid_dim_y)
+        || lz >= i32(streaming.grid_dim_z) {
         return info;
     }
-    let idx = u32(lx) + u32(ly) * streaming.grid_dim + u32(lz) * streaming.grid_dim * streaming.grid_dim;
+    let idx = u32(lx) + u32(ly) * streaming.grid_dim_x + u32(lz) * streaming.grid_dim_x * streaming.grid_dim_y;
     let base = idx * 4u;
     info.world_size = indirection[base];
     info.root_offset = indirection[base + 1u];
@@ -68,10 +70,10 @@ fn get_child_offset_pool(pool_base: u32, node_offset: u32, child_packed_idx: u32
 }
 
 fn get_leaf_material_pool(pool_base: u32, node_offset: u32, bit: u32) -> u32 {
-    let word_idx = bit / 4u;
-    let byte_off = bit % 4u;
+    let word_idx = bit / 2u;
+    let half_off = bit % 2u;
     let word = pool_read(pool_base, node_offset + 3u + word_idx);
-    return (word >> (byte_off * 8u)) & 0xFFu;
+    return (word >> (half_off * 16u)) & 0xFFFFu;
 }
 
 fn get_node_avg_color_pool(pool_base: u32, node_offset: u32) -> vec3<f32> {
@@ -343,7 +345,9 @@ fn trace_ray(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> HitResult {
     result.is_lod_hit = false;
     result.lod_scale_exp = 0u;
 
-    let cs = f32(streaming.chunk_size);
+    let cs_xz = f32(streaming.chunk_size_xz);
+    let cs_y = f32(streaming.chunk_size_y);
+    let cs = vec3<f32>(cs_xz, cs_y, cs_xz);
     var dir = ray_dir;
     let eps_d = 1e-10;
     if abs(dir.x) < eps_d { dir.x = select(-eps_d, eps_d, dir.x >= 0.0); }
@@ -352,16 +356,15 @@ fn trace_ray(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> HitResult {
 
     let inv_dir = 1.0 / dir;
 
-    let grid_dim = i32(streaming.grid_dim);
     let world_min = vec3<f32>(
-        f32(streaming.grid_min_x) * cs,
-        f32(streaming.grid_min_y) * cs,
-        f32(streaming.grid_min_z) * cs,
+        f32(streaming.grid_min_x) * cs_xz,
+        f32(streaming.grid_min_y) * cs_y,
+        f32(streaming.grid_min_z) * cs_xz,
     );
     let world_max = vec3<f32>(
-        f32(streaming.grid_min_x + grid_dim) * cs,
-        f32(streaming.grid_min_y + grid_dim) * cs,
-        f32(streaming.grid_min_z + grid_dim) * cs,
+        f32(i32(streaming.grid_dim_x) + streaming.grid_min_x) * cs_xz,
+        f32(i32(streaming.grid_dim_y) + streaming.grid_min_y) * cs_y,
+        f32(i32(streaming.grid_dim_z) + streaming.grid_min_z) * cs_xz,
     );
 
     let t_world = intersect_aabb(ray_origin, dir, world_min, world_max);
@@ -375,7 +378,7 @@ fn trace_ray(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> HitResult {
     let first_entry = ray_origin + dir * (t_current + ray_eps);
     var cc = world_to_chunk_coord(
         clamp(first_entry, world_min + vec3<f32>(0.001), world_max - vec3<f32>(0.001)),
-        cs,
+        cs_xz, cs_y,
     );
 
     let step = vec3<i32>(
@@ -383,12 +386,12 @@ fn trace_ray(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> HitResult {
         select(-1, 1, dir.y > 0.0),
         select(-1, 1, dir.z > 0.0),
     );
-    let t_delta = abs(vec3<f32>(cs) * inv_dir);
+    let t_delta = abs(cs * inv_dir);
 
     var t_max = vec3<f32>(
-        (f32(cc.x + select(0, 1, dir.x > 0.0)) * cs - ray_origin.x) * inv_dir.x,
-        (f32(cc.y + select(0, 1, dir.y > 0.0)) * cs - ray_origin.y) * inv_dir.y,
-        (f32(cc.z + select(0, 1, dir.z > 0.0)) * cs - ray_origin.z) * inv_dir.z,
+        (f32(cc.x + select(0, 1, dir.x > 0.0)) * cs_xz - ray_origin.x) * inv_dir.x,
+        (f32(cc.y + select(0, 1, dir.y > 0.0)) * cs_y - ray_origin.y) * inv_dir.y,
+        (f32(cc.z + select(0, 1, dir.z > 0.0)) * cs_xz - ray_origin.z) * inv_dir.z,
     );
 
     var entry_axis: i32 = -1;
@@ -401,12 +404,12 @@ fn trace_ray(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> HitResult {
 
             if camera.lod_bias > 0.0 {
                 let chunk_center = vec3<f32>(
-                    (f32(cc.x) + 0.5) * cs,
-                    (f32(cc.y) + 0.5) * cs,
-                    (f32(cc.z) + 0.5) * cs,
+                    (f32(cc.x) + 0.5) * cs_xz,
+                    (f32(cc.y) + 0.5) * cs_y,
+                    (f32(cc.z) + 0.5) * cs_xz,
                 );
                 let dist = max(length(chunk_center - ray_origin), 1.0);
-                let projected = cs / dist;
+                let projected = cs_xz / dist;
                 if projected < camera.pixel_size * camera.lod_bias * render_settings.chunk_lod_scale {
                     let pool_base = info.pool_offset;
                     let avg_color = get_node_avg_color_pool(pool_base, info.root_offset);
@@ -423,7 +426,7 @@ fn trace_ray(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> HitResult {
             }
 
             let pool_base = info.pool_offset;
-            let chunk_min = vec3<f32>(f32(cc.x) * cs, f32(cc.y) * cs, f32(cc.z) * cs);
+            let chunk_min = vec3<f32>(f32(cc.x) * cs_xz, f32(cc.y) * cs_y, f32(cc.z) * cs_xz);
             let local_origin = ray_origin - chunk_min;
 
             let chunk_hit = traverse_chunk(
