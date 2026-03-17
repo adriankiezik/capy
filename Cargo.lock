@@ -595,6 +595,7 @@ dependencies = [
  "capy_render",
  "capy_ui",
  "capy_window",
+ "egui",
  "wgpu",
 ]
 

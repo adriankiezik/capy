@@ -21,6 +21,7 @@ pub(crate) use gpu_context::GpuContext;
 pub(crate) use gtao::GtaoPipeline;
 pub(crate) use lighting::LightingPipeline;
 pub use render_overlay_callbacks::{RenderOverlayCallback, RenderOverlayCallbacks};
+pub(crate) use renderer_settings::compute_scaled_resolution;
 pub use renderer_settings::{MATERIAL_PALETTE_SIZE, RendererSettings};
 pub use shared_voxel_buffers::SharedVoxelBuffers;
 pub use voxel_scene::PreparedVoxelSceneUpload;

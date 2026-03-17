@@ -26,14 +26,8 @@ pub(crate) fn init_voxel_scene(world: &mut World) {
     let settings = world.resource::<RendererSettings>();
     let gpu = world.non_send_resource::<GpuContext>();
 
-    let scene = VoxelSceneBuffers::new(
-        &gpu.device,
-        mesh,
-        camera,
-        gpu.config.width,
-        gpu.config.height,
-        settings,
-    );
+    let (sw, sh) = settings.scaled_resolution(gpu.config.width, gpu.config.height);
+    let scene = VoxelSceneBuffers::new(&gpu.device, mesh, camera, sw, sh, settings);
 
     let scene = match scene {
         Ok(scene) => scene,

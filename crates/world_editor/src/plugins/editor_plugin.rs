@@ -33,6 +33,7 @@ impl capy_core::Plugin for EditorPlugin {
                 systems::edit_apply,
                 systems::undo_redo,
                 systems::editor_ui,
+                capy_shared::graphics_settings_ui,
                 systems::rebake,
                 systems::world_save,
             )

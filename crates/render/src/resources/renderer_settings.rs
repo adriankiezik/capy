@@ -22,6 +22,10 @@ pub struct RendererSettings {
     pub ao_intensity: f32,
     pub ao_samples: u32,
     pub ao_steps: u32,
+
+    /// Internal render resolution as a fraction of window size.
+    /// 1.0 = native, 0.5 = half resolution, 0.25 = quarter resolution.
+    pub render_scale: f32,
 }
 
 impl RendererSettings {
@@ -51,6 +55,26 @@ impl Default for RendererSettings {
             ao_intensity: 1.0,
             ao_samples: 4,
             ao_steps: 4,
+            render_scale: 0.25,
         }
     }
+}
+
+impl RendererSettings {
+    /// Compute the internal render resolution from window dimensions and render_scale.
+    pub fn scaled_resolution(&self, window_width: u32, window_height: u32) -> (u32, u32) {
+        compute_scaled_resolution(window_width, window_height, self.render_scale)
+    }
+}
+
+/// Compute internal render resolution from window dimensions and a scale factor.
+pub(crate) fn compute_scaled_resolution(
+    window_width: u32,
+    window_height: u32,
+    render_scale: f32,
+) -> (u32, u32) {
+    let scale = render_scale.clamp(0.1, 1.0);
+    let w = ((window_width as f32) * scale).round() as u32;
+    let h = ((window_height as f32) * scale).round() as u32;
+    (w.max(1), h.max(1))
 }

@@ -36,10 +36,10 @@ pub(crate) fn editor_ui(
         display_resolution: entry.display_resolution(),
     });
 
-    egui::SidePanel::left("editor_panel")
-        .default_width(240.0)
+    egui::Window::new("World Editor")
+        .default_open(true)
+        .resizable(false)
         .show(&egui_ctx.0, |ui| {
-            ui.heading("World Editor");
             if ui.button("Save World (Ctrl+S)").clicked() {
                 save_state.requested = true;
             }

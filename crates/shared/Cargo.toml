@@ -11,6 +11,7 @@ capy_ui = { path = "../ui" }
 capy_window = { path = "../window" }
 
 bevy_ecs.workspace = true
+egui.workspace = true
 wgpu.workspace = true
 
 [lints]

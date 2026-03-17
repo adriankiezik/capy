@@ -61,6 +61,8 @@ pub(crate) struct BlitPipeline {
     blit_sampler: wgpu::Sampler,
     pub(crate) width: u32,
     pub(crate) height: u32,
+    pub(crate) source_width: u32,
+    pub(crate) source_height: u32,
 }
 
 impl BlitPipeline {
@@ -112,8 +114,8 @@ impl BlitPipeline {
 
         let blit_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("Blit Sampler"),
-            mag_filter: wgpu::FilterMode::Nearest,
-            min_filter: wgpu::FilterMode::Nearest,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
 
@@ -126,6 +128,8 @@ impl BlitPipeline {
             blit_sampler,
             width,
             height,
+            source_width: width,
+            source_height: height,
         }
     }
 

@@ -1,7 +1,10 @@
 use bevy_ecs::system::{NonSendMut, Res};
 
 use crate::resources::trace::TracePipeline;
-use crate::resources::{GpuContext, GtaoPipeline, LightingPipeline, SharedVoxelBuffers};
+use crate::resources::{
+    GpuContext, GtaoPipeline, LightingPipeline, RendererSettings, SharedVoxelBuffers,
+    compute_scaled_resolution,
+};
 
 pub(crate) fn resize_lighting_system(
     gpu: NonSendMut<GpuContext>,
@@ -9,13 +12,16 @@ pub(crate) fn resize_lighting_system(
     gtao: Option<NonSendMut<GtaoPipeline>>,
     lighting: Option<NonSendMut<LightingPipeline>>,
     voxels: Option<Res<SharedVoxelBuffers>>,
+    settings: Option<Res<RendererSettings>>,
 ) {
     let (Some(trace), Some(gtao), Some(mut lighting), Some(voxels)) =
         (trace, gtao, lighting, voxels)
     else {
         return;
     };
-    if lighting.width != gpu.config.width || lighting.height != gpu.config.height {
+    let scale = settings.as_deref().map_or(1.0, |s| s.render_scale);
+    let (sw, sh) = compute_scaled_resolution(gpu.config.width, gpu.config.height, scale);
+    if lighting.width != sw || lighting.height != sh {
         lighting.resize(
             &gpu.device,
             &trace.gbuf_color,
@@ -23,7 +29,7 @@ pub(crate) fn resize_lighting_system(
             &trace.gbuf_depth,
             &voxels.render_settings_buffer,
             &gtao.ao_output,
-            [gpu.config.width, gpu.config.height],
+            [sw, sh],
         );
     }
 }

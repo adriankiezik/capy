@@ -12,14 +12,15 @@ pub(crate) fn init_gtao(world: &mut World) {
     let voxels = world.resource::<SharedVoxelBuffers>();
     let gpu = world.non_send_resource::<GpuContext>();
     let settings = world.resource::<RendererSettings>();
+    let (sw, sh) = settings.scaled_resolution(gpu.config.width, gpu.config.height);
 
     let pipeline = GtaoPipeline::new(
         &gpu.device,
         &trace.gbuf_depth,
         &trace.gbuf_normal,
         &voxels.camera_buffer,
-        gpu.config.width,
-        gpu.config.height,
+        sw,
+        sh,
         settings,
     );
 
