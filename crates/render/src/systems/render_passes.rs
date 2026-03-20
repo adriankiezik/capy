@@ -1,9 +1,9 @@
 use bevy_ecs::error::BevyError;
 use bevy_ecs::system::NonSendMut;
-#[cfg(feature = "dlss")]
+#[cfg(any(feature = "dlss", feature = "fsr"))]
 use bevy_ecs::system::{Res, ResMut};
 
-#[cfg(feature = "dlss")]
+#[cfg(any(feature = "dlss", feature = "fsr"))]
 use crate::resources::TemporalCameraState;
 use crate::resources::trace::TracePipeline;
 #[cfg(feature = "dlss")]
@@ -11,6 +11,8 @@ use crate::resources::{AoMode, DlssPipeline, DlssSettings, RendererSettings, Rta
 use crate::resources::{
     BlitPipeline, FrameInProgress, GpuContext, GpuProfiler, GtaoPipeline, LightingPipeline,
 };
+#[cfg(feature = "fsr")]
+use crate::resources::{FsrPipeline, FsrSettings};
 
 pub(crate) fn render_passes_system(
     gpu: NonSendMut<GpuContext>,
@@ -18,11 +20,13 @@ pub(crate) fn render_passes_system(
     gtao: Option<NonSendMut<GtaoPipeline>>,
     lighting: Option<NonSendMut<LightingPipeline>>,
     blit: Option<NonSendMut<BlitPipeline>>,
-    #[cfg(feature = "dlss")] temporal: Res<TemporalCameraState>,
+    #[cfg(any(feature = "dlss", feature = "fsr"))] temporal: Res<TemporalCameraState>,
     #[cfg(feature = "dlss")] dlss: Option<NonSendMut<DlssPipeline>>,
     #[cfg(feature = "dlss")] mut dlss_settings: Option<ResMut<DlssSettings>>,
     #[cfg(feature = "dlss")] rtao: Option<NonSendMut<RtaoPipeline>>,
     #[cfg(feature = "dlss")] renderer_settings: Option<Res<RendererSettings>>,
+    #[cfg(feature = "fsr")] fsr: Option<NonSendMut<FsrPipeline>>,
+    #[cfg(feature = "fsr")] mut fsr_settings: Option<ResMut<FsrSettings>>,
     mut frame: NonSendMut<FrameInProgress>,
     mut gpu_profiler: NonSendMut<GpuProfiler>,
 ) -> Result<(), BevyError> {
@@ -148,55 +152,90 @@ pub(crate) fn render_passes_system(
         pass.dispatch_workgroups(lighting.width.div_ceil(8), lighting.height.div_ceil(8), 1);
     }
 
-    // Resolve GPU timestamp queries before the DLSS encoder split.
+    // Resolve GPU timestamp queries before the upscaler encoder split.
     gpu_profiler.resolve(&mut encoder);
 
+    // Track whether an upscaler produced a command buffer (for the encoder split).
+    let mut upscaler_cmd_buf: Option<wgpu::CommandBuffer> = None;
+
     #[cfg(feature = "dlss")]
-    if let Some(mut dlss) = dlss {
-        let reset = match dlss_settings.as_mut() {
-            Some(settings) if settings.enabled && settings.reset => {
-                settings.reset = false;
-                true
-            }
-            _ => false,
-        };
-        let jitter = temporal.current_jitter();
+    if upscaler_cmd_buf.is_none() {
+        if let Some(mut dlss) = dlss {
+            let reset = match dlss_settings.as_mut() {
+                Some(settings) if settings.enabled && settings.reset => {
+                    settings.reset = false;
+                    true
+                }
+                _ => false,
+            };
+            let jitter = temporal.current_jitter();
 
-        // Try Ray Reconstruction first, then Super Resolution
-        let dlss_cmd_buf = if dlss.rr_output_texture().is_some() {
-            dlss.render_ray_reconstruction(
-                &mut encoder,
-                &gpu.adapter,
-                &trace.gbuf_color.view,
-                &trace.gbuf_normal.view,
-                &lighting.output_color.view,
-                &trace.dlss_depth.view,
-                &trace.motion_vectors.view,
-                reset,
-                jitter,
-            )?
-        } else if dlss.output_texture().is_some() {
-            dlss.render(
-                &mut encoder,
-                &gpu.adapter,
-                &lighting.output_color.view,
-                &trace.dlss_depth.view,
-                &trace.motion_vectors.view,
-                reset,
-                jitter,
-            )?
-        } else {
-            None
-        };
+            // Try Ray Reconstruction first, then Super Resolution
+            let dlss_cmd_buf = if dlss.rr_output_texture().is_some() {
+                dlss.render_ray_reconstruction(
+                    &mut encoder,
+                    &gpu.adapter,
+                    &trace.gbuf_color.view,
+                    &trace.gbuf_normal.view,
+                    &lighting.output_color.view,
+                    &trace.dlss_depth.view,
+                    &trace.motion_vectors.view,
+                    reset,
+                    jitter,
+                )?
+            } else if dlss.output_texture().is_some() {
+                dlss.render(
+                    &mut encoder,
+                    &gpu.adapter,
+                    &lighting.output_color.view,
+                    &trace.dlss_depth.view,
+                    &trace.motion_vectors.view,
+                    reset,
+                    jitter,
+                )?
+            } else {
+                None
+            };
 
-        if let Some(cmd_buf) = dlss_cmd_buf {
-            gpu.queue.submit([encoder.finish(), cmd_buf]);
-            encoder = gpu
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Post-DLSS Encoder"),
-                });
+            upscaler_cmd_buf = dlss_cmd_buf;
         }
+    }
+
+    #[cfg(feature = "fsr")]
+    if upscaler_cmd_buf.is_none() {
+        if let Some(mut fsr) = fsr {
+            if fsr.output_texture().is_some() {
+                let reset = match fsr_settings.as_mut() {
+                    Some(settings) if settings.enabled && settings.reset => {
+                        settings.reset = false;
+                        true
+                    }
+                    _ => false,
+                };
+                let jitter = temporal.current_jitter();
+
+                let fsr_cmd_buf = fsr.render(
+                    &mut encoder,
+                    &gpu.adapter,
+                    &lighting.output_color.view,
+                    &trace.dlss_depth.view,
+                    &trace.motion_vectors.view,
+                    reset,
+                    jitter,
+                    16.6, // TODO: pass actual frame delta time
+                )?;
+                upscaler_cmd_buf = fsr_cmd_buf;
+            }
+        }
+    }
+
+    if let Some(cmd_buf) = upscaler_cmd_buf {
+        gpu.queue.submit([encoder.finish(), cmd_buf]);
+        encoder = gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Post-Upscaler Encoder"),
+            });
     }
 
     {

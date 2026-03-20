@@ -24,12 +24,12 @@ impl Default for TemporalCameraState {
 }
 
 impl TemporalCameraState {
-    #[cfg(feature = "dlss")]
+    #[cfg(any(feature = "dlss", feature = "fsr"))]
     pub(crate) fn frame_index(&self) -> u32 {
         self.frame_index
     }
 
-    #[cfg(feature = "dlss")]
+    #[cfg(any(feature = "dlss", feature = "fsr"))]
     pub(crate) fn current_jitter(&self) -> [f32; 2] {
         self.current_jitter
     }

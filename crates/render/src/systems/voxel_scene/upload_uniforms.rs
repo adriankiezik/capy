@@ -1,5 +1,5 @@
 use bevy_ecs::change_detection::DetectChanges;
-#[cfg(feature = "dlss")]
+#[cfg(any(feature = "dlss", feature = "fsr"))]
 use bevy_ecs::system::NonSend;
 use bevy_ecs::system::{NonSendMut, Res, ResMut};
 use capy_core::Camera;
@@ -8,6 +8,8 @@ use crate::camera::clip_from_world;
 use crate::resources::voxel_scene::VoxelSceneBuffers;
 #[cfg(feature = "dlss")]
 use crate::resources::{DlssPipeline, DlssSettings};
+#[cfg(feature = "fsr")]
+use crate::resources::{FsrPipeline, FsrSettings};
 use crate::resources::{
     GpuContext, GtaoPipeline, RenderResolution, RendererSettings, TemporalCameraState,
 };
@@ -22,6 +24,8 @@ pub(crate) fn upload_uniforms_system(
     mut temporal: ResMut<TemporalCameraState>,
     #[cfg(feature = "dlss")] dlss: Option<NonSend<DlssPipeline>>,
     #[cfg(feature = "dlss")] dlss_settings: Option<Res<DlssSettings>>,
+    #[cfg(feature = "fsr")] fsr: Option<NonSend<FsrPipeline>>,
+    #[cfg(feature = "fsr")] fsr_settings: Option<Res<FsrSettings>>,
 ) {
     let Some(scene) = scene else {
         return;
@@ -36,14 +40,34 @@ pub(crate) fn upload_uniforms_system(
         {
             temporal.reset_history();
         }
-
-        #[cfg(feature = "dlss")]
-        let jitter = dlss
+        #[cfg(feature = "fsr")]
+        if fsr_settings
             .as_deref()
-            .and_then(|dlss| dlss.suggested_jitter(temporal.frame_index()))
-            .unwrap_or([0.0, 0.0]);
-        #[cfg(not(feature = "dlss"))]
-        let jitter = [0.0, 0.0];
+            .is_some_and(|settings| settings.reset)
+        {
+            temporal.reset_history();
+        }
+
+        // Get jitter from the active upscaler. DLSS takes priority over FSR.
+        let mut jitter = [0.0, 0.0];
+        #[cfg(feature = "dlss")]
+        {
+            if let Some(dlss_jitter) = dlss
+                .as_deref()
+                .and_then(|dlss| dlss.suggested_jitter(temporal.frame_index()))
+            {
+                jitter = dlss_jitter;
+            }
+        }
+        #[cfg(feature = "fsr")]
+        if jitter == [0.0, 0.0] {
+            if let Some(fsr_jitter) = fsr
+                .as_deref()
+                .and_then(|fsr| fsr.suggested_jitter(temporal.frame_index()))
+            {
+                jitter = fsr_jitter;
+            }
+        }
 
         let current_clip_from_world = clip_from_world(&camera).to_cols_array();
         let previous_clip_from_world = temporal.previous_clip_from_world(current_clip_from_world);

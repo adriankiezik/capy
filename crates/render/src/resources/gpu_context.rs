@@ -4,7 +4,7 @@ use crate::{RenderError, Result};
 
 pub(crate) struct GpuContext {
     pub(crate) surface: wgpu::Surface<'static>,
-    #[cfg(feature = "dlss")]
+    #[cfg(any(feature = "dlss", feature = "fsr"))]
     pub(crate) adapter: wgpu::Adapter,
     pub(crate) device: wgpu::Device,
     pub(crate) queue: wgpu::Queue,
@@ -78,6 +78,7 @@ impl GpuContext {
             (surface, adapter, device, queue, timestamp_supported)
         };
 
+        #[allow(unused_variables)]
         let caps = surface.get_capabilities(&adapter);
         let format = caps
             .formats
@@ -105,7 +106,7 @@ impl GpuContext {
 
         Ok(Self {
             surface,
-            #[cfg(feature = "dlss")]
+            #[cfg(any(feature = "dlss", feature = "fsr"))]
             adapter,
             device,
             queue,

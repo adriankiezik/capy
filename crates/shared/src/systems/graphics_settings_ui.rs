@@ -6,6 +6,9 @@ use capy_ui::EguiContext;
 #[cfg(feature = "dlss")]
 use capy_render::{AoMode, DlssQualityMode, DlssSettings};
 
+#[cfg(feature = "fsr")]
+use capy_render::{FsrQualityMode, FsrSettings};
+
 pub fn graphics_settings_ui(world: &mut World) {
     let ctx = world.resource::<EguiContext>().0.clone();
     let dt = world.resource::<FrameTime>().dt;
@@ -14,6 +17,9 @@ pub fn graphics_settings_ui(world: &mut World) {
     #[cfg(feature = "dlss")]
     let mut dlss = world.get_resource::<DlssSettings>().cloned();
 
+    #[cfg(feature = "fsr")]
+    let mut fsr = world.get_resource::<FsrSettings>().cloned();
+
     egui::Window::new("Graphics")
         .default_open(false)
         .resizable(false)
@@ -21,16 +27,24 @@ pub fn graphics_settings_ui(world: &mut World) {
             fps_ui(ui, dt);
             ui.separator();
 
+            // --- Upscaling section ---
             #[cfg(feature = "dlss")]
             let dlss_active = dlss_ui(ui, &mut dlss);
             #[cfg(not(feature = "dlss"))]
             let dlss_active = false;
 
-            if dlss_active {
+            #[cfg(feature = "fsr")]
+            let fsr_active = fsr_ui(ui, &mut fsr, dlss_active);
+            #[cfg(not(feature = "fsr"))]
+            let fsr_active = false;
+
+            let upscaler_active = dlss_active || fsr_active;
+
+            if upscaler_active {
                 ui.separator();
             }
 
-            if !dlss_active {
+            if !upscaler_active {
                 render_scale_ui(ui, &mut settings);
                 ui.separator();
             }
@@ -48,6 +62,13 @@ pub fn graphics_settings_ui(world: &mut World) {
     if let Some(dlss) = dlss {
         if let Some(mut resource) = world.get_resource_mut::<DlssSettings>() {
             *resource = dlss;
+        }
+    }
+
+    #[cfg(feature = "fsr")]
+    if let Some(fsr) = fsr {
+        if let Some(mut resource) = world.get_resource_mut::<FsrSettings>() {
+            *resource = fsr;
         }
     }
 }
@@ -99,6 +120,56 @@ fn dlss_ui(ui: &mut egui::Ui, dlss: &mut Option<DlssSettings>) -> bool {
                 .clicked()
             {
                 settings.perf_quality = mode;
+            }
+        }
+    });
+
+    true
+}
+
+#[cfg(feature = "fsr")]
+fn fsr_ui(ui: &mut egui::Ui, fsr: &mut Option<FsrSettings>, dlss_active: bool) -> bool {
+    let Some(settings) = fsr.as_mut() else {
+        return false;
+    };
+
+    ui.label("FSR 2");
+
+    if !settings.supported {
+        ui.checkbox(&mut settings.enabled, "Enabled");
+        ui.weak("(not supported — Vulkan backend required)");
+        return false;
+    }
+
+    if dlss_active {
+        // DLSS takes priority — disable FSR automatically.
+        settings.enabled = false;
+        ui.add_enabled(false, egui::Checkbox::new(&mut settings.enabled, "Enabled"));
+        ui.weak("(disabled — DLSS active)");
+        return false;
+    }
+
+    ui.checkbox(&mut settings.enabled, "Enabled");
+
+    if !settings.enabled {
+        return false;
+    }
+
+    ui.horizontal(|ui| {
+        let modes = [
+            (FsrQualityMode::Auto, "Auto"),
+            (FsrQualityMode::NativeAA, "Native AA"),
+            (FsrQualityMode::Quality, "Quality"),
+            (FsrQualityMode::Balanced, "Balanced"),
+            (FsrQualityMode::Performance, "Perf"),
+            (FsrQualityMode::UltraPerformance, "Ultra"),
+        ];
+        for (mode, label) in modes {
+            if ui
+                .selectable_label(settings.quality == mode, label)
+                .clicked()
+            {
+                settings.quality = mode;
             }
         }
     });

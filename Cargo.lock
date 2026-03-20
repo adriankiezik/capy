@@ -620,6 +620,8 @@ dependencies = [
  "bytemuck",
  "capy_core",
  "cc",
+ "fsr",
+ "fsr-sys",
  "glam",
  "pollster",
  "thiserror 2.0.18",
@@ -1314,6 +1316,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
 dependencies = [
  "percent-encoding",
+]
+
+[[package]]
+name = "fsr"
+version = "0.1.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a022a701f59daa742dd6acad0c915968d57a75a7ab55ab842aff236369360de6"
+dependencies = [
+ "ash",
+ "bitflags 2.11.0",
+ "fsr-sys",
+ "thiserror 1.0.69",
+ "widestring",
+]
+
+[[package]]
+name = "fsr-sys"
+version = "0.1.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d311e166b0409451241530ee1b653523286d97b9906f6718d3c36831316dc89"
+dependencies = [
+ "cc",
+ "glob",
+ "widestring",
 ]
 
 [[package]]
@@ -4030,6 +4056,12 @@ dependencies = [
  "log",
  "web-sys",
 ]
+
+[[package]]
+name = "widestring"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72069c3113ab32ab29e5584db3c6ec55d416895e60715417b5b883a357c3e471"
 
 [[package]]
 name = "winapi-util"

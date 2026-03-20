@@ -6,6 +6,7 @@ build = "build.rs"
 
 [features]
 dlss = ["dep:ash", "dep:uuid", "dep:bitflags", "dep:bindgen", "dep:cc"]
+fsr = ["dep:ash", "dep:fsr", "dep:fsr-sys"]
 
 [dependencies]
 capy_core = { path = "../core" }
@@ -20,6 +21,8 @@ tracing.workspace = true
 uuid = { workspace = true, optional = true }
 ash = { version = "0.38", optional = true }
 bitflags = { version = "2", optional = true }
+fsr = { version = "0.1", optional = true, features = ["vulkan"] }
+fsr-sys = { version = "0.1", optional = true }
 
 [build-dependencies]
 bindgen = { version = "0.72", optional = true }

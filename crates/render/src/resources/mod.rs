@@ -3,6 +3,8 @@ mod compute_pass_callbacks;
 #[cfg(feature = "dlss")]
 mod dlss;
 mod frame_in_progress;
+#[cfg(feature = "fsr")]
+mod fsr;
 mod gpu_access;
 mod gpu_context;
 mod gpu_profiler;
@@ -28,6 +30,10 @@ pub(crate) use dlss::DlssPipeline;
 #[cfg(feature = "dlss")]
 pub use dlss::{DlssQualityMode, DlssSettings};
 pub(crate) use frame_in_progress::FrameInProgress;
+#[cfg(feature = "fsr")]
+pub(crate) use fsr::FsrPipeline;
+#[cfg(feature = "fsr")]
+pub use fsr::{FsrQualityMode, FsrSettings};
 pub use gpu_access::GpuAccess;
 pub(crate) use gpu_context::GpuContext;
 pub(crate) use gpu_profiler::GpuProfiler;

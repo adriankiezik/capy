@@ -16,6 +16,8 @@ impl capy_core::Plugin for GamePlugin {
         });
         #[cfg(feature = "dlss")]
         insert_dlss_settings(world);
+        #[cfg(feature = "fsr")]
+        world.insert_resource(capy_render::FsrSettings::default());
 
         let mut schedules = world.get_resource_or_init::<Schedules>();
         schedules

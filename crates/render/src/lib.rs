@@ -3,6 +3,8 @@ mod camera;
 #[allow(dead_code, unused_imports)]
 mod dlss;
 mod error;
+#[cfg(feature = "fsr")]
+mod fsr;
 mod gpu_texture;
 mod pipeline_factory;
 mod plugins;
@@ -23,6 +25,8 @@ pub use resources::{
 };
 #[cfg(feature = "dlss")]
 pub use resources::{DlssQualityMode, DlssSettings};
+#[cfg(feature = "fsr")]
+pub use resources::{FsrQualityMode, FsrSettings};
 pub use shader_source::create_compute_shader;
 pub use systems::voxel_scene::{
     apply_prepared_voxel_scene_upload, prepare_voxel_scene_upload, rebuild_voxel_scene,

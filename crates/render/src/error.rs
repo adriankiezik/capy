@@ -31,6 +31,10 @@ pub enum RenderError {
     #[cfg(feature = "dlss")]
     #[error(transparent)]
     Dlss(#[from] crate::dlss::DlssError),
+
+    #[cfg(feature = "fsr")]
+    #[error(transparent)]
+    Fsr(#[from] crate::fsr::FsrError),
 }
 
 pub type Result<T> = std::result::Result<T, RenderError>;
