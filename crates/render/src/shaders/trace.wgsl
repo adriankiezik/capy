@@ -76,7 +76,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     );
     let ray_origin = camera.camera_pos;
 
+    // Trace voxels first, then grass with the voxel hit as a depth ceiling
     let hit = trace_ray(ray_origin, ray_dir);
+    let voxel_t = select(1e20, length(hit.hit_pos_local - ray_origin), hit.hit);
+    let grass = trace_grass_ray(ray_origin, ray_dir, camera.time, voxel_t);
+    let use_grass = grass.hit;
 
     let pixel_idx = actual_y * u32(camera.resolution.x) + actual_x;
     if pixel_idx < arrayLength(&lod_debug_buf) {
@@ -86,7 +90,36 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let pixel = vec2<i32>(i32(actual_x), i32(actual_y));
     var shadow_ray_count = 0u;
     var shadow_blocked_count = 0u;
-    if hit.hit {
+
+    if use_grass {
+        // Grass blade is in front of any voxel
+        let base = grass.color;
+        let shading_pos = grass.pos;
+        let shading_normal = grass.normal;
+
+        var shadow = 1.0;
+        if render_settings.sun_contribution > 0.0 {
+            let sun_dir = normalize(render_settings.sun_direction.xyz);
+            let shadow_origin = shading_pos + shading_normal * render_settings.ray_epsilon;
+            let in_shadow = trace_shadow_ray(shadow_origin, sun_dir);
+            shadow_ray_count = 1u;
+            shadow_blocked_count = select(0u, 1u, in_shadow);
+            shadow = select(1.0, 0.0, in_shadow);
+        }
+        let clip_pos = camera.clip_from_world * vec4<f32>(shading_pos, 1.0);
+        let prev_clip_pos = camera.prev_clip_from_world * vec4<f32>(shading_pos, 1.0);
+        let curr_ndc = clip_pos.xy / clip_pos.w;
+        let prev_ndc = prev_clip_pos.xy / prev_clip_pos.w;
+        let motion = (curr_ndc - prev_ndc) * vec2<f32>(0.5, -0.5);
+        let hardware_depth = clamp(clip_pos.z / clip_pos.w, 0.0, 1.0);
+
+        textureStore(gbuf_color_out, pixel, vec4<f32>(base, shadow));
+        textureStore(gbuf_normal_out, pixel, vec4<f32>(shading_normal, 1.0));
+        let depth_val = length(shading_pos - ray_origin);
+        textureStore(gbuf_depth_out, pixel, vec4<f32>(depth_val, 0.0, 0.0, 0.0));
+        textureStore(dlss_depth_out, pixel, vec4<f32>(hardware_depth, 0.0, 0.0, 0.0));
+        textureStore(motion_vectors_out, pixel, vec4<f32>(motion, 0.0, 0.0));
+    } else if hit.hit {
         var base: vec3<f32>;
         if hit.is_lod_hit {
             base = hit.color_override;
@@ -94,25 +127,28 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             base = render_settings.material_colors[min(hit.material, 1023u)].rgb;
         }
 
+        let shading_pos = hit.hit_pos_local;
+        let shading_normal = hit.normal;
+
         var shadow = 1.0;
         if render_settings.sun_contribution > 0.0 {
             let sun_dir = normalize(render_settings.sun_direction.xyz);
-            let shadow_origin = hit.hit_pos_local + hit.normal * render_settings.ray_epsilon;
+            let shadow_origin = shading_pos + shading_normal * render_settings.ray_epsilon;
             let in_shadow = trace_shadow_ray(shadow_origin, sun_dir);
             shadow_ray_count = 1u;
             shadow_blocked_count = select(0u, 1u, in_shadow);
             shadow = select(1.0, 0.0, in_shadow);
         }
-        let clip_pos = camera.clip_from_world * vec4<f32>(hit.hit_pos_local, 1.0);
-        let prev_clip_pos = camera.prev_clip_from_world * vec4<f32>(hit.hit_pos_local, 1.0);
+        let clip_pos = camera.clip_from_world * vec4<f32>(shading_pos, 1.0);
+        let prev_clip_pos = camera.prev_clip_from_world * vec4<f32>(shading_pos, 1.0);
         let curr_ndc = clip_pos.xy / clip_pos.w;
         let prev_ndc = prev_clip_pos.xy / prev_clip_pos.w;
         let motion = (curr_ndc - prev_ndc) * vec2<f32>(0.5, -0.5);
         let hardware_depth = clamp(clip_pos.z / clip_pos.w, 0.0, 1.0);
 
         textureStore(gbuf_color_out, pixel, vec4<f32>(base, shadow));
-        textureStore(gbuf_normal_out, pixel, vec4<f32>(hit.normal, 1.0));
-        let depth_val = length(hit.hit_pos_local - ray_origin);
+        textureStore(gbuf_normal_out, pixel, vec4<f32>(shading_normal, 1.0));
+        let depth_val = length(shading_pos - ray_origin);
         textureStore(gbuf_depth_out, pixel, vec4<f32>(depth_val, 0.0, 0.0, 0.0));
         textureStore(dlss_depth_out, pixel, vec4<f32>(hardware_depth, 0.0, 0.0, 0.0));
         textureStore(motion_vectors_out, pixel, vec4<f32>(motion, 0.0, 0.0));

@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use bevy_ecs::resource::Resource;
 
 #[derive(Resource, Debug)]
@@ -8,6 +10,7 @@ pub(crate) struct TemporalCameraState {
     pending_clip_from_world: [f32; 16],
     has_previous: bool,
     has_pending: bool,
+    start_time: Instant,
 }
 
 impl Default for TemporalCameraState {
@@ -19,6 +22,7 @@ impl Default for TemporalCameraState {
             pending_clip_from_world: [0.0; 16],
             has_previous: false,
             has_pending: false,
+            start_time: Instant::now(),
         }
     }
 }
@@ -32,6 +36,10 @@ impl TemporalCameraState {
     #[cfg(any(feature = "dlss", feature = "fsr"))]
     pub(crate) fn current_jitter(&self) -> [f32; 2] {
         self.current_jitter
+    }
+
+    pub(crate) fn elapsed_secs(&self) -> f32 {
+        self.start_time.elapsed().as_secs_f32()
     }
 
     pub(crate) fn previous_clip_from_world(

@@ -33,7 +33,8 @@ pub(crate) struct CameraUniform {
     pub(crate) ray_up: [f32; 3],
     pub(crate) _pad4: f32,
     pub(crate) jitter: [f32; 2],
-    pub(crate) _pad5: [f32; 2],
+    pub(crate) time: f32,
+    pub(crate) _pad5: f32,
     pub(crate) clip_from_world: [f32; 16],
     pub(crate) prev_clip_from_world: [f32; 16],
 }
@@ -48,6 +49,7 @@ impl CameraUniform {
         lod_bias: f32,
         jitter: [f32; 2],
         prev_clip_from_world: [f32; 16],
+        time: f32,
     ) -> Self {
         let ivp = inv_view_proj(camera);
         let clip_from_world = clip_from_world(camera);
@@ -89,7 +91,8 @@ impl CameraUniform {
             ray_up: ray_up.into(),
             _pad4: 0.0,
             jitter,
-            _pad5: [0.0; 2],
+            time,
+            _pad5: 0.0,
             clip_from_world: clip_from_world.to_cols_array(),
             prev_clip_from_world,
         }
@@ -110,6 +113,7 @@ pub fn create_camera_buffer(
         lod_bias,
         [0.0, 0.0],
         clip_from_world(camera).to_cols_array(),
+        0.0,
     );
     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Camera Uniform"),
@@ -133,6 +137,7 @@ pub fn write_camera_buffer(
         lod_bias,
         [0.0, 0.0],
         clip_from_world(camera).to_cols_array(),
+        0.0,
     );
     queue.write_buffer(buffer, 0, bytemuck::bytes_of(&uniform));
 }

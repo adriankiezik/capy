@@ -165,6 +165,50 @@ struct HitResult {
     hit_pos_local: vec3<f32>,
 };
 
+// Point query: check if a world-space position contains a solid voxel.
+fn is_voxel_solid(world_pos: vec3<f32>) -> bool {
+    let cs_xz = f32(streaming.chunk_size_xz);
+    let cs_y = f32(streaming.chunk_size_y);
+    let cc = world_to_chunk_coord(world_pos, cs_xz, cs_y);
+    let info = lookup_chunk_info(cc);
+    if info.world_size == 0u {
+        return false;
+    }
+
+    let ws = f32(info.world_size);
+    let chunk_min = vec3<f32>(f32(cc.x) * cs_xz, f32(cc.y) * cs_y, f32(cc.z) * cs_xz);
+    let local = world_pos - chunk_min;
+    let pos = clamp(local / ws + vec3<f32>(1.0), vec3<f32>(1.0), vec3<f32>(1.9999999));
+
+    let pool_base = info.pool_offset;
+    var no = info.root_offset;
+    var se = 21u;
+    var ml = pool_read(pool_base, no);
+    var mh = pool_read(pool_base, no + 1u);
+    var il = (pool_read(pool_base, no + 2u) & 1u) != 0u;
+
+    for (var d = 0u; d < info.depth; d++) {
+        let ci = get_cell_index(pos, se);
+        if il {
+            if bit_is_set_64(ml, mh, ci) {
+                let mat = get_leaf_material_pool(pool_base, no, ci);
+                return mat != 0u;
+            }
+            return false;
+        }
+        if !bit_is_set_64(ml, mh, ci) {
+            return false;
+        }
+        let pi = popcount_below(ml, mh, ci);
+        no = get_child_offset_pool(pool_base, no, pi);
+        ml = pool_read(pool_base, no);
+        mh = pool_read(pool_base, no + 1u);
+        il = (pool_read(pool_base, no + 2u) & 1u) != 0u;
+        se -= 2u;
+    }
+    return false;
+}
+
 fn traverse_chunk(
     pool_base: u32,
     tree_info_ws: u32,

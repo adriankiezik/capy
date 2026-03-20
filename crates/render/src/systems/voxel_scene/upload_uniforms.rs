@@ -80,6 +80,7 @@ pub(crate) fn upload_uniforms_system(
             lod_bias,
             jitter,
             previous_clip_from_world,
+            temporal.elapsed_secs(),
         );
         temporal.set_current_frame(current_clip_from_world, jitter);
     }

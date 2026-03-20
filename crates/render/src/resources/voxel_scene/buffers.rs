@@ -49,6 +49,7 @@ impl VoxelSceneBuffers {
             settings.lod_bias,
             [0.0, 0.0],
             clip_from_world(camera).to_cols_array(),
+            0.0,
         );
         let camera_buffer = UniformBuffer::new(device, "Camera Uniform", &camera_uniform);
 
@@ -114,6 +115,7 @@ impl VoxelSceneBuffers {
         lod_bias: f32,
         jitter: [f32; 2],
         prev_clip_from_world: [f32; 16],
+        time: f32,
     ) {
         let uniform = CameraUniform::from_camera(
             camera,
@@ -122,6 +124,7 @@ impl VoxelSceneBuffers {
             lod_bias,
             jitter,
             prev_clip_from_world,
+            time,
         );
         self.camera_buffer.write(queue, &uniform);
     }
