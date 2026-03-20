@@ -14,6 +14,8 @@ impl capy_core::Plugin for GamePlugin {
             height: 720,
             vsync: false,
         });
+        #[cfg(feature = "dlss")]
+        insert_dlss_settings(world);
 
         let mut schedules = world.get_resource_or_init::<Schedules>();
         schedules
@@ -23,4 +25,16 @@ impl capy_core::Plugin for GamePlugin {
             .entry(capy_core::Update)
             .add_systems(capy_shared::fly_camera_system);
     }
+}
+
+#[cfg(feature = "dlss")]
+fn insert_dlss_settings(world: &mut World) {
+    let mut settings = capy_render::DlssSettings::default();
+    // Allow overriding the project ID via environment variable.
+    if let Ok(id) = std::env::var("CAPY_DLSS_PROJECT_ID") {
+        if let Ok(parsed) = uuid::Uuid::parse_str(id.trim()) {
+            settings.project_id = parsed;
+        }
+    }
+    world.insert_resource(settings);
 }

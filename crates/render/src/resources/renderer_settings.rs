@@ -1,6 +1,14 @@
 use bevy_ecs::resource::Resource;
 
 pub const MATERIAL_PALETTE_SIZE: usize = capy_core::MATERIAL_PALETTE_SIZE;
+pub const DEFAULT_RENDER_SCALE: f32 = 0.25;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AoMode {
+    #[default]
+    ScreenSpace,
+    RayTraced,
+}
 
 #[derive(Resource, Clone, Debug)]
 pub struct RendererSettings {
@@ -22,6 +30,8 @@ pub struct RendererSettings {
     pub ao_intensity: f32,
     pub ao_samples: u32,
     pub ao_steps: u32,
+    pub ao_mode: AoMode,
+    pub ao_rays: u32,
 
     /// Internal render resolution as a fraction of window size.
     /// 1.0 = native, 0.5 = half resolution, 0.25 = quarter resolution.
@@ -55,7 +65,9 @@ impl Default for RendererSettings {
             ao_intensity: 1.0,
             ao_samples: 4,
             ao_steps: 4,
-            render_scale: 0.25,
+            ao_mode: AoMode::default(),
+            ao_rays: 4,
+            render_scale: DEFAULT_RENDER_SCALE,
         }
     }
 }

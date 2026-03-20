@@ -14,7 +14,7 @@ impl Default for WindowConfig {
             title: String::from("Capy"),
             width: 1280,
             height: 720,
-            vsync: true,
+            vsync: false,
         }
     }
 }

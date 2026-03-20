@@ -139,6 +139,21 @@ struct StackEntry {
     is_leaf: bool,
 };
 var<private> stk: array<StackEntry, 12>;
+var<private> trace_stats_primary_chunk_steps: u32;
+var<private> trace_stats_primary_node_steps: u32;
+var<private> trace_stats_primary_descents: u32;
+var<private> trace_stats_shadow_chunk_steps: u32;
+var<private> trace_stats_shadow_node_steps: u32;
+var<private> trace_stats_shadow_descents: u32;
+
+fn reset_trace_private_stats() {
+    trace_stats_primary_chunk_steps = 0u;
+    trace_stats_primary_node_steps = 0u;
+    trace_stats_primary_descents = 0u;
+    trace_stats_shadow_chunk_steps = 0u;
+    trace_stats_shadow_node_steps = 0u;
+    trace_stats_shadow_descents = 0u;
+}
 
 struct HitResult {
     hit: bool,
@@ -226,6 +241,7 @@ fn traverse_chunk(
 
     let max_node_steps = u32(max(round(render_settings.max_node_steps), 1.0));
     for (var i = 0u; i < max_node_steps; i++) {
+        trace_stats_primary_node_steps += 1u;
         for (var dd = 0u; dd < depth; dd++) {
             let child_idx = get_cell_index(pos, scale_exp) ^ mirror_mask;
 
@@ -262,6 +278,7 @@ fn traverse_chunk(
             n_mh = pool_read(pool_base, node_idx + 1u);
             n_il = (pool_read(pool_base, node_idx + 2u) & 1u) != 0u;
             scale_exp -= 2u;
+            trace_stats_primary_descents += 1u;
         }
 
         let child_idx = get_cell_index(pos, scale_exp) ^ mirror_mask;
@@ -345,6 +362,11 @@ fn trace_ray(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> HitResult {
     result.is_lod_hit = false;
     result.lod_scale_exp = 0u;
 
+    // No geometry below y=0; skip tracing entirely
+    if ray_origin.y < 0.0 {
+        return result;
+    }
+
     let cs_xz = f32(streaming.chunk_size_xz);
     let cs_y = f32(streaming.chunk_size_y);
     let cs = vec3<f32>(cs_xz, cs_y, cs_xz);
@@ -398,6 +420,7 @@ fn trace_ray(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> HitResult {
 
     let max_chunk_steps = u32(max(round(render_settings.max_chunk_steps), 1.0));
     for (var chunk_iter = 0u; chunk_iter < max_chunk_steps; chunk_iter++) {
+        trace_stats_primary_chunk_steps += 1u;
         let info = lookup_chunk_info(cc);
 
         if info.world_size != 0u {
@@ -462,6 +485,11 @@ fn trace_ray(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> HitResult {
             t_current = t_max.z;
             cc.z += step.z;
             t_max.z += t_delta.z;
+        }
+
+        // Early exit: ray went below world floor (y=0)
+        if cc.y < 0 {
+            break;
         }
 
         if t_current >= t_world.y {
@@ -534,6 +562,7 @@ fn traverse_chunk_shadow(
 
     let max_steps = u32(max(round(render_settings.max_node_steps), 1.0));
     for (var i = 0u; i < max_steps; i++) {
+        trace_stats_shadow_node_steps += 1u;
         for (var dd = 0u; dd < depth; dd++) {
             let child_idx = get_cell_index(pos, scale_exp) ^ mirror_mask;
             if n_il || !bit_is_set_64(n_ml, n_mh, child_idx) { break; }
@@ -545,6 +574,7 @@ fn traverse_chunk_shadow(
             n_mh = pool_read(pool_base, node_idx + 1u);
             n_il = (pool_read(pool_base, node_idx + 2u) & 1u) != 0u;
             scale_exp -= 2u;
+            trace_stats_shadow_descents += 1u;
         }
 
         let child_idx = get_cell_index(pos, scale_exp) ^ mirror_mask;
@@ -612,6 +642,110 @@ fn traverse_chunk_shadow(
     return false;
 }
 
+fn trace_ao_ray(ray_origin: vec3<f32>, ray_dir: vec3<f32>, max_dist: f32) -> bool {
+    let cs_xz = f32(streaming.chunk_size_xz);
+    let cs_y = f32(streaming.chunk_size_y);
+    let cs = vec3<f32>(cs_xz, cs_y, cs_xz);
+    var dir = ray_dir;
+    let eps_d = 1e-10;
+    if abs(dir.x) < eps_d { dir.x = select(-eps_d, eps_d, dir.x >= 0.0); }
+    if abs(dir.y) < eps_d { dir.y = select(-eps_d, eps_d, dir.y >= 0.0); }
+    if abs(dir.z) < eps_d { dir.z = select(-eps_d, eps_d, dir.z >= 0.0); }
+
+    let inv_dir = 1.0 / dir;
+
+    let world_min = vec3<f32>(
+        f32(streaming.grid_min_x) * cs_xz,
+        f32(streaming.grid_min_y) * cs_y,
+        f32(streaming.grid_min_z) * cs_xz,
+    );
+    let world_max = vec3<f32>(
+        f32(i32(streaming.grid_dim_x) + streaming.grid_min_x) * cs_xz,
+        f32(i32(streaming.grid_dim_y) + streaming.grid_min_y) * cs_y,
+        f32(i32(streaming.grid_dim_z) + streaming.grid_min_z) * cs_xz,
+    );
+
+    let t_world = intersect_aabb(ray_origin, dir, world_min, world_max);
+    if t_world.x >= t_world.y || t_world.y <= 0.0 {
+        return false;
+    }
+
+    var t_current = max(t_world.x, 0.0);
+
+    let ray_eps = max(render_settings.ray_epsilon, 0.0);
+    let first_entry = ray_origin + dir * (t_current + ray_eps);
+    var cc = world_to_chunk_coord(
+        clamp(first_entry, world_min + vec3<f32>(0.001), world_max - vec3<f32>(0.001)),
+        cs_xz, cs_y,
+    );
+
+    let step = vec3<i32>(
+        select(-1, 1, dir.x > 0.0),
+        select(-1, 1, dir.y > 0.0),
+        select(-1, 1, dir.z > 0.0),
+    );
+    let t_delta = abs(cs * inv_dir);
+
+    var t_max = vec3<f32>(
+        (f32(cc.x + select(0, 1, dir.x > 0.0)) * cs_xz - ray_origin.x) * inv_dir.x,
+        (f32(cc.y + select(0, 1, dir.y > 0.0)) * cs_y - ray_origin.y) * inv_dir.y,
+        (f32(cc.z + select(0, 1, dir.z > 0.0)) * cs_xz - ray_origin.z) * inv_dir.z,
+    );
+
+    var entry_axis: i32 = -1;
+
+    let max_chunk_steps = u32(max(round(render_settings.max_chunk_steps), 1.0));
+    for (var chunk_iter = 0u; chunk_iter < max_chunk_steps; chunk_iter++) {
+        trace_stats_shadow_chunk_steps += 1u;
+        let info = lookup_chunk_info(cc);
+
+        if info.world_size != 0u {
+            let pool_base = info.pool_offset;
+            let chunk_min = vec3<f32>(f32(cc.x) * cs_xz, f32(cc.y) * cs_y, f32(cc.z) * cs_xz);
+            let local_origin = ray_origin - chunk_min;
+
+            if traverse_chunk_shadow(
+                pool_base,
+                info.world_size,
+                info.root_offset,
+                info.depth,
+                local_origin,
+                dir,
+                max(t_current, 0.0),
+            ) {
+                return true;
+            }
+        }
+
+        if t_max.x < t_max.y && t_max.x < t_max.z {
+            entry_axis = 0;
+            t_current = t_max.x;
+            cc.x += step.x;
+            t_max.x += t_delta.x;
+        } else if t_max.y < t_max.z {
+            entry_axis = 1;
+            t_current = t_max.y;
+            cc.y += step.y;
+            t_max.y += t_delta.y;
+        } else {
+            entry_axis = 2;
+            t_current = t_max.z;
+            cc.z += step.z;
+            t_max.z += t_delta.z;
+        }
+
+        if cc.y < 0 {
+            break;
+        }
+
+        if t_current >= min(t_world.y, max_dist) {
+            break;
+        }
+    }
+
+    return false;
+}
+
 fn trace_shadow_ray(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> bool {
     let cs_xz = f32(streaming.chunk_size_xz);
     let cs_y = f32(streaming.chunk_size_y);
@@ -666,6 +800,7 @@ fn trace_shadow_ray(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> bool {
 
     let max_chunk_steps = u32(max(round(render_settings.max_chunk_steps), 1.0));
     for (var chunk_iter = 0u; chunk_iter < max_chunk_steps; chunk_iter++) {
+        trace_stats_shadow_chunk_steps += 1u;
         let info = lookup_chunk_info(cc);
 
         if info.world_size != 0u {
@@ -701,6 +836,10 @@ fn trace_shadow_ray(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> bool {
             t_current = t_max.z;
             cc.z += step.z;
             t_max.z += t_delta.z;
+        }
+
+        if cc.y < 0 {
+            break;
         }
 
         if t_current >= t_world.y {

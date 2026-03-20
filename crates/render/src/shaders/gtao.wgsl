@@ -14,8 +14,8 @@ struct GtaoParams {
 const PI: f32 = 3.14159265359;
 
 fn get_ray_dir(pixel: vec2<f32>, resolution: vec2<f32>) -> vec3<f32> {
-    let uv_x = (pixel.x + 0.5) / resolution.x;
-    let uv_y = 1.0 - (pixel.y + 0.5) / resolution.y;
+    let uv_x = (pixel.x + 0.5 + camera.jitter.x) / resolution.x;
+    let uv_y = 1.0 - (pixel.y + 0.5 + camera.jitter.y) / resolution.y;
     return normalize(
         camera.ray_corner
         + camera.ray_right * (uv_x * 2.0)

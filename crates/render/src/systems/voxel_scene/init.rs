@@ -2,7 +2,7 @@ use bevy_ecs::world::World;
 use capy_core::{Camera, VoxelMeshData};
 
 use crate::resources::voxel_scene::VoxelSceneBuffers;
-use crate::resources::{GpuContext, RendererSettings};
+use crate::resources::{GpuContext, RenderResolution, RendererSettings};
 
 pub(crate) fn init_voxel_scene(world: &mut World) {
     if world.get_resource::<Camera>().is_none() {
@@ -25,9 +25,16 @@ pub(crate) fn init_voxel_scene(world: &mut World) {
     let mesh = world.resource::<VoxelMeshData>();
     let settings = world.resource::<RendererSettings>();
     let gpu = world.non_send_resource::<GpuContext>();
+    let resolution = world.resource::<RenderResolution>();
 
-    let (sw, sh) = settings.scaled_resolution(gpu.config.width, gpu.config.height);
-    let scene = VoxelSceneBuffers::new(&gpu.device, mesh, camera, sw, sh, settings);
+    let scene = VoxelSceneBuffers::new(
+        &gpu.device,
+        mesh,
+        camera,
+        resolution.width,
+        resolution.height,
+        settings,
+    );
 
     let scene = match scene {
         Ok(scene) => scene,

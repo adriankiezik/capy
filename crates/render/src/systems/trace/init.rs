@@ -2,7 +2,7 @@ use bevy_ecs::world::World;
 
 use crate::resources::trace::TracePipeline;
 use crate::resources::voxel_scene::VoxelSceneBuffers;
-use crate::resources::{GpuContext, RendererSettings};
+use crate::resources::{GpuContext, RenderResolution, TraceStatsReporter};
 
 pub(crate) fn init_trace(world: &mut World) {
     let Some(scene) = world.get_non_send_resource::<VoxelSceneBuffers>() else {
@@ -11,10 +11,10 @@ pub(crate) fn init_trace(world: &mut World) {
     };
 
     let gpu = world.non_send_resource::<GpuContext>();
-    let settings = world.resource::<RendererSettings>();
-    let (sw, sh) = settings.scaled_resolution(gpu.config.width, gpu.config.height);
+    let resolution = world.resource::<RenderResolution>();
 
-    let pipeline = TracePipeline::new(&gpu.device, sw, sh, scene);
+    let pipeline = TracePipeline::new(&gpu.device, resolution.width, resolution.height, scene);
 
     world.insert_non_send_resource(pipeline);
+    world.get_resource_or_init::<TraceStatsReporter>();
 }

@@ -1,3 +1,3 @@
 mod pipeline;
 
-pub(crate) use pipeline::TracePipeline;
+pub(crate) use pipeline::{TracePipeline, TraceStatsSnapshot};

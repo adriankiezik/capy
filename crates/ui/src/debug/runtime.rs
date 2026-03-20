@@ -46,7 +46,7 @@ pub fn wants_pointer_input(world: &World) -> bool {
 
     world
         .get_resource::<EguiContext>()
-        .map(|ctx| ctx.0.wants_pointer_input())
+        .map(|ctx| ctx.0.egui_wants_pointer_input())
         .unwrap_or(false)
 }
 

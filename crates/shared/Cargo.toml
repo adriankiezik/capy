@@ -3,6 +3,9 @@ name = "capy_shared"
 version.workspace = true
 edition.workspace = true
 
+[features]
+dlss = ["capy_render/dlss"]
+
 [dependencies]
 capy_core = { path = "../core" }
 capy_engine = { path = "../engine" }

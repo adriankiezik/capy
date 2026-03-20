@@ -15,7 +15,7 @@ pub(crate) fn input_edges(
     // At this point in the frame editor_ui hasn't run yet, so the egui context
     // reflects the previous frame's fully-built UI (panels, popups, color
     // pickers, etc.) — exactly the state we want to gate on.
-    if egui_ctx.0.wants_pointer_input() {
+    if egui_ctx.0.egui_wants_pointer_input() {
         edge.mouse_just_pressed.clear();
         edge.mouse_just_released.clear();
     }

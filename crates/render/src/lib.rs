@@ -1,4 +1,7 @@
 mod camera;
+#[cfg(feature = "dlss")]
+#[allow(dead_code, unused_imports)]
+mod dlss;
 mod error;
 mod gpu_texture;
 mod pipeline_factory;
@@ -14,10 +17,12 @@ pub use camera::{create_camera_buffer, write_camera_buffer};
 pub use error::{RenderError, Result};
 pub use plugins::RenderPlugin;
 pub use resources::{
-    ComputePassCallback, ComputePassCallbacks, ComputePassEncode, ComputePassPostSubmit, GpuAccess,
-    MATERIAL_PALETTE_SIZE, PreparedVoxelSceneUpload, RenderOverlayCallback, RenderOverlayCallbacks,
-    RendererSettings, SharedVoxelBuffers,
+    AoMode, ComputePassCallback, ComputePassCallbacks, ComputePassEncode, ComputePassPostSubmit,
+    GpuAccess, MATERIAL_PALETTE_SIZE, PreparedVoxelSceneUpload, RenderOverlayCallback,
+    RenderOverlayCallbacks, RendererSettings, SharedVoxelBuffers,
 };
+#[cfg(feature = "dlss")]
+pub use resources::{DlssQualityMode, DlssSettings};
 pub use shader_source::create_compute_shader;
 pub use systems::voxel_scene::{
     apply_prepared_voxel_scene_upload, prepare_voxel_scene_upload, rebuild_voxel_scene,

@@ -121,7 +121,8 @@ fn build_rebake_output(
                     canonical_baked.clone(),
                     &mut bricks,
                 );
-                (coord, patched)
+                let compacted = capy_world::compact_baked_chunk(patched);
+                (coord, compacted)
             })
             .collect()
     } else {
@@ -133,7 +134,8 @@ fn build_rebake_output(
                     scope.spawn(move || {
                         let patched =
                             capy_world::patch_baked_chunk_bricks_owned(canonical, &mut bricks);
-                        (coord, patched)
+                        let compacted = capy_world::compact_baked_chunk(patched);
+                        (coord, compacted)
                     })
                 })
                 .collect();

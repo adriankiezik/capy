@@ -1,7 +1,13 @@
 use bevy_ecs::error::BevyError;
 use bevy_ecs::world::World;
+use capy_core::FrameProfiler;
 
-use crate::resources::{FrameInProgress, GpuContext, RenderOverlayCallbacks};
+#[cfg(feature = "dlss")]
+use crate::resources::DlssSettings;
+use crate::resources::{
+    FrameInProgress, GpuContext, GpuProfiler, RenderOverlayCallbacks, TemporalCameraState,
+    TraceStatsReporter, trace::TracePipeline,
+};
 
 pub(crate) fn submit_frame_system(world: &mut World) -> Result<(), BevyError> {
     let mut frame = world.non_send_resource_mut::<FrameInProgress>();
@@ -34,6 +40,33 @@ pub(crate) fn submit_frame_system(world: &mut World) -> Result<(), BevyError> {
 
     queue.submit(std::iter::once(encoder.finish()));
 
+    // Read back previous frame's GPU timestamps and feed into FrameProfiler.
+    // Remove/reinsert to avoid double-borrow on World (FrameProfiler is Send, GpuProfiler is !Send).
+    if let Some(mut profiler) = world.remove_resource::<FrameProfiler>() {
+        {
+            let gpu_profiler = world.non_send_resource::<GpuProfiler>();
+            gpu_profiler.read_back(&device, &mut profiler);
+        }
+        world.insert_resource(profiler);
+    }
+
+    let trace_snapshot = world
+        .get_non_send_resource::<TracePipeline>()
+        .and_then(|trace| trace.read_back_stats(&device));
+    if let (Some(snapshot), Some(mut reporter)) = (
+        trace_snapshot,
+        world.get_resource_mut::<TraceStatsReporter>(),
+    ) {
+        reporter.record(snapshot);
+    }
+    {
+        let mut gpu_profiler = world.non_send_resource_mut::<GpuProfiler>();
+        gpu_profiler.end_frame();
+    }
+    if let Some(mut trace) = world.get_non_send_resource_mut::<TracePipeline>() {
+        trace.end_frame();
+    }
+
     for ps in post_submit {
         if let Err(e) = ps(world)
             && first_error.is_none()
@@ -44,6 +77,14 @@ pub(crate) fn submit_frame_system(world: &mut World) -> Result<(), BevyError> {
 
     if let Some(output) = output {
         output.present();
+    }
+
+    if let Some(mut temporal) = world.get_resource_mut::<TemporalCameraState>() {
+        temporal.finish_frame();
+    }
+    #[cfg(feature = "dlss")]
+    if let Some(mut settings) = world.get_resource_mut::<DlssSettings>() {
+        settings.reset = false;
     }
 
     match first_error {

@@ -3,6 +3,9 @@ name = "capy_game"
 version.workspace = true
 edition.workspace = true
 
+[features]
+dlss = ["capy_render/dlss", "capy_shared/dlss"]
+
 [dependencies]
 capy_engine = { path = "../engine" }
 capy_input = { path = "../input" }
@@ -16,6 +19,8 @@ capy_shared = { path = "../shared" }
 anyhow.workspace = true
 bevy_ecs.workspace = true
 glam.workspace = true
+tracing.workspace = true
+uuid.workspace = true
 
 [lints]
 workspace = true

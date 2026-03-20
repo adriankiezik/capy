@@ -1,0 +1,102 @@
+use std::time::Instant;
+
+use bevy_ecs::resource::Resource;
+
+use crate::resources::trace::TraceStatsSnapshot;
+
+#[derive(Default)]
+struct TraceStatsAccum {
+    primary_chunk_steps: u64,
+    primary_node_steps: u64,
+    primary_descents: u64,
+    shadow_chunk_steps: u64,
+    shadow_node_steps: u64,
+    shadow_descents: u64,
+    hit_pixels: u64,
+    miss_pixels: u64,
+    shadow_rays: u64,
+    shadow_blocked: u64,
+    lod_hits: u64,
+    material_hits: u64,
+}
+
+/// Periodically logs averaged traversal counters collected from the trace pass.
+#[derive(Resource)]
+pub(crate) struct TraceStatsReporter {
+    accum: TraceStatsAccum,
+    frame_count: u32,
+    report_interval_secs: f32,
+    last_report: Instant,
+    enabled: bool,
+}
+
+impl Default for TraceStatsReporter {
+    fn default() -> Self {
+        let now = Instant::now();
+        Self {
+            accum: TraceStatsAccum::default(),
+            frame_count: 0,
+            report_interval_secs: 3.0,
+            last_report: now,
+            enabled: true,
+        }
+    }
+}
+
+impl TraceStatsReporter {
+    pub(crate) fn record(&mut self, snapshot: TraceStatsSnapshot) {
+        if !self.enabled {
+            return;
+        }
+
+        self.accum.primary_chunk_steps += u64::from(snapshot.primary_chunk_steps);
+        self.accum.primary_node_steps += u64::from(snapshot.primary_node_steps);
+        self.accum.primary_descents += u64::from(snapshot.primary_descents);
+        self.accum.shadow_chunk_steps += u64::from(snapshot.shadow_chunk_steps);
+        self.accum.shadow_node_steps += u64::from(snapshot.shadow_node_steps);
+        self.accum.shadow_descents += u64::from(snapshot.shadow_descents);
+        self.accum.hit_pixels += u64::from(snapshot.hit_pixels);
+        self.accum.miss_pixels += u64::from(snapshot.miss_pixels);
+        self.accum.shadow_rays += u64::from(snapshot.shadow_rays);
+        self.accum.shadow_blocked += u64::from(snapshot.shadow_blocked);
+        self.accum.lod_hits += u64::from(snapshot.lod_hits);
+        self.accum.material_hits += u64::from(snapshot.material_hits);
+        self.frame_count += 1;
+
+        if self.last_report.elapsed().as_secs_f32() >= self.report_interval_secs {
+            self.report();
+        }
+    }
+
+    fn report(&mut self) {
+        if self.frame_count == 0 {
+            self.last_report = Instant::now();
+            return;
+        }
+
+        let total_pixels = (self.accum.hit_pixels + self.accum.miss_pixels).max(1);
+        let total_hits = self.accum.hit_pixels.max(1);
+        let total_shadow_rays = self.accum.shadow_rays.max(1);
+        let hit_ratio = self.accum.hit_pixels as f64 / total_pixels as f64 * 100.0;
+        let lod_ratio = self.accum.lod_hits as f64 / total_hits as f64 * 100.0;
+        let shadow_blocked_ratio =
+            self.accum.shadow_blocked as f64 / total_shadow_rays as f64 * 100.0;
+
+        tracing::info!(
+            "[trace-stats] hit={hit_ratio:.0}% lod={lod_ratio:.0}% \
+             | primary: chunks/pix={:.1} nodes/pix={:.1} desc/pix={:.1} \
+             | shadow: rays/hit={:.1} blocked={shadow_blocked_ratio:.0}% chunks/ray={:.1} nodes/ray={:.1} desc/ray={:.1}",
+            self.accum.primary_chunk_steps as f64 / total_pixels as f64,
+            self.accum.primary_node_steps as f64 / total_pixels as f64,
+            self.accum.primary_descents as f64 / total_pixels as f64,
+            self.accum.shadow_rays as f64 / total_hits as f64,
+            self.accum.shadow_chunk_steps as f64 / total_shadow_rays as f64,
+            self.accum.shadow_node_steps as f64 / total_shadow_rays as f64,
+            self.accum.shadow_descents as f64 / total_shadow_rays as f64,
+        );
+
+        self.accum = TraceStatsAccum::default();
+        self.frame_count = 0;
+        self.last_report = Instant::now();
+    }
+}

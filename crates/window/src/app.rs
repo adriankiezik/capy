@@ -168,6 +168,12 @@ impl ApplicationHandler for App {
                 });
             }
             WindowEvent::RedrawRequested => {
+                if let Some(mut profiler) =
+                    self.world.get_resource_mut::<capy_core::FrameProfiler>()
+                {
+                    profiler.begin_frame();
+                }
+
                 if let Some(window) = self.window.clone() {
                     self.dispatch_begin_frame(window.as_ref());
                 }
@@ -183,6 +189,13 @@ impl ApplicationHandler for App {
                 if let Err(e) = self.run_schedule(capy_core::Render) {
                     return self.fail(event_loop, e);
                 }
+
+                if let Some(mut profiler) =
+                    self.world.get_resource_mut::<capy_core::FrameProfiler>()
+                {
+                    profiler.end_frame();
+                }
+
                 if self.world.get_resource::<capy_core::AppExit>().is_some() {
                     event_loop.exit();
                     return;

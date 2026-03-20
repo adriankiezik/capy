@@ -11,6 +11,12 @@ fn inv_view_proj(camera: &Camera) -> Mat4 {
     (proj * view_at_origin).inverse()
 }
 
+pub(crate) fn clip_from_world(camera: &Camera) -> Mat4 {
+    let proj = Mat4::perspective_infinite_rh(camera.fov_y, camera.aspect, NEAR_CLIP);
+    let view = Mat4::look_to_rh(camera.position, camera.forward(), Vec3::Y);
+    proj * view
+}
+
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub(crate) struct CameraUniform {
@@ -26,13 +32,25 @@ pub(crate) struct CameraUniform {
     pub(crate) _pad3: f32,
     pub(crate) ray_up: [f32; 3],
     pub(crate) _pad4: f32,
+    pub(crate) jitter: [f32; 2],
+    pub(crate) _pad5: [f32; 2],
+    pub(crate) clip_from_world: [f32; 16],
+    pub(crate) prev_clip_from_world: [f32; 16],
 }
 
-const _: () = assert!(std::mem::size_of::<CameraUniform>() == 144);
+const _: () = assert!(std::mem::size_of::<CameraUniform>() == 288);
 
 impl CameraUniform {
-    pub(crate) fn from_camera(camera: &Camera, width: u32, height: u32, lod_bias: f32) -> Self {
+    pub(crate) fn from_camera(
+        camera: &Camera,
+        width: u32,
+        height: u32,
+        lod_bias: f32,
+        jitter: [f32; 2],
+        prev_clip_from_world: [f32; 16],
+    ) -> Self {
         let ivp = inv_view_proj(camera);
+        let clip_from_world = clip_from_world(camera);
 
         let p_corner = ivp * Vec4::new(-1.0, -1.0, -1.0, 1.0);
         let p_right = ivp * Vec4::new(1.0, -1.0, -1.0, 1.0);
@@ -70,6 +88,10 @@ impl CameraUniform {
             _pad3: 0.0,
             ray_up: ray_up.into(),
             _pad4: 0.0,
+            jitter,
+            _pad5: [0.0; 2],
+            clip_from_world: clip_from_world.to_cols_array(),
+            prev_clip_from_world,
         }
     }
 }
@@ -81,7 +103,14 @@ pub fn create_camera_buffer(
     height: u32,
     lod_bias: f32,
 ) -> wgpu::Buffer {
-    let uniform = CameraUniform::from_camera(camera, width, height, lod_bias);
+    let uniform = CameraUniform::from_camera(
+        camera,
+        width,
+        height,
+        lod_bias,
+        [0.0, 0.0],
+        clip_from_world(camera).to_cols_array(),
+    );
     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Camera Uniform"),
         contents: bytemuck::bytes_of(&uniform),
@@ -97,6 +126,13 @@ pub fn write_camera_buffer(
     height: u32,
     lod_bias: f32,
 ) {
-    let uniform = CameraUniform::from_camera(camera, width, height, lod_bias);
+    let uniform = CameraUniform::from_camera(
+        camera,
+        width,
+        height,
+        lod_bias,
+        [0.0, 0.0],
+        clip_from_world(camera).to_cols_array(),
+    );
     queue.write_buffer(buffer, 0, bytemuck::bytes_of(&uniform));
 }

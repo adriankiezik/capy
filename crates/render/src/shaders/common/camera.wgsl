@@ -12,4 +12,8 @@ struct CameraUniform {
     _pad3: f32,
     ray_up: vec3<f32>,
     _pad4: f32,
+    jitter: vec2<f32>,
+    _pad5: vec2<f32>,
+    clip_from_world: mat4x4<f32>,
+    prev_clip_from_world: mat4x4<f32>,
 };

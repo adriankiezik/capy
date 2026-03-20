@@ -2,6 +2,10 @@
 name = "capy_render"
 version.workspace = true
 edition.workspace = true
+build = "build.rs"
+
+[features]
+dlss = ["dep:ash", "dep:uuid", "dep:bitflags", "dep:bindgen", "dep:cc"]
 
 [dependencies]
 capy_core = { path = "../core" }
@@ -13,6 +17,13 @@ thiserror.workspace = true
 bytemuck.workspace = true
 glam.workspace = true
 tracing.workspace = true
+uuid = { workspace = true, optional = true }
+ash = { version = "0.38", optional = true }
+bitflags = { version = "2", optional = true }
+
+[build-dependencies]
+bindgen = { version = "0.72", optional = true }
+cc = { version = "1", optional = true }
 
 [lints]
 workspace = true

@@ -27,6 +27,10 @@ pub enum RenderError {
 
     #[error(transparent)]
     Surface(#[from] wgpu::SurfaceError),
+
+    #[cfg(feature = "dlss")]
+    #[error(transparent)]
+    Dlss(#[from] crate::dlss::DlssError),
 }
 
 pub type Result<T> = std::result::Result<T, RenderError>;

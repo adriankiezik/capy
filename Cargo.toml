@@ -17,16 +17,17 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 lz4_flex = "0.11"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
-egui = "0.33"
-egui-winit = "0.33"
-egui-wgpu = "0.33"
-# Locked to wgpu 27 until egui-wgpu updates its compatibility.
-wgpu = "27"
+# egui pinned to git main for wgpu 28 compat; switch back to crates.io once egui 0.34 ships.
+egui = { git = "https://github.com/emilk/egui", branch = "main" }
+egui-winit = { git = "https://github.com/emilk/egui", branch = "main" }
+egui-wgpu = { git = "https://github.com/emilk/egui", branch = "main" }
+wgpu = "28"
 winit = "0.30.13"
 raw-window-handle = "0.6"
 pollster = "0.4"
 fbxcel-dom = "0.0.10"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "tga", "bmp"] }
+uuid = "1"
 
 [workspace.lints.clippy]
 unwrap_used = "warn"
@@ -40,3 +41,4 @@ opt-level = 1
 # Keep heavy third-party crates optimized in debug builds.
 [profile.dev.package."*"]
 opt-level = 2
+

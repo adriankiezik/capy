@@ -2,7 +2,7 @@ use wgpu::util::DeviceExt;
 
 use capy_core::{Camera, VoxelMeshData};
 
-use crate::camera::CameraUniform;
+use crate::camera::{CameraUniform, clip_from_world};
 use crate::error::{RenderError, Result};
 use crate::resources::RendererSettings;
 use crate::settings::{RenderSettingsUniform, StreamingInfoUniform, to_render_settings_uniform};
@@ -42,7 +42,14 @@ impl VoxelSceneBuffers {
         height: u32,
         settings: &RendererSettings,
     ) -> Result<Self> {
-        let camera_uniform = CameraUniform::from_camera(camera, width, height, settings.lod_bias);
+        let camera_uniform = CameraUniform::from_camera(
+            camera,
+            width,
+            height,
+            settings.lod_bias,
+            [0.0, 0.0],
+            clip_from_world(camera).to_cols_array(),
+        );
         let camera_buffer = UniformBuffer::new(device, "Camera Uniform", &camera_uniform);
 
         let render_settings_uniform = to_render_settings_uniform(settings);
@@ -105,8 +112,17 @@ impl VoxelSceneBuffers {
         width: u32,
         height: u32,
         lod_bias: f32,
+        jitter: [f32; 2],
+        prev_clip_from_world: [f32; 16],
     ) {
-        let uniform = CameraUniform::from_camera(camera, width, height, lod_bias);
+        let uniform = CameraUniform::from_camera(
+            camera,
+            width,
+            height,
+            lod_bias,
+            jitter,
+            prev_clip_from_world,
+        );
         self.camera_buffer.write(queue, &uniform);
     }
 

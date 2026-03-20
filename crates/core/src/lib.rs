@@ -16,7 +16,8 @@ pub use key_code::KeyCode;
 pub use material::{MATERIAL_COLORS, MATERIAL_PALETTE_SIZE, MaterialId, closest_material};
 pub use plugin::Plugin;
 pub use resources::{
-    AppExit, Camera, CursorMode, FrameTime, GameWindow, RawInput, VoxelMeshData, WindowConfig,
+    AppExit, Camera, CursorMode, FrameProfiler, FrameTime, GameWindow, RawInput, VoxelMeshData,
+    WindowConfig,
 };
 pub use schedule::{PreStartup, Render, Startup, Update};
 pub use window::Window;

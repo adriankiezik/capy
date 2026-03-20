@@ -13,8 +13,10 @@ impl capy_core::Plugin for EditorPlugin {
             title: String::from("Capy World Editor"),
             width: 1600,
             height: 900,
-            vsync: true,
+            vsync: false,
         });
+        #[cfg(feature = "dlss")]
+        insert_dlss_settings(world);
         world.insert_resource(SelectionState::default());
         world.insert_resource(Clipboard::default());
         world.insert_resource(SaveState::default());
@@ -46,4 +48,16 @@ impl capy_core::Plugin for EditorPlugin {
             Some(systems::pick::pick_post_submit),
         );
     }
+}
+
+#[cfg(feature = "dlss")]
+fn insert_dlss_settings(world: &mut World) {
+    let mut settings = capy_render::DlssSettings::default();
+    // Allow overriding the project ID via environment variable.
+    if let Ok(id) = std::env::var("CAPY_DLSS_PROJECT_ID") {
+        if let Ok(parsed) = uuid::Uuid::parse_str(id.trim()) {
+            settings.project_id = parsed;
+        }
+    }
+    world.insert_resource(settings);
 }

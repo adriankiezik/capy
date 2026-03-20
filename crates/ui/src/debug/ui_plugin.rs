@@ -9,7 +9,7 @@ impl capy_core::Plugin for UiPlugin {
         world.insert_resource(UiEnabled);
         if world.get_resource::<EguiContext>().is_none() {
             let ctx = egui::Context::default();
-            ctx.style_mut(|style| {
+            ctx.global_style_mut(|style| {
                 style.visuals.window_shadow = egui::Shadow::NONE;
                 style.visuals.popup_shadow = egui::Shadow::NONE;
             });

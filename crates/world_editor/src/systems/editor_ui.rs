@@ -394,7 +394,7 @@ fn draw_selection_box(
         egui::Order::Background,
         egui::Id::new("selection_box"),
     ));
-    painter.set_clip_rect(ctx.available_rect());
+    painter.set_clip_rect(ctx.content_rect());
 
     let stroke = egui::Stroke::new(1.5, egui::Color32::from_rgb(0, 200, 255));
 

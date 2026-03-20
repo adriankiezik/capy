@@ -18,15 +18,30 @@ const GRID_DIM_XZ: u32 = 32;
 pub(crate) fn editor_startup(world: &mut World) -> Result<(), BevyError> {
     let canonical = capy_world::generate_flat_baked()?;
 
-    // Try to load a previously saved world.
-    let world_dir = Path::new(capy_assets::DEFAULT_WORLD_DIR);
-    let edited_baked = match capy_assets::load_world_chunks(world_dir, &capy_assets::OsFileSystem) {
-        Ok(chunks) if !chunks.is_empty() => {
-            info!("[editor] loaded {} edited chunks from disk", chunks.len());
-            chunks
+    // Try to load a previously saved world (skipped in stress-test mode).
+    let stress_mode = std::env::var("CAPY_STRESS_TEST").is_ok();
+    let mut edited_baked = if stress_mode {
+        HashMap::new()
+    } else {
+        let world_dir = Path::new(capy_assets::DEFAULT_WORLD_DIR);
+        match capy_assets::load_world_chunks(world_dir, &capy_assets::OsFileSystem) {
+            Ok(chunks) if !chunks.is_empty() => {
+                info!("[editor] loaded {} edited chunks from disk", chunks.len());
+                chunks
+            }
+            _ => HashMap::new(),
         }
-        _ => HashMap::new(),
     };
+
+    if stress_mode {
+        info!("[stress] generating stress test world...");
+        let t0 = std::time::Instant::now();
+        let stress_chunks = capy_world::generate_stress_world()?;
+        let n = stress_chunks.len();
+        edited_baked.extend(stress_chunks);
+        let elapsed = t0.elapsed();
+        info!("[stress] baked {n} chunks in {:.2}s", elapsed.as_secs_f64());
+    }
 
     let mesh = if edited_baked.is_empty() {
         VoxelMeshData::from_flat_world(
@@ -55,10 +70,15 @@ pub(crate) fn editor_startup(world: &mut World) -> Result<(), BevyError> {
     };
 
     world.insert_resource(mesh);
+    let (cam_pos, cam_pitch) = if stress_mode {
+        (Vec3::new(0.0, 280.0, -400.0), -0.3)
+    } else {
+        (Vec3::new(128.0, 180.0, -20.0), -0.2)
+    };
     world.insert_resource(Camera {
-        position: Vec3::new(128.0, 180.0, -20.0),
+        position: cam_pos,
         yaw: std::f32::consts::FRAC_PI_2,
-        pitch: -0.2,
+        pitch: cam_pitch,
         aspect,
         ..Camera::default()
     });

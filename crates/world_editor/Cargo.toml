@@ -3,6 +3,9 @@ name = "capy_world_editor"
 version.workspace = true
 edition.workspace = true
 
+[features]
+dlss = ["capy_render/dlss", "capy_shared/dlss"]
+
 [dependencies]
 capy_core = { path = "../core" }
 capy_engine = { path = "../engine" }
@@ -22,6 +25,7 @@ glam.workspace = true
 egui.workspace = true
 wgpu.workspace = true
 winit.workspace = true
+uuid.workspace = true
 
 [lints]
 workspace = true

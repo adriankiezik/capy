@@ -1,6 +1,7 @@
 mod app_exit;
 mod camera;
 mod cursor_mode;
+mod frame_profiler;
 mod frame_time;
 mod game_window;
 mod raw_input;
@@ -10,6 +11,7 @@ mod window_config;
 pub use app_exit::AppExit;
 pub use camera::Camera;
 pub use cursor_mode::CursorMode;
+pub use frame_profiler::FrameProfiler;
 pub use frame_time::FrameTime;
 pub use game_window::GameWindow;
 pub use raw_input::RawInput;

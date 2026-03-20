@@ -56,6 +56,7 @@ impl EngineBuilder {
         let mut world = World::new();
 
         world.insert_resource(DefaultErrorHandler(capture_error));
+        world.insert_resource(capy_core::FrameProfiler::new());
 
         let Self {
             plugins,

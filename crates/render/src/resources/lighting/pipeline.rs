@@ -82,6 +82,7 @@ pub(crate) struct LightingPipeline {
     pub(crate) output_color: GpuTexture,
     pub(crate) width: u32,
     pub(crate) height: u32,
+    pub(crate) ao_source_is_rtao: bool,
 }
 
 impl LightingPipeline {
@@ -131,7 +132,29 @@ impl LightingPipeline {
             output_color,
             width,
             height,
+            ao_source_is_rtao: false,
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn rebind_ao(
+        &mut self,
+        device: &wgpu::Device,
+        gbuf_color: &GpuTexture,
+        gbuf_normal: &GpuTexture,
+        gbuf_depth: &GpuTexture,
+        render_settings_buffer: &wgpu::Buffer,
+        ao_texture: &GpuTexture,
+    ) {
+        self.bind_group = self.layout.bind(
+            device,
+            gbuf_color,
+            gbuf_normal,
+            gbuf_depth,
+            &self.output_color,
+            render_settings_buffer,
+            ao_texture,
+        );
     }
 
     #[allow(clippy::too_many_arguments)]

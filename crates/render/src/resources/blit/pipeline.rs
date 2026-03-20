@@ -63,6 +63,11 @@ pub(crate) struct BlitPipeline {
     pub(crate) height: u32,
     pub(crate) source_width: u32,
     pub(crate) source_height: u32,
+    pub(crate) source_is_dlss: bool,
+    /// Distinguishes DLSS SR from DLSS RR so we rebind when switching between them.
+    pub(crate) source_is_rr: bool,
+    /// Tracks DLSS output texture recreation (quality changes, SR↔RR switches).
+    pub(crate) dlss_generation: u32,
 }
 
 impl BlitPipeline {
@@ -72,6 +77,7 @@ impl BlitPipeline {
         surface_format: wgpu::TextureFormat,
         width: u32,
         height: u32,
+        source_is_dlss: bool,
     ) -> Self {
         let blit_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Blit Shader"),
@@ -108,7 +114,7 @@ impl BlitPipeline {
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
@@ -130,6 +136,9 @@ impl BlitPipeline {
             height,
             source_width: width,
             source_height: height,
+            source_is_dlss,
+            source_is_rr: false,
+            dlss_generation: 0,
         }
     }
 
