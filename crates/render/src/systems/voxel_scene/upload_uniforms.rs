@@ -2,7 +2,7 @@ use bevy_ecs::change_detection::DetectChanges;
 #[cfg(any(feature = "dlss", feature = "fsr"))]
 use bevy_ecs::system::NonSend;
 use bevy_ecs::system::{NonSendMut, Res, ResMut};
-use capy_core::Camera;
+use capy_core::{Camera, PreviewGpuData};
 
 use crate::camera::clip_from_world;
 use crate::resources::voxel_scene::VoxelSceneBuffers;
@@ -22,6 +22,7 @@ pub(crate) fn upload_uniforms_system(
     render_resolution: Res<RenderResolution>,
     settings: Option<Res<RendererSettings>>,
     mut temporal: ResMut<TemporalCameraState>,
+    preview_gpu: Option<Res<PreviewGpuData>>,
     #[cfg(feature = "dlss")] dlss: Option<NonSend<DlssPipeline>>,
     #[cfg(feature = "dlss")] dlss_settings: Option<Res<DlssSettings>>,
     #[cfg(feature = "fsr")] fsr: Option<NonSend<FsrPipeline>>,
@@ -92,5 +93,9 @@ pub(crate) fn upload_uniforms_system(
         if let Some(gtao) = gtao {
             gtao.update_params(&gpu.queue, &settings);
         }
+    }
+
+    if let Some(preview) = preview_gpu {
+        scene.upload_preview_params(&gpu.queue, &preview);
     }
 }

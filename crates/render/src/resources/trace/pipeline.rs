@@ -87,6 +87,7 @@ impl TraceLayout {
                     wgpu::StorageTextureAccess::WriteOnly,
                 ),
                 bgl_storage_rw(12),
+                bgl_uniform(13),
             ],
         });
         Self { layout }
@@ -163,6 +164,10 @@ impl TraceLayout {
                 wgpu::BindGroupEntry {
                     binding: 12,
                     resource: stats_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 13,
+                    resource: scene.preview_params_buffer.buffer().as_entire_binding(),
                 },
             ],
         })

@@ -12,6 +12,8 @@ pub(crate) struct RebakeOutput {
     pub(crate) total_bricks: usize,
     pub(crate) patch_ms: f64,
     pub(crate) mesh_ms: f64,
+    /// Pool offset of appended preview DAG, if any.
+    pub(crate) preview_pool_offset: Option<u32>,
 }
 
 #[derive(Default)]

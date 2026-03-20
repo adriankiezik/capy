@@ -3,12 +3,13 @@ use std::time::Instant;
 
 use bevy_ecs::error::BevyError;
 use bevy_ecs::world::World;
-use capy_core::{MATERIAL_COLORS, VoxelMeshData};
+use capy_core::{BakedChunkData, MATERIAL_COLORS, PreviewGpuData, VoxelMeshData};
 use capy_render::GpuAccess;
 use tracing::{error, info};
 
 use crate::resources::{
-    BakeTask, EditableWorld, MeshDirty, PendingEdits, PickPipeline, RebakeOutput, WorldGrid,
+    BakeTask, EditableWorld, MeshDirty, PendingEdits, PickPipeline, PreviewBake, RebakeOutput,
+    WorldGrid,
 };
 
 struct DirtyChunkSnapshot {
@@ -42,10 +43,14 @@ pub(crate) fn rebake(world: &mut World) -> Result<(), BevyError> {
 
     let mut pending = world.resource_mut::<PendingEdits>();
     let chunks_to_patch = std::mem::take(&mut pending.by_chunk);
+    let force_rebuild = pending.full_rebuild;
     pending.full_rebuild = false;
     drop(pending);
 
-    if chunks_to_patch.is_empty() {
+    // Check if preview needs a pool rebuild (preview DAG changed since last mesh)
+    let preview_needs_rebuild = world.resource::<PreviewBake>().needs_pool_rebuild;
+
+    if chunks_to_patch.is_empty() && !force_rebuild && !preview_needs_rebuild {
         return Ok(());
     }
 
@@ -72,6 +77,13 @@ pub(crate) fn rebake(world: &mut World) -> Result<(), BevyError> {
         )
     };
 
+    // Clone preview baked data for the background thread and clear rebuild flag
+    let preview_baked = {
+        let mut pb = world.resource_mut::<PreviewBake>();
+        pb.needs_pool_rebuild = false;
+        pb.baked.clone()
+    };
+
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
         let result = build_rebake_output(
@@ -81,6 +93,7 @@ pub(crate) fn rebake(world: &mut World) -> Result<(), BevyError> {
             chunk_snapshots,
             num_chunks,
             gpu,
+            preview_baked,
         );
         let _ = tx.send(result);
     });
@@ -91,12 +104,13 @@ pub(crate) fn rebake(world: &mut World) -> Result<(), BevyError> {
 }
 
 fn build_rebake_output(
-    canonical_baked: capy_core::BakedChunkData,
-    mut edited_baked: std::collections::HashMap<[i32; 3], capy_core::BakedChunkData>,
+    canonical_baked: BakedChunkData,
+    mut edited_baked: std::collections::HashMap<[i32; 3], BakedChunkData>,
     grid_dim_xz: u32,
     chunks_to_patch: std::collections::HashMap<[i32; 3], DirtyChunkSnapshot>,
     num_chunks: usize,
     gpu: GpuAccess,
+    preview_baked: Option<BakedChunkData>,
 ) -> anyhow::Result<RebakeOutput> {
     let t_patch = Instant::now();
     let mut total_bricks = 0usize;
@@ -156,7 +170,7 @@ fn build_rebake_output(
     let patch_ms = t_patch.elapsed().as_secs_f64() * 1000.0;
 
     let t_mesh = Instant::now();
-    let mesh = VoxelMeshData::with_edited_chunks(
+    let mut mesh = VoxelMeshData::with_edited_chunks(
         &canonical_baked,
         &edited_baked,
         grid_dim_xz,
@@ -164,6 +178,15 @@ fn build_rebake_output(
         capy_world::CHUNK_Y,
         MATERIAL_COLORS,
     );
+
+    // Append preview DAG to the end of the pool buffers
+    let preview_pool_offset = preview_baked.map(|baked| {
+        let offset = mesh.pool_dag.len() as u32;
+        mesh.pool_dag.extend_from_slice(&baked.dag_buffer);
+        mesh.pool_avg.extend_from_slice(&baked.avg_color_buffer);
+        offset
+    });
+
     let mesh_ms = t_mesh.elapsed().as_secs_f64() * 1000.0;
     let upload = capy_render::prepare_voxel_scene_upload(&gpu, &mesh)?;
 
@@ -176,6 +199,7 @@ fn build_rebake_output(
         total_bricks,
         patch_ms,
         mesh_ms,
+        preview_pool_offset,
     })
 }
 
@@ -189,6 +213,7 @@ fn apply_rebake_result(world: &mut World, result: RebakeOutput) {
         total_bricks,
         patch_ms,
         mesh_ms,
+        preview_pool_offset,
     } = result;
 
     let t_apply = Instant::now();
@@ -203,6 +228,24 @@ fn apply_rebake_result(world: &mut World, result: RebakeOutput) {
 
     let old_mesh = world.remove_resource::<VoxelMeshData>();
     world.insert_resource(mesh);
+
+    // Update preview pool offset so the shader knows where preview DAG lives
+    if let Some(offset) = preview_pool_offset {
+        let preview_info = {
+            let preview_bake = world.resource::<PreviewBake>();
+            preview_bake
+                .baked
+                .as_ref()
+                .map(|b| (b.world_size, b.root_offset, b.depth))
+        };
+        if let Some((world_size, root_offset, depth)) = preview_info {
+            let mut gpu_data = world.resource_mut::<PreviewGpuData>();
+            gpu_data.pool_offset = offset;
+            gpu_data.world_size = world_size;
+            gpu_data.root_offset = root_offset;
+            gpu_data.depth = depth;
+        }
+    }
 
     if buffers_recreated {
         let device = world.resource::<GpuAccess>().device.clone();

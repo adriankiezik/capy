@@ -73,3 +73,70 @@ pub(crate) struct StreamingInfoUniform {
 }
 
 const _: () = assert!(std::mem::size_of::<StreamingInfoUniform>() == 32);
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub(crate) struct PreviewParamsUniform {
+    pub(crate) is_active: u32,
+    pub(crate) pool_offset: u32,
+    pub(crate) world_size: u32,
+    pub(crate) root_offset: u32,
+    pub(crate) depth: u32,
+    pub(crate) _pad0: u32,
+    pub(crate) _pad1: u32,
+    pub(crate) _pad2: u32,
+    pub(crate) pos_x: f32,
+    pub(crate) pos_y: f32,
+    pub(crate) pos_z: f32,
+    pub(crate) tint_strength: f32,
+    pub(crate) tint_r: f32,
+    pub(crate) tint_g: f32,
+    pub(crate) tint_b: f32,
+    pub(crate) _pad3: f32,
+}
+
+const _: () = assert!(std::mem::size_of::<PreviewParamsUniform>() == 64);
+
+impl PreviewParamsUniform {
+    pub(crate) fn inactive() -> Self {
+        Self {
+            is_active: 0,
+            pool_offset: 0,
+            world_size: 0,
+            root_offset: 0,
+            depth: 0,
+            _pad0: 0,
+            _pad1: 0,
+            _pad2: 0,
+            pos_x: 0.0,
+            pos_y: 0.0,
+            pos_z: 0.0,
+            tint_strength: 0.0,
+            tint_r: 0.0,
+            tint_g: 0.0,
+            tint_b: 0.0,
+            _pad3: 0.0,
+        }
+    }
+
+    pub(crate) fn from_gpu_data(data: &capy_core::PreviewGpuData) -> Self {
+        Self {
+            is_active: u32::from(data.active),
+            pool_offset: data.pool_offset,
+            world_size: data.world_size,
+            root_offset: data.root_offset,
+            depth: data.depth,
+            _pad0: 0,
+            _pad1: 0,
+            _pad2: 0,
+            pos_x: data.position[0],
+            pos_y: data.position[1],
+            pos_z: data.position[2],
+            tint_strength: data.tint_strength,
+            tint_r: data.tint[0],
+            tint_g: data.tint[1],
+            tint_b: data.tint[2],
+            _pad3: 0.0,
+        }
+    }
+}

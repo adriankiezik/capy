@@ -9,6 +9,7 @@ mod mesh_dirty;
 mod pending_edits;
 mod pick_pipeline;
 mod prefab_library;
+mod prefab_preview;
 mod prefab_task;
 mod save_state;
 mod selection_state;
@@ -29,6 +30,7 @@ pub(crate) use prefab_library::{
     PrefabEntry, PrefabEntryStatus, PrefabJobKind, PrefabJobSignature, PrefabLibrary,
     next_prefab_scan_after,
 };
+pub(crate) use prefab_preview::PreviewBake;
 pub(crate) use prefab_task::{PrefabJobResult, PrefabTask};
 pub(crate) use save_state::{SaveResult, SaveState};
 pub(crate) use selection_state::{Face, SelectionPhase, SelectionState};

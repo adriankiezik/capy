@@ -5,7 +5,9 @@ use capy_core::{Camera, VoxelMeshData};
 use crate::camera::{CameraUniform, clip_from_world};
 use crate::error::{RenderError, Result};
 use crate::resources::RendererSettings;
-use crate::settings::{RenderSettingsUniform, StreamingInfoUniform, to_render_settings_uniform};
+use crate::settings::{
+    PreviewParamsUniform, RenderSettingsUniform, StreamingInfoUniform, to_render_settings_uniform,
+};
 use crate::uniform_buffer::UniformBuffer;
 
 pub struct PreparedVoxelSceneUpload {
@@ -28,6 +30,7 @@ pub(crate) struct VoxelSceneBuffers {
     pub(crate) camera_buffer: UniformBuffer<CameraUniform>,
     pub(crate) render_settings_buffer: UniformBuffer<RenderSettingsUniform>,
     pub(crate) streaming_info_buffer: UniformBuffer<StreamingInfoUniform>,
+    pub(crate) preview_params_buffer: UniformBuffer<PreviewParamsUniform>,
     pub(crate) pool_buffer: wgpu::Buffer,
     pub(crate) avg_pool_buffer: wgpu::Buffer,
     pub(crate) indirection_buffer: wgpu::Buffer,
@@ -71,10 +74,14 @@ impl VoxelSceneBuffers {
         };
         let streaming_info_buffer = UniformBuffer::new(device, "Streaming Info", &streaming_info);
 
+        let preview_params = PreviewParamsUniform::inactive();
+        let preview_params_buffer = UniformBuffer::new(device, "Preview Params", &preview_params);
+
         Ok(Self {
             camera_buffer,
             render_settings_buffer,
             streaming_info_buffer,
+            preview_params_buffer,
             pool_buffer: upload.pool_buffer,
             avg_pool_buffer: upload.avg_pool_buffer,
             indirection_buffer: upload.indirection_buffer,
@@ -132,6 +139,15 @@ impl VoxelSceneBuffers {
     pub(crate) fn upload_render_settings(&self, queue: &wgpu::Queue, settings: &RendererSettings) {
         self.render_settings_buffer
             .write(queue, &to_render_settings_uniform(settings));
+    }
+
+    pub(crate) fn upload_preview_params(
+        &self,
+        queue: &wgpu::Queue,
+        data: &capy_core::PreviewGpuData,
+    ) {
+        let uniform = PreviewParamsUniform::from_gpu_data(data);
+        self.preview_params_buffer.write(queue, &uniform);
     }
 
     pub(crate) fn shared_voxel_buffers(&self) -> crate::resources::SharedVoxelBuffers {
