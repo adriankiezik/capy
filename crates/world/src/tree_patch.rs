@@ -1,4 +1,4 @@
-use capy_core::{BakedChunkData, MaterialId};
+use capy_core::{BakedChunkData, MaterialId, is_foliage_material};
 
 use crate::sparse64tree::{compute_leaf_avg_color, local_to_bit};
 
@@ -63,12 +63,33 @@ pub fn patch_baked_chunk(old: &BakedChunkData, edits: &[VoxelEdit]) -> BakedChun
     // Ensure avg_buf matches buf length
     avg_buf.resize(buf.len(), 0);
 
+    // Conservatively expand foliage Y range based on edits (never shrink).
+    let mut foliage_y_min = old.foliage_y_min;
+    let mut foliage_y_max = old.foliage_y_max;
+    for edit in edits {
+        if is_foliage_material(edit.material) {
+            if foliage_y_min >= foliage_y_max {
+                // No foliage before — initialize range.
+                foliage_y_min = edit.y;
+                foliage_y_max = edit.y + 1;
+            } else {
+                foliage_y_min = foliage_y_min.min(edit.y);
+                foliage_y_max = foliage_y_max.max(edit.y + 1);
+            }
+        }
+    }
+
     BakedChunkData {
         dag_buffer: buf,
         avg_color_buffer: avg_buf,
         root_offset: root,
         world_size,
         depth,
+        foliage_y_min,
+        foliage_y_max,
+        // Bitmap and bands are recomputed by compact_baked_chunk after patching.
+        foliage_bitmap: None,
+        foliage_y_bands: 0,
     }
 }
 
@@ -117,12 +138,35 @@ pub fn patch_baked_chunk_bricks_owned(
 
     avg_buf.resize(buf.len(), 0);
 
+    // Conservatively expand foliage Y range based on brick edits (never shrink).
+    let mut foliage_y_min = old.foliage_y_min;
+    let mut foliage_y_max = old.foliage_y_max;
+    for brick in bricks.iter() {
+        let has_foliage = brick.materials.iter().any(|&m| is_foliage_material(m));
+        if has_foliage {
+            let brick_y_min = brick.by * BRANCH;
+            let brick_y_max = brick_y_min + BRANCH;
+            if foliage_y_min >= foliage_y_max {
+                foliage_y_min = brick_y_min;
+                foliage_y_max = brick_y_max;
+            } else {
+                foliage_y_min = foliage_y_min.min(brick_y_min);
+                foliage_y_max = foliage_y_max.max(brick_y_max);
+            }
+        }
+    }
+
     BakedChunkData {
         dag_buffer: buf,
         avg_color_buffer: avg_buf,
         root_offset: new_root,
         world_size,
         depth,
+        foliage_y_min,
+        foliage_y_max,
+        // Bitmap and bands are recomputed by compact_baked_chunk after patching.
+        foliage_bitmap: None,
+        foliage_y_bands: 0,
     }
 }
 

@@ -4,13 +4,23 @@ use bevy_ecs::resource::Resource;
 
 use crate::{BakedChunkData, MATERIAL_PALETTE_SIZE};
 
+/// Number of u32 words per slot in the indirection table.
+const INDIRECTION_STRIDE: usize = 8;
+
+/// Sentinel value: chunk has foliage but no bitmap (all columns are foliage).
+const FOLIAGE_BITMAP_ALL: u32 = 0xFFFFFFFE;
+/// Sentinel value: chunk has no foliage at all.
+const FOLIAGE_BITMAP_NONE: u32 = 0xFFFFFFFF;
+
 #[derive(Resource)]
 pub struct VoxelMeshData {
-    /// Concatenated DAG node data for all chunks in the pool.
+    /// Concatenated DAG node data for all chunks in the pool,
+    /// followed by pooled foliage bitmaps.
     pub pool_dag: Vec<u32>,
-    /// Concatenated average-color data, parallel to pool_dag.
+    /// Concatenated average-color data, parallel to pool_dag (DAG portion only).
     pub pool_avg: Vec<u32>,
-    /// Per-slot indirection: [world_size, root_offset, depth, pool_offset] × total_slots.
+    /// Per-slot indirection: [world_size, root_offset, depth, pool_offset,
+    ///                        foliage_y_min, foliage_y_max, foliage_bitmap_offset, _reserved] × total_slots.
     pub indirection: Vec<u32>,
     /// Chunk-coordinate origin of the grid (min corner).
     pub grid_min: [i32; 3],
@@ -23,12 +33,52 @@ pub struct VoxelMeshData {
     pub material_palette: [[f32; 3]; MATERIAL_PALETTE_SIZE],
 }
 
+/// Write one indirection slot at the given index.
+fn write_slot(
+    indirection: &mut [u32],
+    idx: usize,
+    baked: &BakedChunkData,
+    pool_offset: u32,
+    bitmap_offset: u32,
+) {
+    let base = idx * INDIRECTION_STRIDE;
+    indirection[base] = baked.world_size;
+    indirection[base + 1] = baked.root_offset;
+    indirection[base + 2] = baked.depth;
+    indirection[base + 3] = pool_offset;
+    indirection[base + 4] = baked.foliage_y_min;
+    indirection[base + 5] = baked.foliage_y_max;
+    indirection[base + 6] = bitmap_offset;
+    indirection[base + 7] = baked.foliage_y_bands;
+}
+
+/// Compute the foliage bitmap pool offset for a baked chunk.
+/// Appends the bitmap to `pool` if needed and returns the offset sentinel.
+fn pool_foliage_bitmap(
+    pool: &mut Vec<u32>,
+    foliage_y_min: u32,
+    foliage_y_max: u32,
+    foliage_bitmap: &Option<Vec<u32>>,
+) -> u32 {
+    if foliage_y_min >= foliage_y_max {
+        return FOLIAGE_BITMAP_NONE;
+    }
+    match foliage_bitmap {
+        None => FOLIAGE_BITMAP_ALL,
+        Some(bitmap) => {
+            let offset = pool.len() as u32;
+            pool.extend_from_slice(bitmap);
+            offset
+        }
+    }
+}
+
 impl VoxelMeshData {
     pub fn empty() -> Self {
         Self {
             pool_dag: vec![0],
             pool_avg: vec![0],
-            indirection: vec![0; 4],
+            indirection: vec![0; INDIRECTION_STRIDE],
             grid_min: [0; 3],
             grid_dim: [1, 1, 1],
             chunk_size_xz: 1,
@@ -44,9 +94,25 @@ impl VoxelMeshData {
         chunk_size_y: u32,
         material_palette: [[f32; 3]; MATERIAL_PALETTE_SIZE],
     ) -> Self {
-        let indirection = vec![baked.world_size, baked.root_offset, baked.depth, 0];
+        let mut pool_dag = baked.dag_buffer;
+        let bitmap_offset = pool_foliage_bitmap(
+            &mut pool_dag,
+            baked.foliage_y_min,
+            baked.foliage_y_max,
+            &baked.foliage_bitmap,
+        );
+        let mut indirection = vec![0u32; INDIRECTION_STRIDE];
+        let base = 0;
+        indirection[base] = baked.world_size;
+        indirection[base + 1] = baked.root_offset;
+        indirection[base + 2] = baked.depth;
+        indirection[base + 3] = 0;
+        indirection[base + 4] = baked.foliage_y_min;
+        indirection[base + 5] = baked.foliage_y_max;
+        indirection[base + 6] = bitmap_offset;
+        indirection[base + 7] = baked.foliage_y_bands;
         Self {
-            pool_dag: baked.dag_buffer,
+            pool_dag,
             pool_avg: baked.avg_color_buffer,
             indirection,
             grid_min: [0, 0, 0],
@@ -70,19 +136,25 @@ impl VoxelMeshData {
         let grid_dim = [grid_dim_xz, 1u32, grid_dim_xz];
         let total_slots = (grid_dim[0] * grid_dim[1] * grid_dim[2]) as usize;
 
-        let mut indirection = vec![0u32; total_slots * 4];
+        let mut pool_dag = canonical.dag_buffer.clone();
+        // Canonical chunk: pool bitmap once, all slots share it.
+        let bitmap_offset = pool_foliage_bitmap(
+            &mut pool_dag,
+            canonical.foliage_y_min,
+            canonical.foliage_y_max,
+            &canonical.foliage_bitmap,
+        );
+
+        let mut indirection = vec![0u32; total_slots * INDIRECTION_STRIDE];
         for z in 0..grid_dim_xz {
             for x in 0..grid_dim_xz {
                 let idx = (x + z * grid_dim_xz) as usize;
-                indirection[idx * 4] = canonical.world_size;
-                indirection[idx * 4 + 1] = canonical.root_offset;
-                indirection[idx * 4 + 2] = canonical.depth;
-                indirection[idx * 4 + 3] = 0; // all share same pool data
+                write_slot(&mut indirection, idx, canonical, 0, bitmap_offset);
             }
         }
 
         Self {
-            pool_dag: canonical.dag_buffer.clone(),
+            pool_dag,
             pool_avg: canonical.avg_color_buffer.clone(),
             indirection,
             grid_min: [-half, 0, -half],
@@ -133,9 +205,27 @@ impl VoxelMeshData {
             edited_offsets.insert(*coord, offset);
         }
 
+        // Pool foliage bitmaps after all DAG data.
+        let canonical_bmp = pool_foliage_bitmap(
+            &mut pool_dag,
+            canonical.foliage_y_min,
+            canonical.foliage_y_max,
+            &canonical.foliage_bitmap,
+        );
+        let mut edited_bmp_offsets: HashMap<[i32; 3], u32> = HashMap::with_capacity(edited.len());
+        for (coord, baked) in edited {
+            let bmp = pool_foliage_bitmap(
+                &mut pool_dag,
+                baked.foliage_y_min,
+                baked.foliage_y_max,
+                &baked.foliage_bitmap,
+            );
+            edited_bmp_offsets.insert(*coord, bmp);
+        }
+
         // Build indirection: canonical by default, override edited slots
         let grid_min = [-half, 0i32, -half];
-        let mut indirection = vec![0u32; total_slots * 4];
+        let mut indirection = vec![0u32; total_slots * INDIRECTION_STRIDE];
         for z in 0..grid_dim_xz {
             for x in 0..grid_dim_xz {
                 let idx = (x + z * grid_dim_xz) as usize;
@@ -143,15 +233,10 @@ impl VoxelMeshData {
 
                 if let Some(&pool_offset) = edited_offsets.get(&chunk_coord) {
                     let baked = &edited[&chunk_coord];
-                    indirection[idx * 4] = baked.world_size;
-                    indirection[idx * 4 + 1] = baked.root_offset;
-                    indirection[idx * 4 + 2] = baked.depth;
-                    indirection[idx * 4 + 3] = pool_offset;
+                    let bmp = edited_bmp_offsets[&chunk_coord];
+                    write_slot(&mut indirection, idx, baked, pool_offset, bmp);
                 } else {
-                    indirection[idx * 4] = canonical.world_size;
-                    indirection[idx * 4 + 1] = canonical.root_offset;
-                    indirection[idx * 4 + 2] = canonical.depth;
-                    indirection[idx * 4 + 3] = 0;
+                    write_slot(&mut indirection, idx, canonical, 0, canonical_bmp);
                 }
             }
         }

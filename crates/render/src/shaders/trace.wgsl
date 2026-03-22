@@ -119,11 +119,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     );
     let ray_origin = camera.camera_pos;
 
-    // Trace voxels first, then grass with the voxel hit as a depth ceiling
+    // Trace voxels + grass integrated in the DDA loop
     let hit = trace_ray(ray_origin, ray_dir);
-    let voxel_t = select(1e20, length(hit.hit_pos_local - ray_origin), hit.hit);
-    let grass = trace_grass_ray(ray_origin, ray_dir, camera.time, voxel_t);
-    var use_grass = grass.hit;
+    let grass = dda_grass_hit;
+    var use_grass = grass.hit && (!hit.hit || grass.t < length(hit.hit_pos_local - ray_origin));
 
     // Preview overlay: trace the prefab preview DAG if active
     var preview_hit_result: HitResult;
@@ -175,7 +174,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         if preview_hit_result.is_lod_hit {
             base = preview_hit_result.color_override;
         } else {
-            base = render_settings.material_colors[min(preview_hit_result.material, 1023u)].rgb;
+            base = render_settings.material_colors[min(preview_hit_result.material & 0x7FFFu, 1023u)].rgb;
         }
         base = mix(base, tint_color, preview.tint_strength);
 
@@ -230,7 +229,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         if hit.is_lod_hit {
             base = hit.color_override;
         } else {
-            base = render_settings.material_colors[min(hit.material, 1023u)].rgb;
+            base = render_settings.material_colors[min(hit.material & 0x7FFFu, 1023u)].rgb;
         }
 
         let shading_pos = hit.hit_pos_local;

@@ -120,6 +120,12 @@ pub fn load_region(
                 root_offset,
                 world_size,
                 depth,
+                // Foliage range is recomputed from voxel data on bake; default
+                // to "no foliage" for region-loaded chunks until a rebake occurs.
+                foliage_y_min: 0,
+                foliage_y_max: 0,
+                foliage_bitmap: None,
+                foliage_y_bands: 0,
             },
         );
     }

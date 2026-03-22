@@ -14,6 +14,16 @@ pub enum EditorTool {
     Smooth,
     Prefab,
     Select,
+    /// Paint or remove foliage (grass) on surface voxels.
+    Foliage,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FoliageAction {
+    /// Paint foliage material onto surface voxels.
+    Paint,
+    /// Remove foliage material from surface voxels (replace with dirt).
+    Erase,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,6 +49,8 @@ pub struct EditorState {
     pub prefab_scroll_last: Option<Instant>,
     /// Prefab rotation in 90° increments (0..4) around the Y axis.
     pub prefab_rotation: u8,
+    /// Current foliage tool action (paint or erase).
+    pub foliage_action: FoliageAction,
 }
 
 impl Default for EditorState {
@@ -58,6 +70,7 @@ impl Default for EditorState {
             prefab_search: String::new(),
             prefab_scroll_last: None,
             prefab_rotation: 0,
+            foliage_action: FoliageAction::Paint,
         }
     }
 }

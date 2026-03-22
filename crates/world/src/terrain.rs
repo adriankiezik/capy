@@ -1,4 +1,4 @@
-use capy_core::{BakedChunkData, MaterialId};
+use capy_core::{BakedChunkData, FOLIAGE_BIT, MaterialId};
 
 use crate::bake;
 use crate::error::Result;
@@ -14,7 +14,8 @@ pub const CHUNK_Y: u32 = 1024;
 pub const FLAT_FILL_HEIGHT: u32 = 128;
 
 /// Material ID used for the flat-fill solid layer (0 = air).
-pub const FLAT_FILL_MATERIAL: MaterialId = 1;
+/// Includes the foliage bit so grass grows on the default terrain.
+pub const FLAT_FILL_MATERIAL: MaterialId = 1 | FOLIAGE_BIT;
 
 /// Generate a flat-world voxel grid: solid from y=0..FLAT_FILL_HEIGHT, air above.
 pub fn generate_flat_grid() -> Result<(VoxelGrid, Vec<u16>)> {

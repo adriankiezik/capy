@@ -10,8 +10,8 @@ use tracing::{error, info};
 
 use crate::resources::{
     BrickChange, BrushShape, EditAction, EditHistory, EditTask, EditTaskOutput, EditableChunk,
-    EditableWorld, EditorState, EditorTool, InputEdge, MeshDirty, PendingEdits, PrefabLibrary,
-    UpdatedChunk, VoxelHit, WorldGrid,
+    EditableWorld, EditorState, EditorTool, FoliageAction, InputEdge, MeshDirty, PendingEdits,
+    PrefabLibrary, UpdatedChunk, VoxelHit, WorldGrid,
 };
 
 const BRICK: u32 = 4;
@@ -155,6 +155,7 @@ pub(crate) fn edit_apply(
 
     let selected_material = state.selected_material;
     let brush_shape = state.brush_shape;
+    let foliage_action = state.foliage_action;
     let r = state.brush_radius as i32;
     let cxz = capy_world::CHUNK_XZ as i32;
     let cy = capy_world::CHUNK_Y as i32;
@@ -224,6 +225,7 @@ pub(crate) fn edit_apply(
                 selected_material,
                 r,
                 brush_shape,
+                foliage_action,
                 chunk_snapshots,
             );
             let _ = tx.send(output);
@@ -418,6 +420,7 @@ fn compute_edit_output(
     selected_material: MaterialId,
     radius: i32,
     brush_shape: BrushShape,
+    foliage_action: FoliageAction,
     mut chunks: HashMap<[i32; 3], EditableChunk>,
 ) -> EditTaskOutput {
     let cxz = capy_world::CHUNK_XZ as i32;
@@ -540,6 +543,55 @@ fn compute_edit_output(
                                                     continue;
                                                 }
                                                 selected_material
+                                            }
+                                            EditorTool::Foliage => {
+                                                // Only affect the surface layer at the clicked Y level.
+                                                if old == 0 {
+                                                    continue;
+                                                }
+                                                // World-space Y of this voxel
+                                                let wy = org[1] + vy_base + ly;
+                                                if wy != target.y {
+                                                    continue;
+                                                }
+                                                let above_is_air = if ly + 1 < BRICK as i32 {
+                                                    // Within the same brick
+                                                    let above_bit = (lx
+                                                        + (ly + 1) * BRICK as i32
+                                                        + lz * BRICK as i32 * BRICK as i32)
+                                                        as usize;
+                                                    new_brick[above_bit] == 0
+                                                } else {
+                                                    let above_wy = vy_base + ly + 1;
+                                                    if above_wy >= cy {
+                                                        true // top of chunk
+                                                    } else {
+                                                        let aby = by + 1;
+                                                        let above_brick =
+                                                            chunk.read_brick(bx, aby, bz);
+                                                        let above_bit = (lx
+                                                            + lz * BRICK as i32 * BRICK as i32)
+                                                            as usize;
+                                                        above_brick[above_bit] == 0
+                                                    }
+                                                };
+                                                if !above_is_air {
+                                                    continue; // not the surface voxel
+                                                }
+                                                match foliage_action {
+                                                    FoliageAction::Paint => {
+                                                        if capy_core::is_foliage_material(old) {
+                                                            continue; // already has foliage
+                                                        }
+                                                        old | capy_core::FOLIAGE_BIT
+                                                    }
+                                                    FoliageAction::Erase => {
+                                                        if !capy_core::is_foliage_material(old) {
+                                                            continue; // no foliage to remove
+                                                        }
+                                                        old & !capy_core::FOLIAGE_BIT
+                                                    }
+                                                }
                                             }
                                             _ => continue,
                                         };

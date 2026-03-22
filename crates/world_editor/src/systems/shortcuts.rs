@@ -31,6 +31,9 @@ pub(crate) fn shortcuts(edge: Res<InputEdge>, mut state: ResMut<EditorState>) {
     if edge.keys_just_pressed.contains(&KeyCode::Digit9) {
         state.active_tool = EditorTool::Select;
     }
+    if edge.keys_just_pressed.contains(&KeyCode::Digit0) {
+        state.active_tool = EditorTool::Foliage;
+    }
     if edge.keys_just_pressed.contains(&KeyCode::KeyB) {
         state.brush_shape = match state.brush_shape {
             BrushShape::Sphere => BrushShape::Cube,

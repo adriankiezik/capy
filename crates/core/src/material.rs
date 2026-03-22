@@ -2,6 +2,20 @@ use std::sync::LazyLock;
 
 pub type MaterialId = u16;
 
+/// Bit flag stored in the high bit of a `MaterialId` to indicate foliage (grass).
+/// The visual material is stored in the lower 15 bits.
+pub const FOLIAGE_BIT: MaterialId = 0x8000;
+
+/// Returns `true` if the given material ID has the foliage flag set.
+pub const fn is_foliage_material(id: MaterialId) -> bool {
+    (id & FOLIAGE_BIT) != 0
+}
+
+/// Strip the foliage flag and return the visual material index (0–1023).
+pub const fn visual_material(id: MaterialId) -> MaterialId {
+    id & !FOLIAGE_BIT
+}
+
 pub const MATERIAL_PALETTE_SIZE: usize = 1024;
 
 const RESERVED_COLORS: [[f32; 3]; 24] = [

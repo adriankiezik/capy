@@ -7,7 +7,7 @@ mod terrain;
 mod tree_patch;
 mod voxel_grid;
 
-pub use bake::{bake_chunk, bake_chunk_fast, compact_baked_chunk};
+pub use bake::{bake_chunk, bake_chunk_fast, compact_baked_chunk, recompute_foliage_bitmap};
 pub use error::WorldError;
 pub use sparse64tree::ChunkOccupancy;
 pub use stress::{StressPattern, generate_stress_baked, generate_stress_world};

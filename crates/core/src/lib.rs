@@ -13,7 +13,10 @@ pub use input_messages::{
     CursorMovedMessage, KeyboardInputMessage, MouseButton, MouseButtonMessage, MouseMotionMessage,
 };
 pub use key_code::KeyCode;
-pub use material::{MATERIAL_COLORS, MATERIAL_PALETTE_SIZE, MaterialId, closest_material};
+pub use material::{
+    FOLIAGE_BIT, MATERIAL_COLORS, MATERIAL_PALETTE_SIZE, MaterialId, closest_material,
+    is_foliage_material, visual_material,
+};
 pub use plugin::Plugin;
 pub use resources::{
     AppExit, Camera, CursorMode, FrameProfiler, FrameTime, GameWindow, PreviewGpuData, RawInput,

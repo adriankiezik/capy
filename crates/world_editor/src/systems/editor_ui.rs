@@ -4,7 +4,7 @@ use capy_ui::EguiContext;
 use glam::{Mat4, Vec3, Vec4};
 
 use crate::resources::{
-    BrushShape, EditorState, EditorTool, Face, PrefabLibrary, SaveResult, SaveState,
+    BrushShape, EditorState, EditorTool, Face, FoliageAction, PrefabLibrary, SaveResult, SaveState,
     SelectionPhase, SelectionState,
 };
 
@@ -57,6 +57,7 @@ pub(crate) fn editor_ui(
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut state.active_tool, EditorTool::Prefab, "Prefab (8)");
                 ui.selectable_value(&mut state.active_tool, EditorTool::Select, "Select (9)");
+                ui.selectable_value(&mut state.active_tool, EditorTool::Foliage, "Foliage (0)");
             });
 
             if state.active_tool == EditorTool::Select {
@@ -69,7 +70,9 @@ pub(crate) fn editor_ui(
                 ui.separator();
             }
 
-            if state.active_tool != EditorTool::Prefab && state.active_tool != EditorTool::Select {
+            let is_brush_tool =
+                !matches!(state.active_tool, EditorTool::Prefab | EditorTool::Select);
+            if is_brush_tool {
                 ui.label("Brush Size");
                 let mut radius = state.brush_radius;
                 ui.add(egui::Slider::new(&mut radius, 1..=128));
@@ -84,41 +87,60 @@ pub(crate) fn editor_ui(
                 });
                 ui.separator();
 
-                ui.label("Color");
-                let mut color = egui::Color32::from_rgb(
-                    state.picked_color[0],
-                    state.picked_color[1],
-                    state.picked_color[2],
-                );
-                let response = egui::color_picker::color_edit_button_srgba(
-                    ui,
-                    &mut color,
-                    egui::color_picker::Alpha::Opaque,
-                );
-                if response.changed() {
-                    state.picked_color = [color.r(), color.g(), color.b()];
-                    let color_f32 = [
-                        color.r() as f32 / 255.0,
-                        color.g() as f32 / 255.0,
-                        color.b() as f32 / 255.0,
-                    ];
-                    state.selected_material = capy_core::closest_material(color_f32);
+                if state.active_tool == EditorTool::Foliage {
+                    ui.label("Foliage Action");
+                    ui.horizontal(|ui| {
+                        ui.selectable_value(
+                            &mut state.foliage_action,
+                            FoliageAction::Paint,
+                            "Paint",
+                        );
+                        ui.selectable_value(
+                            &mut state.foliage_action,
+                            FoliageAction::Erase,
+                            "Erase",
+                        );
+                    });
+                    ui.separator();
                 }
 
-                let mat = state.selected_material;
-                let matched = MATERIAL_COLORS[mat as usize];
-                let matched_color = egui::Color32::from_rgb(
-                    (matched[0] * 255.0) as u8,
-                    (matched[1] * 255.0) as u8,
-                    (matched[2] * 255.0) as u8,
-                );
-                ui.horizontal(|ui| {
-                    let (rect, _) =
-                        ui.allocate_exact_size(egui::vec2(20.0, 20.0), egui::Sense::hover());
-                    ui.painter().rect_filled(rect, 2.0, matched_color);
-                    ui.label(format!("Palette #{mat}"));
-                });
-                ui.separator();
+                if state.active_tool != EditorTool::Foliage {
+                    ui.label("Color");
+                    let mut color = egui::Color32::from_rgb(
+                        state.picked_color[0],
+                        state.picked_color[1],
+                        state.picked_color[2],
+                    );
+                    let response = egui::color_picker::color_edit_button_srgba(
+                        ui,
+                        &mut color,
+                        egui::color_picker::Alpha::Opaque,
+                    );
+                    if response.changed() {
+                        state.picked_color = [color.r(), color.g(), color.b()];
+                        let color_f32 = [
+                            color.r() as f32 / 255.0,
+                            color.g() as f32 / 255.0,
+                            color.b() as f32 / 255.0,
+                        ];
+                        state.selected_material = capy_core::closest_material(color_f32);
+                    }
+
+                    let mat = state.selected_material;
+                    let matched = MATERIAL_COLORS[mat as usize];
+                    let matched_color = egui::Color32::from_rgb(
+                        (matched[0] * 255.0) as u8,
+                        (matched[1] * 255.0) as u8,
+                        (matched[2] * 255.0) as u8,
+                    );
+                    ui.horizontal(|ui| {
+                        let (rect, _) =
+                            ui.allocate_exact_size(egui::vec2(20.0, 20.0), egui::Sense::hover());
+                        ui.painter().rect_filled(rect, 2.0, matched_color);
+                        ui.label(format!("Palette #{mat}"));
+                    });
+                    ui.separator();
+                }
             }
 
             if state.active_tool == EditorTool::Prefab {

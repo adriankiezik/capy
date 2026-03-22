@@ -46,9 +46,9 @@ fn build_common_prefix() -> String {
     out.push('\n');
     out.push_str(COMMON_RENDER_SETTINGS);
     out.push('\n');
-    out.push_str(COMMON_TRAVERSAL);
-    out.push('\n');
     out.push_str(COMMON_GRASS);
+    out.push('\n');
+    out.push_str(COMMON_TRAVERSAL);
     out.push('\n');
     out
 }

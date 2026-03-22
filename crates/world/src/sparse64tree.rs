@@ -464,7 +464,7 @@ pub(crate) fn compute_leaf_avg_color(materials: &[MaterialId; BRANCH_CUBED], mas
     let mut sum = [0.0f32; 3];
     for (bit, &mat_id) in materials.iter().enumerate().take(BRANCH_CUBED) {
         if (mask & (1u64 << bit)) != 0 {
-            let mat = mat_id as usize;
+            let mat = capy_core::visual_material(mat_id) as usize;
             if mat < MATERIAL_PALETTE_SIZE {
                 sum[0] += MATERIAL_COLORS[mat][0];
                 sum[1] += MATERIAL_COLORS[mat][1];
