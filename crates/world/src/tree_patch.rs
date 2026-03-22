@@ -777,3 +777,76 @@ fn recompute_avg_color(buf: &[u32], avg_buf: &mut Vec<u32>, node_offset: u32, ch
         avg_buf[node_offset as usize] = avg_word;
     }
 }
+
+// ---------------------------------------------------------------------------
+// Leaf brick extraction — traverse DAG to recover editable brick data
+// ---------------------------------------------------------------------------
+
+/// Extract all leaf bricks from a baked chunk DAG.
+///
+/// Returns `(bx, by, bz, materials)` tuples for every occupied leaf node.
+/// Only bricks that differ from all-zero are returned.
+pub fn extract_leaf_bricks(baked: &BakedChunkData) -> Vec<LeafBrickEdit> {
+    let buf = &baked.dag_buffer;
+    if buf.is_empty() {
+        return Vec::new();
+    }
+
+    let mut out = Vec::new();
+
+    // Stack entries: (node_offset, remaining_depth, base_bx, base_by, base_bz, blocks_at_level)
+    // blocks_at_level = how many leaf blocks one child at this level spans per axis.
+    let top_blocks = baked.world_size / BRANCH as u32;
+    let mut stack: Vec<(u32, u32, u32, u32, u32, u32)> =
+        vec![(baked.root_offset, baked.depth, 0, 0, 0, top_blocks)];
+
+    while let Some((offset, depth, base_bx, base_by, base_bz, blocks)) = stack.pop() {
+        let o = offset as usize;
+        if o + HEADER_WORDS > buf.len() {
+            continue;
+        }
+
+        let mask = (buf[o] as u64) | ((buf[o + 1] as u64) << 32);
+        let is_leaf = (buf[o + 2] & 1) != 0;
+
+        if is_leaf || depth <= 1 {
+            let materials = read_leaf_materials(buf, offset);
+            if materials.iter().any(|&m| m != 0) {
+                out.push(LeafBrickEdit {
+                    bx: base_bx,
+                    by: base_by,
+                    bz: base_bz,
+                    materials,
+                });
+            }
+            continue;
+        }
+
+        // Inner node — iterate set bits and push children.
+        let child_blocks = blocks / BRANCH as u32;
+        let mut remaining = mask;
+        let mut packed_idx = 0usize;
+        while remaining != 0 {
+            let bit = remaining.trailing_zeros();
+            remaining &= remaining - 1;
+
+            let lz = bit / (BRANCH * BRANCH);
+            let ly = (bit / BRANCH) % BRANCH;
+            let lx = bit % BRANCH;
+
+            let child_off = buf[o + HEADER_WORDS + packed_idx];
+            packed_idx += 1;
+
+            stack.push((
+                child_off,
+                depth - 1,
+                base_bx + lx * child_blocks,
+                base_by + ly * child_blocks,
+                base_bz + lz * child_blocks,
+                child_blocks,
+            ));
+        }
+    }
+
+    out
+}

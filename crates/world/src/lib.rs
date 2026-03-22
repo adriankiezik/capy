@@ -16,7 +16,7 @@ pub use terrain::{
     generate_flat_grid,
 };
 pub use tree_patch::{
-    LeafBrickEdit, VoxelEdit, patch_baked_chunk, patch_baked_chunk_bricks,
+    LeafBrickEdit, VoxelEdit, extract_leaf_bricks, patch_baked_chunk, patch_baked_chunk_bricks,
     patch_baked_chunk_bricks_owned,
 };
 pub use voxel_grid::VoxelGrid;

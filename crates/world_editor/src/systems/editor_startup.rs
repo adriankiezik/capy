@@ -87,12 +87,25 @@ pub(crate) fn editor_startup(world: &mut World) -> Result<(), BevyError> {
         hold_to_look: true,
         ..FlyCameraConfig::default()
     });
+    // Seed EditableWorld from loaded chunks so the edit tools and undo can
+    // see the loaded voxel data (not just canonical flat terrain).
+    let mut editable = EditableWorld::default();
+    for (coord, baked) in &edited_baked {
+        let leaf_bricks = capy_world::extract_leaf_bricks(baked);
+        if !leaf_bricks.is_empty() {
+            let chunk = editable.chunks.entry(*coord).or_default();
+            for brick in leaf_bricks {
+                chunk.write_brick(brick.bx, brick.by, brick.bz, brick.materials);
+            }
+        }
+    }
+
     world.insert_resource(WorldGrid {
         canonical_baked: canonical,
         edited_baked,
         grid_dim_xz: GRID_DIM_XZ,
     });
-    world.insert_resource(EditableWorld::default());
+    world.insert_resource(editable);
     world.insert_resource(EditorState::default());
     world.insert_resource(EditHistory::default());
     world.insert_resource(MeshDirty::default());
