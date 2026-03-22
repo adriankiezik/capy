@@ -9,7 +9,6 @@ const GRASS_MATERIAL_ID: u32 = 1u;
 const GRASS_BLADE_HEIGHT: f32 = 5.0;        // height in voxel units
 const GRASS_PIXEL_SIZE: f32 = 0.5;          // size of each pixel square on the blade
 const GRASS_BLADE_DENSITY: f32 = 0.9;       // probability a grid cell has a blade
-const GRASS_SEARCH_RADIUS: i32 = 4;         // how many grid cells to check around hit
 const GRASS_MAX_DIST: f32 = 8000.0;          // distance beyond which grass is skipped
 const GRASS_SURFACE_Y: f32 = 128.0;         // Y level of the grass surface (flat terrain top)
 
@@ -66,11 +65,6 @@ fn trace_grass_ray(
         return result;
     }
 
-    // Distance cull
-    if t_enter > GRASS_MAX_DIST {
-        return result;
-    }
-
     // Camera-facing blade orientation
     let cam_fwd_xz = vec2<f32>(ray_dir.x, ray_dir.z);
     if length(cam_fwd_xz) < 0.001 {
@@ -80,27 +74,46 @@ fn trace_grass_ray(
     let blade_normal = vec3<f32>(blade_normal_xz.x, 0.0, blade_normal_xz.y);
     let blade_tangent = vec3<f32>(-blade_normal.z, 0.0, blade_normal.x);
 
-    // Search center: where the ray is at the middle of the slab
-    let t_mid = (t_enter + min(t_exit, t_enter + 20.0)) * 0.5;
-    let mid_pos = ray_origin + ray_dir * t_mid;
     let cell_size = 1.0;
-    let center_gx = i32(floor(mid_pos.x / cell_size));
-    let center_gz = i32(floor(mid_pos.z / cell_size));
-
     let wind_dir = normalize(GRASS_WIND_DIR);
 
-    // Distance-based LOD: reduce search radius at distance
-    let grass_dist = t_enter;
-    var search_radius = GRASS_SEARCH_RADIUS;
-    if grass_dist > 2000.0 {
-        search_radius = 1;
-    } else if grass_dist > 1000.0 {
-        search_radius = 2;
-    }
+    // March along the ray through the grass slab instead of a single-center area search.
+    // This fixes grass appearing short/missing at grazing angles where the ray spans
+    // many grid cells but a fixed-area search only covers a tiny fraction.
+    let t_start = max(t_enter, 0.0);
+    let t_end = min(t_exit, max_t);
+    if t_start >= t_end { return result; }
+
+    // Distance cull
+    if t_start > GRASS_MAX_DIST { return result; }
+
+    // Determine how many march steps we need based on XZ span
+    let p_start = ray_origin + ray_dir * t_start;
+    let p_end_raw = ray_origin + ray_dir * min(t_end, t_start + GRASS_MAX_DIST);
+    let xz_span = length(vec2<f32>(p_end_raw.x - p_start.x, p_end_raw.z - p_start.z));
+    // One step every ~2 cells, capped for performance.
+    // Steep angles: few steps (slab is thin in XZ). Grazing angles: more steps.
+    let n_steps = clamp(i32(ceil(xz_span * 0.5)), 1, 24);
+    let dt = (min(t_end, t_start + GRASS_MAX_DIST) - t_start) / f32(n_steps);
 
     var best_t = max_t;
     var best_color = vec3<f32>(0.0);
     var best_pos = vec3<f32>(0.0);
+
+    for (var step = 0; step < n_steps; step++) {
+        let t_sample = t_start + (f32(step) + 0.5) * dt;
+        // Early-out: if this step is already past our best hit, no closer blade can be found ahead
+        if t_sample - 3.0 >= best_t { break; }
+
+        let sample_pos = ray_origin + ray_dir * t_sample;
+        let center_gx = i32(floor(sample_pos.x / cell_size));
+        let center_gz = i32(floor(sample_pos.z / cell_size));
+
+        // Distance-based LOD on the neighborhood radius
+        var search_radius = 1;
+        if t_sample < 40.0 {
+            search_radius = 2;
+        }
 
     for (var dz = -search_radius; dz <= search_radius; dz++) {
         for (var dx = -search_radius; dx <= search_radius; dx++) {
@@ -204,6 +217,7 @@ fn trace_grass_ray(
             best_pos = p;
         }
     }
+    } // end step loop
 
     if best_t < max_t {
         result.hit = true;
