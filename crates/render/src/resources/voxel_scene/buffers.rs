@@ -6,7 +6,8 @@ use crate::camera::{CameraUniform, clip_from_world};
 use crate::error::{RenderError, Result};
 use crate::resources::RendererSettings;
 use crate::settings::{
-    PreviewParamsUniform, RenderSettingsUniform, StreamingInfoUniform, to_render_settings_uniform,
+    PreviewParamsUniform, RenderSettingsUniform, SelectionUniform, StreamingInfoUniform,
+    to_render_settings_uniform,
 };
 use crate::uniform_buffer::UniformBuffer;
 
@@ -31,6 +32,7 @@ pub(crate) struct VoxelSceneBuffers {
     pub(crate) render_settings_buffer: UniformBuffer<RenderSettingsUniform>,
     pub(crate) streaming_info_buffer: UniformBuffer<StreamingInfoUniform>,
     pub(crate) preview_params_buffer: UniformBuffer<PreviewParamsUniform>,
+    pub(crate) selection_buffer: UniformBuffer<SelectionUniform>,
     pub(crate) pool_buffer: wgpu::Buffer,
     pub(crate) avg_pool_buffer: wgpu::Buffer,
     pub(crate) indirection_buffer: wgpu::Buffer,
@@ -77,11 +79,15 @@ impl VoxelSceneBuffers {
         let preview_params = PreviewParamsUniform::inactive();
         let preview_params_buffer = UniformBuffer::new(device, "Preview Params", &preview_params);
 
+        let selection = SelectionUniform::inactive();
+        let selection_buffer = UniformBuffer::new(device, "Selection Highlight", &selection);
+
         Ok(Self {
             camera_buffer,
             render_settings_buffer,
             streaming_info_buffer,
             preview_params_buffer,
+            selection_buffer,
             pool_buffer: upload.pool_buffer,
             avg_pool_buffer: upload.avg_pool_buffer,
             indirection_buffer: upload.indirection_buffer,
@@ -148,6 +154,15 @@ impl VoxelSceneBuffers {
     ) {
         let uniform = PreviewParamsUniform::from_gpu_data(data);
         self.preview_params_buffer.write(queue, &uniform);
+    }
+
+    pub(crate) fn upload_selection(
+        &self,
+        queue: &wgpu::Queue,
+        data: &capy_core::SelectionHighlight,
+    ) {
+        self.selection_buffer
+            .write(queue, &SelectionUniform::from_highlight(data));
     }
 
     pub(crate) fn shared_voxel_buffers(&self) -> crate::resources::SharedVoxelBuffers {

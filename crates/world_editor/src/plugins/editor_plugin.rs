@@ -2,7 +2,7 @@ use bevy_ecs::schedule::{IntoScheduleConfigs, Schedules};
 use bevy_ecs::world::World;
 use capy_core::WindowConfig;
 
-use capy_core::PreviewGpuData;
+use capy_core::{PreviewGpuData, SelectionHighlight};
 
 use crate::resources::{Clipboard, PreviewBake, SaveState, SelectionState};
 use crate::systems;
@@ -26,6 +26,7 @@ impl capy_core::Plugin for EditorPlugin {
         world.insert_resource(SaveState::default());
         world.insert_resource(PreviewBake::default());
         world.insert_resource(PreviewGpuData::default());
+        world.insert_resource(SelectionHighlight::default());
 
         let mut schedules = world.get_resource_or_init::<Schedules>();
         schedules

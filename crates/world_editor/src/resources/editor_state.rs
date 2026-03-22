@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use bevy_ecs::resource::Resource;
 use capy_core::MaterialId;
 
@@ -18,6 +20,8 @@ pub enum EditorTool {
 pub enum BrushShape {
     Sphere,
     Cube,
+    Cylinder,
+    Diamond,
 }
 
 #[derive(Resource)]
@@ -28,6 +32,13 @@ pub struct EditorState {
     pub selected_material: MaterialId,
     /// Color chosen via the egui color picker (sRGB, 0-255).
     pub picked_color: [u8; 3],
+    /// Search filter for the prefab list.
+    pub prefab_search: String,
+    /// Timestamp of the last scroll event for prefab resolution; used to
+    /// throttle regeneration until scrolling settles.
+    pub prefab_scroll_last: Option<Instant>,
+    /// Prefab rotation in 90° increments (0..4) around the Y axis.
+    pub prefab_rotation: u8,
 }
 
 impl Default for EditorState {
@@ -44,6 +55,9 @@ impl Default for EditorState {
             brush_shape: BrushShape::Sphere,
             selected_material: capy_core::closest_material(color_f32),
             picked_color,
+            prefab_search: String::new(),
+            prefab_scroll_last: None,
+            prefab_rotation: 0,
         }
     }
 }

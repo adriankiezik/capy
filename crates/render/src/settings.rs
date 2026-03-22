@@ -97,6 +97,37 @@ pub(crate) struct PreviewParamsUniform {
 
 const _: () = assert!(std::mem::size_of::<PreviewParamsUniform>() == 64);
 
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub(crate) struct SelectionUniform {
+    pub(crate) aabb_min: [f32; 3],
+    pub(crate) is_active: u32,
+    pub(crate) aabb_max: [f32; 3],
+    pub(crate) _pad0: u32,
+}
+
+const _: () = assert!(std::mem::size_of::<SelectionUniform>() == 32);
+
+impl SelectionUniform {
+    pub(crate) fn inactive() -> Self {
+        Self {
+            aabb_min: [0.0; 3],
+            is_active: 0,
+            aabb_max: [0.0; 3],
+            _pad0: 0,
+        }
+    }
+
+    pub(crate) fn from_highlight(data: &capy_core::SelectionHighlight) -> Self {
+        Self {
+            aabb_min: data.aabb_min,
+            is_active: u32::from(data.active),
+            aabb_max: data.aabb_max,
+            _pad0: 0,
+        }
+    }
+}
+
 impl PreviewParamsUniform {
     pub(crate) fn inactive() -> Self {
         Self {

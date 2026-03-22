@@ -17,7 +17,7 @@ pub use material::{MATERIAL_COLORS, MATERIAL_PALETTE_SIZE, MaterialId, closest_m
 pub use plugin::Plugin;
 pub use resources::{
     AppExit, Camera, CursorMode, FrameProfiler, FrameTime, GameWindow, PreviewGpuData, RawInput,
-    VoxelMeshData, WindowConfig,
+    SelectionHighlight, VoxelMeshData, WindowConfig,
 };
 pub use schedule::{PreStartup, Render, Startup, Update};
 pub use window::Window;

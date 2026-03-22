@@ -77,6 +77,7 @@ fn apply_prefab_job_result(library: &mut PrefabLibrary, result: PrefabJobResult)
     }
 
     entry.last_attempt = Some(result.signature);
+    library.prefab_generation = library.prefab_generation.wrapping_add(1);
     library.ensure_selected_entry();
 }
 

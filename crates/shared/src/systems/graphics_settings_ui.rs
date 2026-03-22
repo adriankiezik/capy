@@ -28,8 +28,13 @@ pub fn graphics_settings_ui(world: &mut World) {
             ui.separator();
 
             // --- Upscaling section ---
+            #[cfg(feature = "fsr")]
+            let fsr_currently_enabled = fsr.as_ref().is_some_and(|s| s.enabled && s.supported);
+            #[cfg(not(feature = "fsr"))]
+            let fsr_currently_enabled = false;
+
             #[cfg(feature = "dlss")]
-            let dlss_active = dlss_ui(ui, &mut dlss);
+            let dlss_active = dlss_ui(ui, &mut dlss, fsr_currently_enabled);
             #[cfg(not(feature = "dlss"))]
             let dlss_active = false;
 
@@ -86,7 +91,7 @@ fn fps_ui(ui: &mut egui::Ui, dt: f32) {
 }
 
 #[cfg(feature = "dlss")]
-fn dlss_ui(ui: &mut egui::Ui, dlss: &mut Option<DlssSettings>) -> bool {
+fn dlss_ui(ui: &mut egui::Ui, dlss: &mut Option<DlssSettings>, fsr_active: bool) -> bool {
     let Some(settings) = dlss.as_mut() else {
         return false;
     };
@@ -96,6 +101,12 @@ fn dlss_ui(ui: &mut egui::Ui, dlss: &mut Option<DlssSettings>) -> bool {
     if !settings.supported {
         ui.checkbox(&mut settings.enabled, "Enabled");
         ui.weak("(not supported on this GPU)");
+        return false;
+    }
+
+    if fsr_active {
+        settings.enabled = false;
+        ui.add_enabled(false, egui::Checkbox::new(&mut settings.enabled, "Enabled"));
         return false;
     }
 
@@ -145,7 +156,7 @@ fn fsr_ui(ui: &mut egui::Ui, fsr: &mut Option<FsrSettings>, dlss_active: bool) -
         // DLSS takes priority — disable FSR automatically.
         settings.enabled = false;
         ui.add_enabled(false, egui::Checkbox::new(&mut settings.enabled, "Enabled"));
-        ui.weak("(disabled — DLSS active)");
+
         return false;
     }
 
@@ -236,7 +247,10 @@ fn ao_settings_ui(ui: &mut egui::Ui, settings: &mut RendererSettings, dlss: &Opt
                 settings.ao_mode = AoMode::ScreenSpace;
             }
             if ui
-                .selectable_label(settings.ao_mode == AoMode::RayTraced, "Ray-Traced")
+                .selectable_label(
+                    settings.ao_mode == AoMode::RayTraced,
+                    "Ray-Traced (unstable)",
+                )
                 .clicked()
             {
                 settings.ao_mode = AoMode::RayTraced;

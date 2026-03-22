@@ -18,7 +18,7 @@ mod world_grid;
 
 pub(crate) use bake_task::{BakeTask, RebakeOutput};
 pub(crate) use clipboard::Clipboard;
-pub(crate) use edit_history::{BrickChange, EditAction, EditHistory};
+pub(crate) use edit_history::{BrickChange, EditAction, EditHistory, SelectionChange};
 pub(crate) use edit_task::{EditTask, EditTaskOutput, UpdatedChunk};
 pub(crate) use editable_world::{EditableChunk, EditableWorld};
 pub(crate) use editor_state::{BrushShape, EditorState, EditorTool};

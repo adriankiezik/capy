@@ -14,4 +14,9 @@ pub struct PreviewBake {
     pub source_path: Option<std::path::PathBuf>,
     /// Set when baked data changes and needs to be appended to the pool.
     pub needs_pool_rebuild: bool,
+    /// Tracks `PrefabLibrary::prefab_generation` to detect when the prefab
+    /// data has been reloaded/regenerated and the preview needs re-baking.
+    pub prefab_generation: u32,
+    /// Rotation that was applied when baking (0..4).
+    pub rotation: u8,
 }

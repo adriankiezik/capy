@@ -47,6 +47,29 @@ struct PreviewParams {
 };
 @group(0) @binding(13) var<uniform> preview: PreviewParams;
 
+struct SelectionParams {
+    aabb_min: vec3<f32>,
+    is_active: u32,
+    aabb_max: vec3<f32>,
+    _pad0: u32,
+};
+@group(0) @binding(14) var<uniform> selection: SelectionParams;
+
+fn apply_selection_tint(base: vec3<f32>, pos: vec3<f32>) -> vec3<f32> {
+    if selection.is_active == 0u {
+        return base;
+    }
+    let inside = all(pos >= selection.aabb_min) && all(pos <= selection.aabb_max);
+    if inside {
+        // Bright cyan tint on selected voxels
+        return mix(base, vec3<f32>(0.3, 0.7, 1.0), 0.3);
+    }
+    // Darken and desaturate voxels outside the selection
+    let grey = dot(base, vec3<f32>(0.299, 0.587, 0.114));
+    let desaturated = mix(base, vec3<f32>(grey), 0.4);
+    return desaturated * 0.7;
+}
+
 fn commit_trace_stats(
     hit: HitResult,
     shadow_rays: u32,
@@ -195,7 +218,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let motion = (curr_ndc - prev_ndc) * vec2<f32>(0.5, -0.5);
         let hardware_depth = clamp(clip_pos.z / clip_pos.w, 0.0, 1.0);
 
-        textureStore(gbuf_color_out, pixel, vec4<f32>(base, shadow));
+        let tinted_base_p = apply_selection_tint(base, shading_pos);
+        textureStore(gbuf_color_out, pixel, vec4<f32>(tinted_base_p, shadow));
         textureStore(gbuf_normal_out, pixel, vec4<f32>(shading_normal, 1.0));
         let depth_val = length(shading_pos - ray_origin);
         textureStore(gbuf_depth_out, pixel, vec4<f32>(depth_val, 0.0, 0.0, 0.0));
@@ -228,7 +252,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let motion = (curr_ndc - prev_ndc) * vec2<f32>(0.5, -0.5);
         let hardware_depth = clamp(clip_pos.z / clip_pos.w, 0.0, 1.0);
 
-        textureStore(gbuf_color_out, pixel, vec4<f32>(base, shadow));
+        let tinted_base = apply_selection_tint(base, shading_pos);
+        textureStore(gbuf_color_out, pixel, vec4<f32>(tinted_base, shadow));
         textureStore(gbuf_normal_out, pixel, vec4<f32>(shading_normal, 1.0));
         let depth_val = length(shading_pos - ray_origin);
         textureStore(gbuf_depth_out, pixel, vec4<f32>(depth_val, 0.0, 0.0, 0.0));

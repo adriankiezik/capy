@@ -2,7 +2,7 @@ use bevy_ecs::change_detection::DetectChanges;
 #[cfg(any(feature = "dlss", feature = "fsr"))]
 use bevy_ecs::system::NonSend;
 use bevy_ecs::system::{NonSendMut, Res, ResMut};
-use capy_core::{Camera, PreviewGpuData};
+use capy_core::{Camera, PreviewGpuData, SelectionHighlight};
 
 use crate::camera::clip_from_world;
 use crate::resources::voxel_scene::VoxelSceneBuffers;
@@ -23,6 +23,7 @@ pub(crate) fn upload_uniforms_system(
     settings: Option<Res<RendererSettings>>,
     mut temporal: ResMut<TemporalCameraState>,
     preview_gpu: Option<Res<PreviewGpuData>>,
+    selection_highlight: Option<Res<SelectionHighlight>>,
     #[cfg(feature = "dlss")] dlss: Option<NonSend<DlssPipeline>>,
     #[cfg(feature = "dlss")] dlss_settings: Option<Res<DlssSettings>>,
     #[cfg(feature = "fsr")] fsr: Option<NonSend<FsrPipeline>>,
@@ -97,5 +98,9 @@ pub(crate) fn upload_uniforms_system(
 
     if let Some(preview) = preview_gpu {
         scene.upload_preview_params(&gpu.queue, &preview);
+    }
+
+    if let Some(sel) = selection_highlight {
+        scene.upload_selection(&gpu.queue, &sel);
     }
 }

@@ -34,7 +34,9 @@ pub(crate) fn shortcuts(edge: Res<InputEdge>, mut state: ResMut<EditorState>) {
     if edge.keys_just_pressed.contains(&KeyCode::KeyB) {
         state.brush_shape = match state.brush_shape {
             BrushShape::Sphere => BrushShape::Cube,
-            BrushShape::Cube => BrushShape::Sphere,
+            BrushShape::Cube => BrushShape::Cylinder,
+            BrushShape::Cylinder => BrushShape::Diamond,
+            BrushShape::Diamond => BrushShape::Sphere,
         };
     }
     if edge.keys_just_pressed.contains(&KeyCode::BracketLeft) {
@@ -42,5 +44,8 @@ pub(crate) fn shortcuts(edge: Res<InputEdge>, mut state: ResMut<EditorState>) {
     }
     if edge.keys_just_pressed.contains(&KeyCode::BracketRight) {
         state.brush_radius = (state.brush_radius + 1).min(128);
+    }
+    if state.active_tool == EditorTool::Prefab && edge.keys_just_pressed.contains(&KeyCode::KeyR) {
+        state.prefab_rotation = (state.prefab_rotation + 1) % 4;
     }
 }

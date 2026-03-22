@@ -6,6 +6,7 @@ mod frame_time;
 mod game_window;
 mod preview_gpu_data;
 mod raw_input;
+mod selection_highlight;
 mod voxel_mesh_data;
 mod window_config;
 
@@ -17,5 +18,6 @@ pub use frame_time::FrameTime;
 pub use game_window::GameWindow;
 pub use preview_gpu_data::PreviewGpuData;
 pub use raw_input::RawInput;
+pub use selection_highlight::SelectionHighlight;
 pub use voxel_mesh_data::VoxelMeshData;
 pub use window_config::WindowConfig;

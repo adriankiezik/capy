@@ -62,45 +62,6 @@ fn brick_distance_bounds_sq(target: [i32; 3], bx: u32, by: u32, bz: u32) -> (i32
     (min_dist_sq, max_dist_sq)
 }
 
-#[inline]
-fn apply_full_brick(
-    tool: EditorTool,
-    selected_material: MaterialId,
-    brick: &mut [MaterialId; 64],
-) -> bool {
-    let mut changed = false;
-
-    match tool {
-        EditorTool::Place => {
-            for voxel in brick.iter_mut() {
-                if *voxel == 0 {
-                    *voxel = selected_material;
-                    changed = true;
-                }
-            }
-        }
-        EditorTool::Remove => {
-            for voxel in brick.iter_mut() {
-                if *voxel != 0 {
-                    *voxel = 0;
-                    changed = true;
-                }
-            }
-        }
-        EditorTool::Paint => {
-            for voxel in brick.iter_mut() {
-                if *voxel != 0 && *voxel != selected_material {
-                    *voxel = selected_material;
-                    changed = true;
-                }
-            }
-        }
-        _ => {} // Sculpt tools use compute_sculpt_edit
-    }
-
-    changed
-}
-
 fn is_sculpt_tool(tool: EditorTool) -> bool {
     matches!(
         tool,
@@ -165,16 +126,24 @@ pub(crate) fn edit_apply(
         let Some(prefab) = prefabs.selected_prefab() else {
             return;
         };
+        let rotation = state.prefab_rotation;
         let placement = hit.position + hit.normal * 0.5;
         let target = glam::IVec3::new(
             placement.x.floor() as i32,
             placement.y.floor() as i32,
             placement.z.floor() as i32,
         );
-        let origin = target - glam::IVec3::from(prefab.anchor);
+        let anchor = rotate_anchor_cw_y(
+            glam::IVec3::from(prefab.anchor),
+            prefab.size[0],
+            prefab.size[2],
+            rotation,
+        );
+        let origin = target - anchor;
         apply_prefab_placement(
             prefab,
             origin,
+            rotation,
             world_grid.grid_dim_xz,
             &mut editable,
             &mut history,
@@ -287,6 +256,7 @@ fn snapshot_affected_chunks(
 fn apply_prefab_placement(
     prefab: &VoxelPrefabAsset,
     origin: glam::IVec3,
+    rotation: u8,
     grid_dim_xz: u32,
     editable: &mut EditableWorld,
     history: &mut EditHistory,
@@ -301,6 +271,15 @@ fn apply_prefab_placement(
     let max_z = max_x;
     let max_y = capy_world::CHUNK_Y as i32 - 1;
 
+    // Compute rotated output dimensions.
+    let (mut rsx, rsz) = (prefab.size[0], prefab.size[2]);
+    let mut cur_sz = rsz;
+    for _ in 0..rotation {
+        let old = rsx;
+        rsx = cur_sz;
+        cur_sz = old;
+    }
+
     let mut staged_bricks = HashMap::new();
     let mut placed_voxels = 0usize;
     let mut clipped_voxels = 0usize;
@@ -313,9 +292,23 @@ fn apply_prefab_placement(
                     continue;
                 }
 
-                let wx = origin.x + x as i32;
+                // Apply rotation: (x,y,z) → rotated (dx, y, dz)
+                let (mut dx, mut dz) = (x as i32, z as i32);
+                let mut rot_sx = prefab.size[0] as i32;
+                let mut rot_sz = prefab.size[2] as i32;
+                for _ in 0..rotation {
+                    let new_dx = dz;
+                    let new_dz = rot_sx - 1 - dx;
+                    dx = new_dx;
+                    dz = new_dz;
+                    let old = rot_sx;
+                    rot_sx = rot_sz;
+                    rot_sz = old;
+                }
+
+                let wx = origin.x + dx;
                 let wy = origin.y + y as i32;
-                let wz = origin.z + z as i32;
+                let wz = origin.z + dz;
 
                 if wx < min_x || wx > max_x || wy < 0 || wy > max_y || wz < min_z || wz > max_z {
                     clipped_voxels += 1;
@@ -389,7 +382,7 @@ fn apply_prefab_placement(
             .extend(edits);
     }
 
-    history.undo_stack.push(EditAction { changes });
+    history.undo_stack.push(EditAction::Voxel { changes });
     history.redo_stack.clear();
 
     info!(
@@ -398,6 +391,21 @@ fn apply_prefab_placement(
         placed_voxels,
         dirty.dirty.len()
     );
+}
+
+/// Rotate an anchor point to match N 90° CW rotations around Y.
+fn rotate_anchor_cw_y(mut anchor: glam::IVec3, mut sx: u32, sz: u32, n: u8) -> glam::IVec3 {
+    let mut cur_sz = sz;
+    for _ in 0..n {
+        let new_x = anchor.z;
+        let new_z = sx as i32 - 1 - anchor.x;
+        anchor.x = new_x;
+        anchor.z = new_z;
+        let old_sx = sx;
+        sx = cur_sz;
+        cur_sz = old_sx;
+    }
+    anchor
 }
 
 // ---------------------------------------------------------------------------
@@ -415,7 +423,6 @@ fn compute_edit_output(
     let cxz = capy_world::CHUNK_XZ as i32;
     let cy = capy_world::CHUNK_Y as i32;
     let r2 = radius * radius;
-    let is_cube = brush_shape == BrushShape::Cube;
     let t_total = Instant::now();
 
     let w_min = [target.x - radius, target.y - radius, target.z - radius];
@@ -479,84 +486,75 @@ fn compute_edit_output(
                             let old_brick = chunk.read_brick(bx, by, bz);
                             let mut new_brick = old_brick;
 
-                            let brick_changed = if is_cube {
-                                apply_full_brick(tool, selected_material, &mut new_brick)
-                            } else {
-                                let (min_dist_sq, max_dist_sq) =
-                                    brick_distance_bounds_sq(tl, bx, by, bz);
+                            // Quick brick-level AABB test for sphere shape
+                            // to skip bricks entirely outside the radius.
+                            if brush_shape == BrushShape::Sphere {
+                                let (min_dist_sq, _) = brick_distance_bounds_sq(tl, bx, by, bz);
                                 if min_dist_sq > r2 {
                                     continue;
                                 }
+                            }
 
-                                let mut changed = max_dist_sq <= r2
-                                    && apply_full_brick(tool, selected_material, &mut new_brick);
+                            let mut changed = false;
+                            let vx_base = (bx * BRICK) as i32;
+                            let vy_base = (by * BRICK) as i32;
+                            let vz_base = (bz * BRICK) as i32;
 
-                                if !changed && max_dist_sq > r2 {
-                                    let vx_base = (bx * BRICK) as i32;
-                                    let vy_base = (by * BRICK) as i32;
-                                    let vz_base = (bz * BRICK) as i32;
+                            for lz in 0..BRICK as i32 {
+                                let vz = vz_base + lz;
+                                let dz = vz - tl[2];
 
-                                    for lz in 0..BRICK as i32 {
-                                        let vz = vz_base + lz;
-                                        let dz = vz - tl[2];
-                                        let dz2 = dz * dz;
+                                for ly in 0..BRICK as i32 {
+                                    let vy = vy_base + ly;
+                                    let dy = vy - tl[1];
 
-                                        for ly in 0..BRICK as i32 {
-                                            let vy = vy_base + ly;
-                                            let dy = vy - tl[1];
-                                            let r2_yz = r2 - dz2 - dy * dy;
-                                            if r2_yz < 0 {
-                                                continue;
-                                            }
+                                    for lx in 0..BRICK as i32 {
+                                        let vx = vx_base + lx;
+                                        let dx = vx - tl[0];
 
-                                            for lx in 0..BRICK as i32 {
-                                                let vx = vx_base + lx;
-                                                let dx = vx - tl[0];
-                                                if dx * dx > r2_yz {
-                                                    continue;
-                                                }
-
-                                                let bit = (lx
-                                                    + ly * BRICK as i32
-                                                    + lz * BRICK as i32 * BRICK as i32)
-                                                    as usize;
-                                                let old = new_brick[bit];
-
-                                                let new_mat = match tool {
-                                                    EditorTool::Place => {
-                                                        if old != 0 {
-                                                            continue;
-                                                        }
-                                                        selected_material
-                                                    }
-                                                    EditorTool::Remove => {
-                                                        if old == 0 {
-                                                            continue;
-                                                        }
-                                                        0
-                                                    }
-                                                    EditorTool::Paint => {
-                                                        if old == 0 {
-                                                            continue;
-                                                        }
-                                                        selected_material
-                                                    }
-                                                    _ => continue,
-                                                };
-
-                                                if old == new_mat {
-                                                    continue;
-                                                }
-
-                                                new_brick[bit] = new_mat;
-                                                changed = true;
-                                            }
+                                        if !voxel_in_brush(dx, dy, dz, r2, radius, brush_shape) {
+                                            continue;
                                         }
+
+                                        let bit = (lx
+                                            + ly * BRICK as i32
+                                            + lz * BRICK as i32 * BRICK as i32)
+                                            as usize;
+                                        let old = new_brick[bit];
+
+                                        let new_mat = match tool {
+                                            EditorTool::Place => {
+                                                if old != 0 {
+                                                    continue;
+                                                }
+                                                selected_material
+                                            }
+                                            EditorTool::Remove => {
+                                                if old == 0 {
+                                                    continue;
+                                                }
+                                                0
+                                            }
+                                            EditorTool::Paint => {
+                                                if old == 0 {
+                                                    continue;
+                                                }
+                                                selected_material
+                                            }
+                                            _ => continue,
+                                        };
+
+                                        if old == new_mat {
+                                            continue;
+                                        }
+
+                                        new_brick[bit] = new_mat;
+                                        changed = true;
                                     }
                                 }
+                            }
 
-                                changed
-                            };
+                            let brick_changed = changed;
 
                             if brick_changed {
                                 chunk.write_brick(bx, by, bz, new_brick);
@@ -634,13 +632,23 @@ fn find_surface_height(chunk: &EditableChunk, lx: u32, lz: u32) -> Option<u32> {
 /// Check if a world XZ column is within the 2D brush footprint.
 #[inline]
 fn column_in_brush(wx: i32, wz: i32, tx: i32, tz: i32, radius: i32, shape: BrushShape) -> bool {
+    let dx = (wx - tx).abs();
+    let dz = (wz - tz).abs();
     match shape {
-        BrushShape::Sphere => {
-            let dx = wx - tx;
-            let dz = wz - tz;
-            dx * dx + dz * dz <= radius * radius
-        }
-        BrushShape::Cube => (wx - tx).abs() <= radius && (wz - tz).abs() <= radius,
+        BrushShape::Sphere | BrushShape::Cylinder => dx * dx + dz * dz <= radius * radius,
+        BrushShape::Cube => dx <= radius && dz <= radius,
+        BrushShape::Diamond => dx + dz <= radius,
+    }
+}
+
+/// Check if a voxel offset (dx, dy, dz) from the brush center is inside the 3D brush.
+#[inline]
+fn voxel_in_brush(dx: i32, dy: i32, dz: i32, r2: i32, radius: i32, shape: BrushShape) -> bool {
+    match shape {
+        BrushShape::Sphere => dx * dx + dy * dy + dz * dz <= r2,
+        BrushShape::Cube => dx.abs() <= radius && dy.abs() <= radius && dz.abs() <= radius,
+        BrushShape::Cylinder => dx * dx + dz * dz <= r2 && dy.abs() <= radius,
+        BrushShape::Diamond => dx.abs() + dy.abs() + dz.abs() <= radius,
     }
 }
 
@@ -675,6 +683,9 @@ fn neighbor_average(wx: i32, wz: i32, heights: &HashMap<(i32, i32), Option<u32>>
 }
 
 /// Modify a column's height by filling or clearing voxels between current and target surface.
+///
+/// `original_bricks` tracks the pre-edit state of each brick so that multiple columns
+/// sharing the same brick produce a single correct `BrickChange` (first old → final new).
 #[allow(clippy::too_many_arguments)]
 fn modify_column_height(
     chunk: &mut EditableChunk,
@@ -684,8 +695,7 @@ fn modify_column_height(
     target_h: Option<u32>,
     material: MaterialId,
     cc: [i32; 3],
-    changes: &mut Vec<BrickChange>,
-    changed_chunks: &mut HashMap<[i32; 3], Vec<LeafBrickEdit>>,
+    original_bricks: &mut HashMap<([i32; 3], [u32; 3]), [MaterialId; 64]>,
 ) {
     if current_h == target_h {
         return;
@@ -715,32 +725,29 @@ fn modify_column_height(
     let by_hi = y_hi / BRICK;
 
     for by in by_lo..=by_hi {
-        let old_brick = chunk.read_brick(bx, by, bz);
-        let mut new_brick = old_brick;
+        let brick_key = (cc, [bx, by, bz]);
+        // Snapshot the truly original brick the first time we touch it.
+        original_bricks
+            .entry(brick_key)
+            .or_insert_with(|| chunk.read_brick(bx, by, bz));
+
+        let mut current_brick = chunk.read_brick(bx, by, bz);
         let base_y = by * BRICK;
+        let mut changed = false;
 
         for ly in 0..BRICK {
             let vy = base_y + ly;
             if vy >= y_lo && vy <= y_hi {
                 let idx = (local_x + ly * BRICK + local_z * BRICK * BRICK) as usize;
-                new_brick[idx] = fill_mat;
+                if current_brick[idx] != fill_mat {
+                    current_brick[idx] = fill_mat;
+                    changed = true;
+                }
             }
         }
 
-        if new_brick != old_brick {
-            chunk.write_brick(bx, by, bz, new_brick);
-            changes.push(BrickChange {
-                chunk: cc,
-                brick: [bx, by, bz],
-                old_materials: old_brick,
-                new_materials: new_brick,
-            });
-            changed_chunks.entry(cc).or_default().push(LeafBrickEdit {
-                bx,
-                by,
-                bz,
-                materials: new_brick,
-            });
+        if changed {
+            chunk.write_brick(bx, by, bz, current_brick);
         }
     }
 }
@@ -785,8 +792,8 @@ fn compute_sculpt_edit(
         })
         .collect();
 
-    let mut changes = Vec::new();
-    let mut changed_chunks: HashMap<[i32; 3], Vec<LeafBrickEdit>> = HashMap::new();
+    // Track the truly original brick state (before any column in this edit touched it).
+    let mut original_bricks: HashMap<([i32; 3], [u32; 3]), [MaterialId; 64]> = HashMap::new();
 
     for &(wx, wz) in &all_columns {
         // Only modify columns within the actual brush radius (skip margin).
@@ -818,12 +825,35 @@ fn compute_sculpt_edit(
             new_h,
             selected_material,
             cc,
-            &mut changes,
-            &mut changed_chunks,
+            &mut original_bricks,
         );
     }
 
     let loop_ms = t_loop.elapsed().as_secs_f64() * 1000.0;
+
+    // Build one BrickChange per unique brick: original old → final new.
+    let mut changes = Vec::with_capacity(original_bricks.len());
+    let mut changed_chunks: HashMap<[i32; 3], Vec<LeafBrickEdit>> = HashMap::new();
+
+    for ((cc, brick), old_materials) in original_bricks {
+        let chunk = chunks.entry(cc).or_default();
+        let new_materials = chunk.read_brick(brick[0], brick[1], brick[2]);
+        if old_materials == new_materials {
+            continue;
+        }
+        changes.push(BrickChange {
+            chunk: cc,
+            brick,
+            old_materials,
+            new_materials,
+        });
+        changed_chunks.entry(cc).or_default().push(LeafBrickEdit {
+            bx: brick[0],
+            by: brick[1],
+            bz: brick[2],
+            materials: new_materials,
+        });
+    }
 
     let updated_chunks = changed_chunks
         .into_iter()
@@ -885,7 +915,7 @@ fn apply_edit_output(
             .extend(updated.pending);
     }
 
-    history.undo_stack.push(EditAction { changes });
+    history.undo_stack.push(EditAction::Voxel { changes });
     history.redo_stack.clear();
 
     let apply_ms = t_apply.elapsed().as_secs_f64() * 1000.0;

@@ -1,7 +1,7 @@
 use bevy_ecs::resource::Resource;
 
 pub const MATERIAL_PALETTE_SIZE: usize = capy_core::MATERIAL_PALETTE_SIZE;
-pub const DEFAULT_RENDER_SCALE: f32 = 0.25;
+pub const DEFAULT_RENDER_SCALE: f32 = 1.0;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum AoMode {

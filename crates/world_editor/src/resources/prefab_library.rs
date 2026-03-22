@@ -17,6 +17,8 @@ pub struct PrefabLibrary {
     pub entries: Vec<PrefabEntry>,
     pub selected_source: Option<PathBuf>,
     pub next_scan_at: Instant,
+    /// Monotonic counter incremented whenever a prefab job completes.
+    pub prefab_generation: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -191,6 +193,7 @@ impl Default for PrefabLibrary {
             entries: Vec::new(),
             selected_source: None,
             next_scan_at: Instant::now(),
+            prefab_generation: 0,
         }
     }
 }
