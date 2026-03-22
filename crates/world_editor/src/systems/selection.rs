@@ -303,6 +303,21 @@ pub(crate) fn selection_system(
 
                 if let Some((_t, face)) = ray_aabb(camera.position, dir, fmin, fmax) {
                     // Ray hit the selection box — resize that face
+                    let axis = face.axis();
+                    let center = Vec3::new(
+                        (min.x + max.x) as f32 / 2.0,
+                        (min.y + max.y) as f32 / 2.0,
+                        (min.z + max.z) as f32 / 2.0,
+                    );
+                    // Store the original corner value and initial drag position
+                    // so we can compute deltas and avoid jumps on click.
+                    let origin_val = match face {
+                        Face::XNeg | Face::YNeg | Face::ZNeg => [min.x, min.y, min.z][axis],
+                        _ => [max.x, max.y, max.z][axis],
+                    };
+                    sel.resize_origin = origin_val;
+                    sel.resize_anchor = drag_along_axis(camera.position, dir, axis, center)
+                        .unwrap_or(origin_val as f32);
                     sel.resize_face = Some(face);
                     sel.phase = SelectionPhase::Resizing;
                 } else if let Some(hit) = voxel_hit.as_ref().filter(|h| h.hit) {
@@ -327,7 +342,10 @@ pub(crate) fn selection_system(
                 let axis = face.axis();
 
                 if let Some(val) = drag_along_axis(camera.position, dir, axis, center) {
-                    let v = val.floor() as i32;
+                    // Delta-based: compute how far the mouse moved from the
+                    // initial click and apply that to the original corner value.
+                    let delta = val - sel.resize_anchor;
+                    let v = sel.resize_origin + delta.round() as i32;
                     let (new_min, new_max) = match face {
                         Face::XNeg => (IVec3::new(v, min.y, min.z), max),
                         Face::XPos => (min, IVec3::new(v, max.y, max.z)),

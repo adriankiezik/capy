@@ -45,6 +45,10 @@ pub struct SelectionState {
     pub pre_move_b: Option<IVec3>,
     /// World-space grab point when move started.
     pub grab_point: Vec3,
+    /// Initial drag_along_axis value when resize started (for delta-based resize).
+    pub resize_anchor: f32,
+    /// Original corner value along the resize axis when resize started.
+    pub resize_origin: i32,
 }
 
 impl SelectionState {
@@ -76,5 +80,7 @@ impl SelectionState {
         self.resize_face = None;
         self.pre_move_a = None;
         self.pre_move_b = None;
+        self.resize_anchor = 0.0;
+        self.resize_origin = 0;
     }
 }
