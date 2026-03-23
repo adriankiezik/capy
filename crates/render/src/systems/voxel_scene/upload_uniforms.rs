@@ -1,17 +1,14 @@
 use bevy_ecs::change_detection::DetectChanges;
-#[cfg(any(feature = "dlss", feature = "fsr"))]
-use bevy_ecs::system::NonSend;
-use bevy_ecs::system::{NonSendMut, Res, ResMut};
+use bevy_ecs::system::{NonSend, NonSendMut, Res, ResMut};
 use capy_core::{Camera, PreviewGpuData, SelectionHighlight};
 
 use crate::camera::clip_from_world;
 use crate::resources::voxel_scene::VoxelSceneBuffers;
 #[cfg(feature = "dlss")]
 use crate::resources::{DlssPipeline, DlssSettings};
-#[cfg(feature = "fsr")]
-use crate::resources::{FsrPipeline, FsrSettings};
 use crate::resources::{
-    GpuContext, GtaoPipeline, RenderResolution, RendererSettings, TemporalCameraState,
+    FsrPipeline, FsrSettings, GpuContext, GtaoPipeline, RenderResolution, RendererSettings,
+    TemporalCameraState,
 };
 
 pub(crate) fn upload_uniforms_system(
@@ -26,8 +23,8 @@ pub(crate) fn upload_uniforms_system(
     selection_highlight: Option<Res<SelectionHighlight>>,
     #[cfg(feature = "dlss")] dlss: Option<NonSend<DlssPipeline>>,
     #[cfg(feature = "dlss")] dlss_settings: Option<Res<DlssSettings>>,
-    #[cfg(feature = "fsr")] fsr: Option<NonSend<FsrPipeline>>,
-    #[cfg(feature = "fsr")] fsr_settings: Option<Res<FsrSettings>>,
+    fsr: Option<NonSend<FsrPipeline>>,
+    fsr_settings: Option<Res<FsrSettings>>,
 ) {
     let Some(scene) = scene else {
         return;
@@ -42,7 +39,6 @@ pub(crate) fn upload_uniforms_system(
         {
             temporal.reset_history();
         }
-        #[cfg(feature = "fsr")]
         if fsr_settings
             .as_deref()
             .is_some_and(|settings| settings.reset)
@@ -61,7 +57,6 @@ pub(crate) fn upload_uniforms_system(
                 jitter = dlss_jitter;
             }
         }
-        #[cfg(feature = "fsr")]
         if jitter == [0.0, 0.0] {
             if let Some(fsr_jitter) = fsr
                 .as_deref()

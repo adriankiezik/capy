@@ -4,7 +4,6 @@ use capy_core::FrameProfiler;
 
 #[cfg(feature = "dlss")]
 use crate::resources::DlssSettings;
-#[cfg(feature = "fsr")]
 use crate::resources::FsrSettings;
 use crate::resources::{
     FrameInProgress, GpuContext, GpuProfiler, RenderOverlayCallbacks, TemporalCameraState,
@@ -88,7 +87,6 @@ pub(crate) fn submit_frame_system(world: &mut World) -> Result<(), BevyError> {
     if let Some(mut settings) = world.get_resource_mut::<DlssSettings>() {
         settings.reset = false;
     }
-    #[cfg(feature = "fsr")]
     if let Some(mut settings) = world.get_resource_mut::<FsrSettings>() {
         settings.reset = false;
     }

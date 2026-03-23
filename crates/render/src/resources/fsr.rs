@@ -17,7 +17,7 @@ impl Default for FsrSettings {
     fn default() -> Self {
         Self {
             // When DLSS is also available, prefer DLSS by default.
-            enabled: !cfg!(feature = "dlss"),
+            enabled: true,
             quality: FsrQualityMode::Auto,
             reset: false,
             supported: false,

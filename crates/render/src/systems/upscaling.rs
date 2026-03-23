@@ -1,21 +1,17 @@
 use bevy_ecs::world::World;
 
 use crate::resources::{
-    DEFAULT_RENDER_SCALE, GpuContext, RenderResolution, RendererSettings, TemporalCameraState,
-    compute_scaled_resolution,
+    DEFAULT_RENDER_SCALE, FsrPipeline, FsrSettings, GpuContext, RenderResolution, RendererSettings,
+    TemporalCameraState, compute_scaled_resolution,
 };
 
 #[cfg(feature = "dlss")]
 use crate::resources::{AoMode, DlssPipeline, DlssSettings};
 
-#[cfg(feature = "fsr")]
-use crate::resources::{FsrPipeline, FsrSettings};
-
 pub(crate) fn init_upscaling(world: &mut World) {
     world.insert_resource(TemporalCameraState::default());
     #[cfg(feature = "dlss")]
     world.insert_non_send_resource(DlssPipeline::new());
-    #[cfg(feature = "fsr")]
     world.insert_non_send_resource(FsrPipeline::new());
     update_upscaling_system(world);
 }
@@ -29,18 +25,12 @@ pub(crate) fn update_upscaling_system(world: &mut World) {
     let render_scale = world
         .get_resource::<RendererSettings>()
         .map_or(DEFAULT_RENDER_SCALE, |settings| settings.render_scale);
-    #[cfg(any(feature = "dlss", feature = "fsr"))]
     let mut render_resolution =
         compute_scaled_resolution(output_width, output_height, render_scale);
-    #[cfg(not(any(feature = "dlss", feature = "fsr")))]
-    let render_resolution = compute_scaled_resolution(output_width, output_height, render_scale);
-    #[cfg(any(feature = "dlss", feature = "fsr"))]
     let mut reset_temporal = false;
-    #[cfg(not(any(feature = "dlss", feature = "fsr")))]
-    let reset_temporal = false;
 
     // Track whether DLSS is active so FSR can be skipped when DLSS takes priority.
-    #[cfg(all(feature = "dlss", feature = "fsr"))]
+    #[cfg(feature = "dlss")]
     let mut dlss_active = false;
 
     #[cfg(feature = "dlss")]
@@ -86,10 +76,7 @@ pub(crate) fn update_upscaling_system(world: &mut World) {
                     ) {
                         render_resolution = (rr_resolution[0], rr_resolution[1]);
                         reset_temporal |= recreated || settings.reset;
-                        #[cfg(feature = "fsr")]
-                        {
-                            dlss_active = true;
-                        }
+                        dlss_active = true;
                     } else if was_rr_active || was_sr_active {
                         reset_temporal = true;
                     }
@@ -110,10 +97,7 @@ pub(crate) fn update_upscaling_system(world: &mut World) {
                     ) {
                         render_resolution = (dlss_resolution[0], dlss_resolution[1]);
                         reset_temporal |= recreated || settings.reset;
-                        #[cfg(feature = "fsr")]
-                        {
-                            dlss_active = true;
-                        }
+                        dlss_active = true;
                     } else if was_sr_active {
                         reset_temporal = true;
                     }
@@ -137,7 +121,6 @@ pub(crate) fn update_upscaling_system(world: &mut World) {
         }
     }
 
-    #[cfg(feature = "fsr")]
     {
         // Skip FSR when DLSS is active (DLSS takes priority).
         #[cfg(feature = "dlss")]

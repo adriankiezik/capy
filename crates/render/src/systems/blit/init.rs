@@ -3,15 +3,13 @@ use bevy_ecs::world::World;
 use crate::gpu_texture::GpuTexture;
 #[cfg(feature = "dlss")]
 use crate::resources::DlssPipeline;
-#[cfg(feature = "fsr")]
-use crate::resources::FsrPipeline;
-use crate::resources::{BlitPipeline, GpuContext, LightingPipeline};
+use crate::resources::{BlitPipeline, FsrPipeline, GpuContext, LightingPipeline};
 
 /// Returns (source_texture, is_upscaled, is_rr).
 fn blit_source<'a>(
     lighting: &'a LightingPipeline,
     #[cfg(feature = "dlss")] dlss: Option<&'a DlssPipeline>,
-    #[cfg(feature = "fsr")] fsr: Option<&'a FsrPipeline>,
+    fsr: Option<&'a FsrPipeline>,
 ) -> (&'a GpuTexture, bool, bool) {
     #[cfg(feature = "dlss")]
     if let Some(dlss) = dlss {
@@ -22,7 +20,6 @@ fn blit_source<'a>(
             return (sr_output, true, false);
         }
     }
-    #[cfg(feature = "fsr")]
     if let Some(fsr) = fsr {
         if let Some(fsr_output) = fsr.output_texture() {
             return (fsr_output, true, false);
@@ -40,14 +37,12 @@ pub(crate) fn init_blit(world: &mut World) {
     let gpu = world.non_send_resource::<GpuContext>();
     #[cfg(feature = "dlss")]
     let dlss = world.get_non_send_resource::<DlssPipeline>();
-    #[cfg(feature = "fsr")]
     let fsr = world.get_non_send_resource::<FsrPipeline>();
 
     let (source_texture, source_is_upscaled, source_is_rr) = blit_source(
         lighting,
         #[cfg(feature = "dlss")]
         dlss,
-        #[cfg(feature = "fsr")]
         fsr,
     );
 

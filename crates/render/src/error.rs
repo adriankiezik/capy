@@ -32,7 +32,6 @@ pub enum RenderError {
     #[error(transparent)]
     Dlss(#[from] crate::dlss::DlssError),
 
-    #[cfg(feature = "fsr")]
     #[error(transparent)]
     Fsr(#[from] crate::fsr::FsrError),
 }

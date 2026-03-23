@@ -6,7 +6,6 @@ use capy_ui::EguiContext;
 #[cfg(feature = "dlss")]
 use capy_render::{AoMode, DlssQualityMode, DlssSettings};
 
-#[cfg(feature = "fsr")]
 use capy_render::{FsrQualityMode, FsrSettings};
 
 pub fn graphics_settings_ui(world: &mut World) {
@@ -17,7 +16,6 @@ pub fn graphics_settings_ui(world: &mut World) {
     #[cfg(feature = "dlss")]
     let mut dlss = world.get_resource::<DlssSettings>().cloned();
 
-    #[cfg(feature = "fsr")]
     let mut fsr = world.get_resource::<FsrSettings>().cloned();
 
     egui::Window::new("Graphics")
@@ -31,10 +29,7 @@ pub fn graphics_settings_ui(world: &mut World) {
             #[cfg(not(feature = "dlss"))]
             let dlss_active = false;
 
-            #[cfg(feature = "fsr")]
             let fsr_active = fsr.as_ref().is_some_and(|s| s.enabled && s.supported);
-            #[cfg(not(feature = "fsr"))]
-            let fsr_active = false;
 
             let upscaler_active = dlss_active || fsr_active;
 
@@ -46,11 +41,8 @@ pub fn graphics_settings_ui(world: &mut World) {
                     ui.separator();
                 }
 
-                #[cfg(feature = "fsr")]
-                {
-                    ui.label("FSR 2");
-                    fsr_ui(ui, &mut fsr, dlss_active);
-                }
+                ui.label("FSR 2");
+                fsr_ui(ui, &mut fsr, dlss_active);
 
                 if !upscaler_active {
                     ui.separator();
@@ -84,7 +76,6 @@ pub fn graphics_settings_ui(world: &mut World) {
         }
     }
 
-    #[cfg(feature = "fsr")]
     if let Some(fsr) = fsr {
         if let Some(mut resource) = world.get_resource_mut::<FsrSettings>() {
             *resource = fsr;
@@ -150,7 +141,6 @@ fn dlss_ui(ui: &mut egui::Ui, dlss: &mut Option<DlssSettings>, fsr_active: bool)
     true
 }
 
-#[cfg(feature = "fsr")]
 fn fsr_ui(ui: &mut egui::Ui, fsr: &mut Option<FsrSettings>, dlss_active: bool) -> bool {
     let Some(settings) = fsr.as_mut() else {
         return false;

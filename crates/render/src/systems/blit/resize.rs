@@ -1,19 +1,15 @@
-use bevy_ecs::system::NonSendMut;
-#[cfg(any(feature = "dlss", feature = "fsr"))]
-use bevy_ecs::system::{NonSend, Res};
+use bevy_ecs::system::{NonSend, NonSendMut, Res};
 
 use crate::gpu_texture::GpuTexture;
-use crate::resources::{BlitPipeline, GpuContext, LightingPipeline};
+use crate::resources::{BlitPipeline, FsrPipeline, FsrSettings, GpuContext, LightingPipeline};
 #[cfg(feature = "dlss")]
 use crate::resources::{DlssPipeline, DlssSettings};
-#[cfg(feature = "fsr")]
-use crate::resources::{FsrPipeline, FsrSettings};
 
 /// Returns (source_texture, is_upscaled, is_rr).
 fn blit_source<'a>(
     lighting: &'a LightingPipeline,
     #[cfg(feature = "dlss")] dlss: Option<&'a DlssPipeline>,
-    #[cfg(feature = "fsr")] fsr: Option<&'a FsrPipeline>,
+    fsr: Option<&'a FsrPipeline>,
 ) -> (&'a GpuTexture, bool, bool) {
     #[cfg(feature = "dlss")]
     if let Some(dlss) = dlss {
@@ -25,7 +21,6 @@ fn blit_source<'a>(
             return (sr_output, true, false);
         }
     }
-    #[cfg(feature = "fsr")]
     if let Some(fsr) = fsr {
         if let Some(fsr_output) = fsr.output_texture() {
             return (fsr_output, true, false);
@@ -40,8 +35,8 @@ pub(crate) fn resize_blit_system(
     blit: Option<NonSendMut<BlitPipeline>>,
     #[cfg(feature = "dlss")] dlss: Option<NonSend<DlssPipeline>>,
     #[cfg(feature = "dlss")] dlss_settings: Option<Res<DlssSettings>>,
-    #[cfg(feature = "fsr")] fsr: Option<NonSend<FsrPipeline>>,
-    #[cfg(feature = "fsr")] fsr_settings: Option<Res<FsrSettings>>,
+    fsr: Option<NonSend<FsrPipeline>>,
+    fsr_settings: Option<Res<FsrSettings>>,
 ) {
     let (Some(lighting), Some(mut blit)) = (lighting, blit) else {
         return;
@@ -51,24 +46,17 @@ pub(crate) fn resize_blit_system(
     // its temporal history; the blit switches to its output next frame.
     #[cfg(feature = "dlss")]
     let dlss_resetting = dlss_settings.as_deref().is_some_and(|s| s.reset);
-    #[cfg(feature = "fsr")]
     let fsr_resetting = fsr_settings.as_deref().is_some_and(|s| s.reset);
 
-    #[cfg(any(feature = "dlss", feature = "fsr"))]
     let upscaler_resetting = {
         let mut resetting = false;
         #[cfg(feature = "dlss")]
         {
             resetting |= dlss_resetting;
         }
-        #[cfg(feature = "fsr")]
-        {
-            resetting |= fsr_resetting;
-        }
+        resetting |= fsr_resetting;
         resetting
     };
-    #[cfg(not(any(feature = "dlss", feature = "fsr")))]
-    let upscaler_resetting = false;
 
     let (source_texture, source_is_upscaled, source_is_rr) = if upscaler_resetting {
         (&lighting.output_color, false, false)
@@ -77,7 +65,6 @@ pub(crate) fn resize_blit_system(
             &lighting,
             #[cfg(feature = "dlss")]
             dlss.as_deref(),
-            #[cfg(feature = "fsr")]
             fsr.as_deref(),
         )
     };
@@ -88,10 +75,7 @@ pub(crate) fn resize_blit_system(
         {
             g = g.wrapping_add(dlss.as_deref().map_or(0, |d| d.generation()));
         }
-        #[cfg(feature = "fsr")]
-        {
-            g = g.wrapping_add(fsr.as_deref().map_or(0, |f| f.generation()));
-        }
+        g = g.wrapping_add(fsr.as_deref().map_or(0, |f| f.generation()));
         g
     };
 

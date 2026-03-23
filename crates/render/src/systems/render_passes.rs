@@ -1,18 +1,14 @@
 use bevy_ecs::error::BevyError;
-use bevy_ecs::system::NonSendMut;
-#[cfg(any(feature = "dlss", feature = "fsr"))]
-use bevy_ecs::system::{Res, ResMut};
+use bevy_ecs::system::{NonSendMut, Res, ResMut};
 
-#[cfg(any(feature = "dlss", feature = "fsr"))]
 use crate::resources::TemporalCameraState;
 use crate::resources::trace::TracePipeline;
 #[cfg(feature = "dlss")]
 use crate::resources::{AoMode, DlssPipeline, DlssSettings, RendererSettings, RtaoPipeline};
 use crate::resources::{
-    BlitPipeline, FrameInProgress, GpuContext, GpuProfiler, GtaoPipeline, LightingPipeline,
+    BlitPipeline, FrameInProgress, FsrPipeline, FsrSettings, GpuContext, GpuProfiler, GtaoPipeline,
+    LightingPipeline,
 };
-#[cfg(feature = "fsr")]
-use crate::resources::{FsrPipeline, FsrSettings};
 
 pub(crate) fn render_passes_system(
     gpu: NonSendMut<GpuContext>,
@@ -20,13 +16,13 @@ pub(crate) fn render_passes_system(
     gtao: Option<NonSendMut<GtaoPipeline>>,
     lighting: Option<NonSendMut<LightingPipeline>>,
     blit: Option<NonSendMut<BlitPipeline>>,
-    #[cfg(any(feature = "dlss", feature = "fsr"))] temporal: Res<TemporalCameraState>,
+    temporal: Res<TemporalCameraState>,
     #[cfg(feature = "dlss")] dlss: Option<NonSendMut<DlssPipeline>>,
     #[cfg(feature = "dlss")] mut dlss_settings: Option<ResMut<DlssSettings>>,
     #[cfg(feature = "dlss")] rtao: Option<NonSendMut<RtaoPipeline>>,
     #[cfg(feature = "dlss")] renderer_settings: Option<Res<RendererSettings>>,
-    #[cfg(feature = "fsr")] fsr: Option<NonSendMut<FsrPipeline>>,
-    #[cfg(feature = "fsr")] mut fsr_settings: Option<ResMut<FsrSettings>>,
+    fsr: Option<NonSendMut<FsrPipeline>>,
+    mut fsr_settings: Option<ResMut<FsrSettings>>,
     mut frame: NonSendMut<FrameInProgress>,
     mut gpu_profiler: NonSendMut<GpuProfiler>,
 ) -> Result<(), BevyError> {
@@ -201,7 +197,6 @@ pub(crate) fn render_passes_system(
         }
     }
 
-    #[cfg(feature = "fsr")]
     if upscaler_cmd_buf.is_none() {
         if let Some(mut fsr) = fsr {
             if fsr.output_texture().is_some() {
