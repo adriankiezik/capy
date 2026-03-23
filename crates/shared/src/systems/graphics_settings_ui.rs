@@ -25,40 +25,54 @@ pub fn graphics_settings_ui(world: &mut World) {
         .resizable(false)
         .show(&ctx, |ui| {
             fps_ui(ui, dt);
-            ui.separator();
-
-            // --- Upscaling section ---
-            #[cfg(feature = "fsr")]
-            let fsr_currently_enabled = fsr.as_ref().is_some_and(|s| s.enabled && s.supported);
-            #[cfg(not(feature = "fsr"))]
-            let fsr_currently_enabled = false;
 
             #[cfg(feature = "dlss")]
-            let dlss_active = dlss_ui(ui, &mut dlss, fsr_currently_enabled);
+            let dlss_active = dlss.as_ref().is_some_and(|s| s.enabled && s.supported);
             #[cfg(not(feature = "dlss"))]
             let dlss_active = false;
 
             #[cfg(feature = "fsr")]
-            let fsr_active = fsr_ui(ui, &mut fsr, dlss_active);
+            let fsr_active = fsr.as_ref().is_some_and(|s| s.enabled && s.supported);
             #[cfg(not(feature = "fsr"))]
             let fsr_active = false;
 
             let upscaler_active = dlss_active || fsr_active;
 
-            if upscaler_active {
-                ui.separator();
-            }
+            ui.collapsing("Upscalers", |ui| {
+                #[cfg(feature = "dlss")]
+                {
+                    ui.label("DLSS");
+                    dlss_ui(ui, &mut dlss, fsr_active);
+                    ui.separator();
+                }
 
-            if !upscaler_active {
-                render_scale_ui(ui, &mut settings);
-                ui.separator();
-            }
-            #[cfg(feature = "dlss")]
-            ao_settings_ui(ui, &mut settings, &dlss);
-            #[cfg(not(feature = "dlss"))]
-            ao_settings_ui(ui, &mut settings);
-            ui.separator();
-            lighting_ui(ui, &mut settings);
+                #[cfg(feature = "fsr")]
+                {
+                    ui.label("FSR 2");
+                    fsr_ui(ui, &mut fsr, dlss_active);
+                }
+
+                if !upscaler_active {
+                    ui.separator();
+                    ui.label("Render Scale");
+                    render_scale_ui(ui, &mut settings);
+                }
+            });
+
+            ui.collapsing("Ambient Occlusion", |ui| {
+                #[cfg(feature = "dlss")]
+                ao_settings_ui(ui, &mut settings, &dlss);
+                #[cfg(not(feature = "dlss"))]
+                ao_settings_ui(ui, &mut settings);
+            });
+
+            ui.collapsing("Lighting", |ui| {
+                lighting_ui(ui, &mut settings);
+            });
+
+            ui.collapsing("Vegetation", |ui| {
+                vegetation_ui(ui, &mut settings);
+            });
         });
 
     *world.resource_mut::<RendererSettings>() = settings;
@@ -95,8 +109,6 @@ fn dlss_ui(ui: &mut egui::Ui, dlss: &mut Option<DlssSettings>, fsr_active: bool)
     let Some(settings) = dlss.as_mut() else {
         return false;
     };
-
-    ui.label("DLSS");
 
     if !settings.supported {
         ui.checkbox(&mut settings.enabled, "Enabled");
@@ -144,8 +156,6 @@ fn fsr_ui(ui: &mut egui::Ui, fsr: &mut Option<FsrSettings>, dlss_active: bool) -
         return false;
     };
 
-    ui.label("FSR 2");
-
     if !settings.supported {
         ui.checkbox(&mut settings.enabled, "Enabled");
         ui.weak("(not supported — Vulkan backend required)");
@@ -189,7 +199,6 @@ fn fsr_ui(ui: &mut egui::Ui, fsr: &mut Option<FsrSettings>, dlss_active: bool) -
 }
 
 fn render_scale_ui(ui: &mut egui::Ui, settings: &mut RendererSettings) {
-    ui.label("Render Scale");
     let mut scale = settings.render_scale;
     ui.horizontal(|ui| {
         if ui
@@ -223,7 +232,6 @@ fn render_scale_ui(ui: &mut egui::Ui, settings: &mut RendererSettings) {
 
 #[cfg(feature = "dlss")]
 fn ao_settings_ui(ui: &mut egui::Ui, settings: &mut RendererSettings, dlss: &Option<DlssSettings>) {
-    ui.label("Ambient Occlusion");
     let mut enabled = settings.ao_intensity > 0.0;
     if ui.checkbox(&mut enabled, "Enabled").changed() {
         settings.ao_intensity = if enabled { 1.0 } else { 0.0 };
@@ -275,7 +283,6 @@ fn ao_settings_ui(ui: &mut egui::Ui, settings: &mut RendererSettings, dlss: &Opt
 
 #[cfg(not(feature = "dlss"))]
 fn ao_settings_ui(ui: &mut egui::Ui, settings: &mut RendererSettings) {
-    ui.label("Ambient Occlusion");
     let mut enabled = settings.ao_intensity > 0.0;
     if ui.checkbox(&mut enabled, "Enabled").changed() {
         settings.ao_intensity = if enabled { 1.0 } else { 0.0 };
@@ -288,8 +295,48 @@ fn ao_settings_ui(ui: &mut egui::Ui, settings: &mut RendererSettings) {
     }
 }
 
+fn vegetation_ui(ui: &mut egui::Ui, settings: &mut RendererSettings) {
+    ui.checkbox(&mut settings.vegetation_enabled, "Enabled");
+    if !settings.vegetation_enabled {
+        return;
+    }
+
+    ui.add(egui::Slider::new(&mut settings.vegetation_density, 0.05..=1.0).text("density"));
+    ui.add(
+        egui::Slider::new(&mut settings.vegetation_max_distance, 8.0..=10_000.0).text("distance"),
+    );
+    ui.add(
+        egui::Slider::new(&mut settings.vegetation_far_reduce_start, 8.0..=10_000.0)
+            .text("far reduce start"),
+    );
+    ui.add(
+        egui::Slider::new(&mut settings.vegetation_far_step_scale, 1.0..=4.0)
+            .text("far step scale"),
+    );
+    ui.add(
+        egui::Slider::new(&mut settings.vegetation_near_search_radius, 0..=2)
+            .text("near search radius"),
+    );
+    ui.add(
+        egui::Slider::new(&mut settings.vegetation_far_search_radius, 0..=2)
+            .text("far search radius"),
+    );
+
+    ui.add(
+        egui::Slider::new(&mut settings.vegetation_animation_distance, 0.0..=10_000.0)
+            .text("animation distance"),
+    );
+
+    ui.checkbox(&mut settings.vegetation_shadow_enabled, "Grass shadows");
+    if settings.vegetation_shadow_enabled {
+        ui.add(
+            egui::Slider::new(&mut settings.vegetation_shadow_distance, 1.0..=10_000.0)
+                .text("shadow distance"),
+        );
+    }
+}
+
 fn lighting_ui(ui: &mut egui::Ui, settings: &mut RendererSettings) {
-    ui.label("Lighting");
     ui.add(egui::Slider::new(&mut settings.ambient_light, 0.0..=1.0).text("ambient"));
     let mut sun_enabled = settings.sun_contribution > 0.0;
     if ui.checkbox(&mut sun_enabled, "Directional light").changed() {

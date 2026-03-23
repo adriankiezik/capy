@@ -190,6 +190,7 @@ struct HitResult {
     color_override: vec3<f32>,
     lod_scale_exp: u32,
     hit_pos_local: vec3<f32>,
+    t: f32,              // ray parameter (world-space distance, since dir is normalized)
 };
 
 // Point query: check if a world-space position contains a solid voxel.
@@ -277,6 +278,7 @@ fn traverse_chunk(
                         result.hit = true;
                         result.material = mat;
                         result.hit_pos_local = (pos - vec3<f32>(1.0)) * ws;
+                        result.t = dot(result.hit_pos_local - ray_origin_world, dir);
                         result.normal = axis_normal(entry_axis, ray_dir_world);
                         return result;
                     }
@@ -312,7 +314,7 @@ fn traverse_chunk(
 
     let max_node_steps = u32(max(round(render_settings.max_node_steps), 1.0));
     for (var i = 0u; i < max_node_steps; i++) {
-        trace_stats_primary_node_steps += 1u;
+        if ENABLE_TRACE_STATS { trace_stats_primary_node_steps += 1u; }
         for (var dd = 0u; dd < depth; dd++) {
             let child_idx = get_cell_index(pos, scale_exp) ^ mirror_mask;
 
@@ -322,8 +324,8 @@ fn traverse_chunk(
                 let child_world_size = ws * exp2(f32(i32(scale_exp) - i32(root_se)));
                 let pos_frac = unmirror_pos(pos, dir);
                 let pos_world = (pos_frac - vec3<f32>(1.0)) * ws;
-                let t = max(length(pos_world - ray_origin_world), 1.0);
-                let projected = child_world_size / t;
+                let lod_t = max(dot(pos_world - ray_origin_world, dir), 1.0);
+                let projected = child_world_size / lod_t;
                 let threshold = camera.pixel_size * camera.lod_bias * render_settings.node_lod_scale;
 
                 if projected < threshold {
@@ -337,6 +339,7 @@ fn traverse_chunk(
                     result.normal = axis_normal(last_axis, ray_dir_world);
                     result.lod_scale_exp = scale_exp;
                     result.hit_pos_local = pos_world;
+                    result.t = dot(pos_world - ray_origin_world, dir);
                     return result;
                 }
             }
@@ -349,7 +352,7 @@ fn traverse_chunk(
             n_mh = pool_read(pool_base, node_idx + 1u);
             n_il = (pool_read(pool_base, node_idx + 2u) & 1u) != 0u;
             scale_exp -= 2u;
-            trace_stats_primary_descents += 1u;
+            if ENABLE_TRACE_STATS { trace_stats_primary_descents += 1u; }
         }
 
         let child_idx = get_cell_index(pos, scale_exp) ^ mirror_mask;
@@ -361,6 +364,7 @@ fn traverse_chunk(
                 result.material = mat;
                 let dda_frac = unmirror_pos(pos, dir);
                 result.hit_pos_local = (dda_frac - vec3<f32>(1.0)) * ws;
+                result.t = dot(result.hit_pos_local - ray_origin_world, dir);
                 result.normal = axis_normal(last_axis, ray_dir_world);
                 return result;
             }
@@ -502,7 +506,7 @@ fn trace_ray(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> HitResult {
             return result;
         }
 
-        trace_stats_primary_chunk_steps += 1u;
+        if ENABLE_TRACE_STATS { trace_stats_primary_chunk_steps += 1u; }
         let info = lookup_chunk_info(cc);
 
         if info.world_size != 0u {
@@ -523,7 +527,8 @@ fn trace_ray(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> HitResult {
                         result.is_lod_hit = true;
                         result.color_override = avg_color;
                         result.lod_scale_exp = 23u;
-                        result.hit_pos_local = ray_origin + dir * max(t_current, 0.0);
+                        result.t = max(t_current, 0.0);
+                        result.hit_pos_local = ray_origin + dir * result.t;
                         result.normal = axis_normal(entry_axis, ray_dir);
                         return result;
                     }
@@ -552,7 +557,7 @@ fn trace_ray(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> HitResult {
                 if !skip_grass {
                     // Before returning, check if grass in this chunk is closer.
                     if info.foliage_y_min < info.foliage_y_max {
-                        let voxel_t = length(chunk_hit.hit_pos_local + chunk_min - ray_origin);
+                        let voxel_t = chunk_hit.t;
                         let grass_max = select(voxel_t, min(voxel_t, dda_grass_hit.t), dda_grass_hit.hit);
                         let foliage_base_y = chunk_min.y + f32(info.foliage_y_min);
                         let foliage_top_y = chunk_min.y + f32(info.foliage_y_max) + GRASS_BLADE_HEIGHT;
@@ -572,7 +577,7 @@ fn trace_ray(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> HitResult {
 
                 // Grass hits are restricted to this chunk segment, so if the voxel is
                 // farther away than the best grass hit we can stop immediately.
-                if skip_grass || !dda_grass_hit.hit || length(chunk_hit.hit_pos_local + chunk_min - ray_origin) <= dda_grass_hit.t {
+                if skip_grass || !dda_grass_hit.hit || chunk_hit.t <= dda_grass_hit.t {
                     var world_hit = chunk_hit;
                     world_hit.hit_pos_local = chunk_hit.hit_pos_local + chunk_min;
                     return world_hit;
@@ -692,7 +697,7 @@ fn traverse_chunk_shadow(
 
     let max_steps = u32(max(round(render_settings.max_node_steps), 1.0));
     for (var i = 0u; i < max_steps; i++) {
-        trace_stats_shadow_node_steps += 1u;
+        if ENABLE_TRACE_STATS { trace_stats_shadow_node_steps += 1u; }
         for (var dd = 0u; dd < depth; dd++) {
             let child_idx = get_cell_index(pos, scale_exp) ^ mirror_mask;
             if n_il || !bit_is_set_64(n_ml, n_mh, child_idx) { break; }
@@ -704,7 +709,7 @@ fn traverse_chunk_shadow(
             n_mh = pool_read(pool_base, node_idx + 1u);
             n_il = (pool_read(pool_base, node_idx + 2u) & 1u) != 0u;
             scale_exp -= 2u;
-            trace_stats_shadow_descents += 1u;
+            if ENABLE_TRACE_STATS { trace_stats_shadow_descents += 1u; }
         }
 
         let child_idx = get_cell_index(pos, scale_exp) ^ mirror_mask;
@@ -826,7 +831,7 @@ fn trace_ao_ray(ray_origin: vec3<f32>, ray_dir: vec3<f32>, max_dist: f32) -> boo
 
     let max_chunk_steps = u32(max(round(render_settings.max_chunk_steps), 1.0));
     for (var chunk_iter = 0u; chunk_iter < max_chunk_steps; chunk_iter++) {
-        trace_stats_shadow_chunk_steps += 1u;
+        if ENABLE_TRACE_STATS { trace_stats_shadow_chunk_steps += 1u; }
         let info = lookup_chunk_info(cc);
 
         if info.world_size != 0u {
@@ -930,7 +935,7 @@ fn trace_shadow_ray(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> bool {
 
     let max_chunk_steps = u32(max(round(render_settings.max_chunk_steps), 1.0));
     for (var chunk_iter = 0u; chunk_iter < max_chunk_steps; chunk_iter++) {
-        trace_stats_shadow_chunk_steps += 1u;
+        if ENABLE_TRACE_STATS { trace_stats_shadow_chunk_steps += 1u; }
         let info = lookup_chunk_info(cc);
 
         if info.world_size != 0u {

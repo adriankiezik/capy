@@ -33,6 +33,17 @@ pub struct RendererSettings {
     pub ao_mode: AoMode,
     pub ao_rays: u32,
 
+    pub vegetation_enabled: bool,
+    pub vegetation_density: f32,
+    pub vegetation_max_distance: f32,
+    pub vegetation_far_step_scale: f32,
+    pub vegetation_far_reduce_start: f32,
+    pub vegetation_near_search_radius: u32,
+    pub vegetation_far_search_radius: u32,
+    pub vegetation_shadow_enabled: bool,
+    pub vegetation_shadow_distance: f32,
+    pub vegetation_animation_distance: f32,
+
     /// Internal render resolution as a fraction of window size.
     /// 1.0 = native, 0.5 = half resolution, 0.25 = quarter resolution.
     pub render_scale: f32,
@@ -67,6 +78,16 @@ impl Default for RendererSettings {
             ao_steps: 4,
             ao_mode: AoMode::default(),
             ao_rays: 4,
+            vegetation_enabled: true,
+            vegetation_density: 1.0,
+            vegetation_max_distance: 4000.0,
+            vegetation_far_step_scale: 4.0,
+            vegetation_far_reduce_start: 500.0,
+            vegetation_near_search_radius: 1,
+            vegetation_far_search_radius: 0,
+            vegetation_shadow_enabled: true,
+            vegetation_shadow_distance: 4000.0,
+            vegetation_animation_distance: 2000.0,
             render_scale: DEFAULT_RENDER_SCALE,
         }
     }

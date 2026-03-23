@@ -87,6 +87,7 @@ fn commit_trace_stats(
     shadow_rays: u32,
     shadow_blocked: u32,
 ) {
+    if !ENABLE_TRACE_STATS { return; }
     atomicAdd(&trace_stats.primary_chunk_steps, trace_stats_primary_chunk_steps);
     atomicAdd(&trace_stats.primary_node_steps, trace_stats_primary_node_steps);
     atomicAdd(&trace_stats.primary_descents, trace_stats_primary_descents);
@@ -132,6 +133,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if actual_x >= dims.x || actual_y >= dims.y { return; }
 
     reset_trace_private_stats();
+    skip_grass = render_settings.vegetation_enabled < 0.5;
 
     let uv_x = (f32(actual_x) + 0.5 + camera.jitter.x) / camera.resolution.x;
     let uv_y = 1.0 - (f32(actual_y) + 0.5 + camera.jitter.y) / camera.resolution.y;
@@ -146,7 +148,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Trace voxels + grass integrated in the DDA loop
     let hit = trace_ray(ray_origin, ray_dir);
     let grass = dda_grass_hit;
-    var use_grass = grass.hit && (!hit.hit || grass.t < length(hit.hit_pos_local - ray_origin));
+    var use_grass = grass.hit && (!hit.hit || grass.t < hit.t);
 
     // Preview overlay: trace the prefab preview DAG if active
     var preview_hit_result: HitResult;
@@ -164,13 +166,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 local_o, ray_dir, max(t_pv.x, 0.0), -1);
             if pv_hit.hit {
                 let pv_pos = pv_hit.hit_pos_local + pmin;
-                let pv_depth = length(pv_pos - ray_origin);
+                let pv_depth = pv_hit.t;
                 // Compare with closest scene hit (grass or voxel)
                 var scene_depth = 1e20;
                 if use_grass {
-                    scene_depth = length(grass.pos - ray_origin);
+                    scene_depth = grass.t;
                 } else if hit.hit {
-                    scene_depth = length(hit.hit_pos_local - ray_origin);
+                    scene_depth = hit.t;
                 }
                 if pv_depth < scene_depth {
                     preview_hit_result = pv_hit;
@@ -215,23 +217,26 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         // Preview is fully lit (shadow = 1.0)
         textureStore(gbuf_color_out, pixel, vec4<f32>(base, 1.0));
         textureStore(gbuf_normal_out, pixel, vec4<f32>(shading_normal, 1.0));
-        let depth_val = length(shading_pos - ray_origin);
-        textureStore(gbuf_depth_out, pixel, vec4<f32>(depth_val, 0.0, 0.0, 0.0));
+        textureStore(gbuf_depth_out, pixel, vec4<f32>(preview_hit_result.t, 0.0, 0.0, 0.0));
         textureStore(dlss_depth_out, pixel, vec4<f32>(hardware_depth, 0.0, 0.0, 0.0));
         textureStore(motion_vectors_out, pixel, vec4<f32>(motion, 0.0, 0.0));
     } else if use_grass {
         // Grass blade is in front of any voxel
-        trace_stats_grass_visible_pixels += 1u;
+        if ENABLE_TRACE_STATS { trace_stats_grass_visible_pixels += 1u; }
         let base = grass.color;
         let shading_pos = grass.pos;
         let shading_normal = grass.normal;
 
         var shadow = 1.0;
-        if render_settings.sun_contribution > 0.0 {
+        let grass_shadows_enabled =
+            render_settings.vegetation_shadow_enabled > 0.5
+            && render_settings.vegetation_shadow_distance > 0.0
+            && grass.t <= render_settings.vegetation_shadow_distance;
+        if render_settings.sun_contribution > 0.0 && grass_shadows_enabled {
             let sun_dir = normalize(render_settings.sun_direction.xyz);
             let shadow_origin = shading_pos + shading_normal * render_settings.ray_epsilon;
             let in_shadow = trace_shadow_ray(shadow_origin, sun_dir);
-            trace_stats_grass_shadow_rays += 1u;
+            if ENABLE_TRACE_STATS { trace_stats_grass_shadow_rays += 1u; }
             shadow_ray_count = 1u;
             shadow_blocked_count = select(0u, 1u, in_shadow);
             shadow = select(1.0, 0.0, in_shadow);
@@ -246,8 +251,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let tinted_base_p = apply_selection_tint(base, shading_pos);
         textureStore(gbuf_color_out, pixel, vec4<f32>(tinted_base_p, shadow));
         textureStore(gbuf_normal_out, pixel, vec4<f32>(shading_normal, 1.0));
-        let depth_val = length(shading_pos - ray_origin);
-        textureStore(gbuf_depth_out, pixel, vec4<f32>(depth_val, 0.0, 0.0, 0.0));
+        textureStore(gbuf_depth_out, pixel, vec4<f32>(grass.t, 0.0, 0.0, 0.0));
         textureStore(dlss_depth_out, pixel, vec4<f32>(hardware_depth, 0.0, 0.0, 0.0));
         textureStore(motion_vectors_out, pixel, vec4<f32>(motion, 0.0, 0.0));
     } else if hit.hit {
@@ -280,8 +284,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let tinted_base = apply_selection_tint(base, shading_pos);
         textureStore(gbuf_color_out, pixel, vec4<f32>(tinted_base, shadow));
         textureStore(gbuf_normal_out, pixel, vec4<f32>(shading_normal, 1.0));
-        let depth_val = length(shading_pos - ray_origin);
-        textureStore(gbuf_depth_out, pixel, vec4<f32>(depth_val, 0.0, 0.0, 0.0));
+        textureStore(gbuf_depth_out, pixel, vec4<f32>(hit.t, 0.0, 0.0, 0.0));
         textureStore(dlss_depth_out, pixel, vec4<f32>(hardware_depth, 0.0, 0.0, 0.0));
         textureStore(motion_vectors_out, pixel, vec4<f32>(motion, 0.0, 0.0));
     } else {

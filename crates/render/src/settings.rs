@@ -35,7 +35,27 @@ pub(crate) fn to_render_settings_uniform(settings: &RendererSettings) -> RenderS
         ray_epsilon: settings.ray_epsilon.max(0.0),
         max_chunk_steps: settings.max_chunk_steps.max(1) as f32,
         max_node_steps: settings.max_node_steps.max(1) as f32,
-        _padding0: 0.0,
+        vegetation_enabled: if settings.vegetation_enabled {
+            1.0
+        } else {
+            0.0
+        },
+        vegetation_density: settings.vegetation_density.clamp(0.0, 1.0),
+        vegetation_max_distance: settings.vegetation_max_distance.max(0.0),
+        vegetation_far_step_scale: settings.vegetation_far_step_scale.max(1.0),
+        vegetation_far_reduce_start: settings.vegetation_far_reduce_start.max(0.0),
+        vegetation_near_search_radius: settings.vegetation_near_search_radius.min(4) as f32,
+        vegetation_far_search_radius: settings.vegetation_far_search_radius.min(4) as f32,
+        vegetation_shadow_distance: settings.vegetation_shadow_distance.max(0.0),
+        vegetation_shadow_enabled: if settings.vegetation_shadow_enabled {
+            1.0
+        } else {
+            0.0
+        },
+        vegetation_animation_distance: settings.vegetation_animation_distance.max(0.0),
+        _veg_pad0: 0.0,
+        _veg_pad1: 0.0,
+        _veg_pad2: 0.0,
     }
 }
 
@@ -54,10 +74,22 @@ pub(crate) struct RenderSettingsUniform {
     ray_epsilon: f32,
     max_chunk_steps: f32,
     max_node_steps: f32,
-    _padding0: f32,
+    vegetation_enabled: f32,
+    vegetation_density: f32,
+    vegetation_max_distance: f32,
+    vegetation_far_step_scale: f32,
+    vegetation_far_reduce_start: f32,
+    vegetation_near_search_radius: f32,
+    vegetation_far_search_radius: f32,
+    vegetation_shadow_distance: f32,
+    vegetation_shadow_enabled: f32,
+    vegetation_animation_distance: f32,
+    _veg_pad0: f32,
+    _veg_pad1: f32,
+    _veg_pad2: f32,
 }
 
-const _: () = assert!(std::mem::size_of::<RenderSettingsUniform>() == 16448);
+const _: () = assert!(std::mem::size_of::<RenderSettingsUniform>() == 16496);
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
