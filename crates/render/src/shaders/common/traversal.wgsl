@@ -18,6 +18,7 @@ struct SlotTreeInfo {
     foliage_y_max: u32,
     foliage_bitmap_offset: u32,
     foliage_y_bands: u32,
+    foliage_tile_y_ranges_offset: u32,
 };
 
 fn world_to_chunk_coord(world_pos: vec3<f32>, cs_xz: f32, cs_y: f32) -> vec3<i32> {
@@ -53,7 +54,7 @@ fn lookup_chunk_info(cc: vec3<i32>) -> SlotTreeInfo {
         return info;
     }
     let idx = u32(lx) + u32(ly) * streaming.grid_dim_x + u32(lz) * streaming.grid_dim_x * streaming.grid_dim_y;
-    let base = idx * 8u;
+    let base = idx * 9u;
     info.world_size = indirection[base];
     info.root_offset = indirection[base + 1u];
     info.depth = indirection[base + 2u];
@@ -62,6 +63,7 @@ fn lookup_chunk_info(cc: vec3<i32>) -> SlotTreeInfo {
     info.foliage_y_max = indirection[base + 5u];
     info.foliage_bitmap_offset = indirection[base + 6u];
     info.foliage_y_bands = indirection[base + 7u];
+    info.foliage_tile_y_ranges_offset = indirection[base + 8u];
     return info;
 }
 
@@ -166,6 +168,18 @@ fn reset_trace_private_stats() {
     trace_stats_shadow_chunk_steps = 0u;
     trace_stats_shadow_node_steps = 0u;
     trace_stats_shadow_descents = 0u;
+    trace_stats_grass_trace_calls = 0u;
+    trace_stats_grass_run_visits = 0u;
+    trace_stats_grass_steps = 0u;
+    trace_stats_grass_candidates = 0u;
+    trace_stats_grass_tile_rejects = 0u;
+    trace_stats_grass_heightmap_reads = 0u;
+    trace_stats_grass_column_misses = 0u;
+    trace_stats_grass_y_checks = 0u;
+    trace_stats_grass_y_rejects = 0u;
+    trace_stats_grass_trace_hits = 0u;
+    trace_stats_grass_visible_pixels = 0u;
+    trace_stats_grass_shadow_rays = 0u;
 }
 
 struct HitResult {
@@ -481,6 +495,13 @@ fn trace_ray(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> HitResult {
 
     let max_chunk_steps = u32(max(round(render_settings.max_chunk_steps), 1.0));
     for (var chunk_iter = 0u; chunk_iter < max_chunk_steps; chunk_iter++) {
+        // Grass hits are clamped to the current chunk segment in trace_grass_ray_bounded(),
+        // so once the next chunk entry is past the best grass hit, no later chunk can
+        // occlude it and the primary DDA can stop immediately.
+        if !skip_grass && dda_grass_hit.hit && max(t_current, 0.0) >= dda_grass_hit.t {
+            return result;
+        }
+
         trace_stats_primary_chunk_steps += 1u;
         let info = lookup_chunk_info(cc);
 
@@ -541,6 +562,7 @@ fn trace_ray(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> HitResult {
                             max(t_current, 0.0), chunk_t_exit,
                             info.foliage_bitmap_offset, chunk_min.x, chunk_min.z, cs_xz,
                             chunk_min.y, info.foliage_y_bands,
+                            info.foliage_tile_y_ranges_offset,
                         );
                         if grass.hit && grass.t < dda_grass_hit.t {
                             dda_grass_hit = grass;
@@ -548,13 +570,14 @@ fn trace_ray(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> HitResult {
                     }
                 }
 
-                // If grass is closer than the voxel hit, don't return yet —
-                // continue DDA so later chunks can occlude the grass.
+                // Grass hits are restricted to this chunk segment, so if the voxel is
+                // farther away than the best grass hit we can stop immediately.
                 if skip_grass || !dda_grass_hit.hit || length(chunk_hit.hit_pos_local + chunk_min - ray_origin) <= dda_grass_hit.t {
                     var world_hit = chunk_hit;
                     world_hit.hit_pos_local = chunk_hit.hit_pos_local + chunk_min;
                     return world_hit;
                 }
+                return result;
             } else if !skip_grass && info.foliage_y_min < info.foliage_y_max {
                 // No voxel hit in this chunk, but it has foliage — trace grass.
                 let grass_max = select(1e20, dda_grass_hit.t, dda_grass_hit.hit);
@@ -566,9 +589,13 @@ fn trace_ray(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> HitResult {
                     max(t_current, 0.0), chunk_t_exit,
                     info.foliage_bitmap_offset, chunk_min.x, chunk_min.z, cs_xz,
                     chunk_min.y, info.foliage_y_bands,
+                    info.foliage_tile_y_ranges_offset,
                 );
                 if grass.hit && grass.t < dda_grass_hit.t {
                     dda_grass_hit = grass;
+                }
+                if dda_grass_hit.hit {
+                    return result;
                 }
             }
         }

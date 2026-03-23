@@ -43,6 +43,18 @@ pub(crate) struct TraceStatsSnapshot {
     pub(crate) shadow_blocked: u32,
     pub(crate) lod_hits: u32,
     pub(crate) material_hits: u32,
+    pub(crate) grass_trace_calls: u32,
+    pub(crate) grass_run_visits: u32,
+    pub(crate) grass_steps: u32,
+    pub(crate) grass_candidates: u32,
+    pub(crate) grass_tile_rejects: u32,
+    pub(crate) grass_heightmap_reads: u32,
+    pub(crate) grass_column_misses: u32,
+    pub(crate) grass_y_checks: u32,
+    pub(crate) grass_y_rejects: u32,
+    pub(crate) grass_trace_hits: u32,
+    pub(crate) grass_visible_pixels: u32,
+    pub(crate) grass_shadow_rays: u32,
 }
 
 pub(crate) struct TraceLayout {

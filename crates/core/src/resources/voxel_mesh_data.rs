@@ -5,12 +5,14 @@ use bevy_ecs::resource::Resource;
 use crate::{BakedChunkData, MATERIAL_PALETTE_SIZE};
 
 /// Number of u32 words per slot in the indirection table.
-const INDIRECTION_STRIDE: usize = 8;
+const INDIRECTION_STRIDE: usize = 9;
 
 /// Sentinel value: chunk has foliage but no bitmap (all columns are foliage).
 const FOLIAGE_BITMAP_ALL: u32 = 0xFFFFFFFE;
 /// Sentinel value: chunk has no foliage at all.
 const FOLIAGE_BITMAP_NONE: u32 = 0xFFFFFFFF;
+/// Sentinel value: no per-tile Y-range data (uniform foliage or no foliage).
+const FOLIAGE_TILE_NONE: u32 = 0xFFFFFFFF;
 
 #[derive(Resource)]
 pub struct VoxelMeshData {
@@ -20,7 +22,8 @@ pub struct VoxelMeshData {
     /// Concatenated average-color data, parallel to pool_dag (DAG portion only).
     pub pool_avg: Vec<u32>,
     /// Per-slot indirection: [world_size, root_offset, depth, pool_offset,
-    ///                        foliage_y_min, foliage_y_max, foliage_bitmap_offset, _reserved] × total_slots.
+    ///                        foliage_y_min, foliage_y_max, foliage_bitmap_offset,
+    ///                        foliage_y_bands, foliage_tile_y_ranges_offset] × total_slots.
     pub indirection: Vec<u32>,
     /// Chunk-coordinate origin of the grid (min corner).
     pub grid_min: [i32; 3],
@@ -40,6 +43,7 @@ fn write_slot(
     baked: &BakedChunkData,
     pool_offset: u32,
     bitmap_offset: u32,
+    tile_y_bands_offset: u32,
 ) {
     let base = idx * INDIRECTION_STRIDE;
     indirection[base] = baked.world_size;
@@ -50,6 +54,7 @@ fn write_slot(
     indirection[base + 5] = baked.foliage_y_max;
     indirection[base + 6] = bitmap_offset;
     indirection[base + 7] = baked.foliage_y_bands;
+    indirection[base + 8] = tile_y_bands_offset;
 }
 
 /// Compute the foliage bitmap pool offset for a baked chunk.
@@ -68,6 +73,19 @@ fn pool_foliage_bitmap(
         Some(bitmap) => {
             let offset = pool.len() as u32;
             pool.extend_from_slice(bitmap);
+            offset
+        }
+    }
+}
+
+/// Pool the per-tile Y-range data into the shared DAG/foliage pool.
+/// Returns the offset into `pool`, or `FOLIAGE_TILE_NONE` when there is no per-tile data.
+fn pool_foliage_tile_y_ranges(pool: &mut Vec<u32>, tile_y_bands: &Option<Vec<u32>>) -> u32 {
+    match tile_y_bands {
+        None => FOLIAGE_TILE_NONE,
+        Some(tiles) => {
+            let offset = pool.len() as u32;
+            pool.extend_from_slice(tiles);
             offset
         }
     }
@@ -101,6 +119,7 @@ impl VoxelMeshData {
             baked.foliage_y_max,
             &baked.foliage_bitmap,
         );
+        let tile_offset = pool_foliage_tile_y_ranges(&mut pool_dag, &baked.foliage_tile_y_ranges);
         let mut indirection = vec![0u32; INDIRECTION_STRIDE];
         let base = 0;
         indirection[base] = baked.world_size;
@@ -111,6 +130,7 @@ impl VoxelMeshData {
         indirection[base + 5] = baked.foliage_y_max;
         indirection[base + 6] = bitmap_offset;
         indirection[base + 7] = baked.foliage_y_bands;
+        indirection[base + 8] = tile_offset;
         Self {
             pool_dag,
             pool_avg: baked.avg_color_buffer,
@@ -144,12 +164,21 @@ impl VoxelMeshData {
             canonical.foliage_y_max,
             &canonical.foliage_bitmap,
         );
+        let tile_offset =
+            pool_foliage_tile_y_ranges(&mut pool_dag, &canonical.foliage_tile_y_ranges);
 
         let mut indirection = vec![0u32; total_slots * INDIRECTION_STRIDE];
         for z in 0..grid_dim_xz {
             for x in 0..grid_dim_xz {
                 let idx = (x + z * grid_dim_xz) as usize;
-                write_slot(&mut indirection, idx, canonical, 0, bitmap_offset);
+                write_slot(
+                    &mut indirection,
+                    idx,
+                    canonical,
+                    0,
+                    bitmap_offset,
+                    tile_offset,
+                );
             }
         }
 
@@ -205,14 +234,17 @@ impl VoxelMeshData {
             edited_offsets.insert(*coord, offset);
         }
 
-        // Pool foliage bitmaps after all DAG data.
+        // Pool foliage bitmaps and tile Y-range data after all DAG data.
         let canonical_bmp = pool_foliage_bitmap(
             &mut pool_dag,
             canonical.foliage_y_min,
             canonical.foliage_y_max,
             &canonical.foliage_bitmap,
         );
-        let mut edited_bmp_offsets: HashMap<[i32; 3], u32> = HashMap::with_capacity(edited.len());
+        let canonical_tile =
+            pool_foliage_tile_y_ranges(&mut pool_dag, &canonical.foliage_tile_y_ranges);
+        let mut edited_bmp_offsets: HashMap<[i32; 3], (u32, u32)> =
+            HashMap::with_capacity(edited.len());
         for (coord, baked) in edited {
             let bmp = pool_foliage_bitmap(
                 &mut pool_dag,
@@ -220,7 +252,8 @@ impl VoxelMeshData {
                 baked.foliage_y_max,
                 &baked.foliage_bitmap,
             );
-            edited_bmp_offsets.insert(*coord, bmp);
+            let tile = pool_foliage_tile_y_ranges(&mut pool_dag, &baked.foliage_tile_y_ranges);
+            edited_bmp_offsets.insert(*coord, (bmp, tile));
         }
 
         // Build indirection: canonical by default, override edited slots
@@ -233,10 +266,17 @@ impl VoxelMeshData {
 
                 if let Some(&pool_offset) = edited_offsets.get(&chunk_coord) {
                     let baked = &edited[&chunk_coord];
-                    let bmp = edited_bmp_offsets[&chunk_coord];
-                    write_slot(&mut indirection, idx, baked, pool_offset, bmp);
+                    let (bmp, tile) = edited_bmp_offsets[&chunk_coord];
+                    write_slot(&mut indirection, idx, baked, pool_offset, bmp, tile);
                 } else {
-                    write_slot(&mut indirection, idx, canonical, 0, canonical_bmp);
+                    write_slot(
+                        &mut indirection,
+                        idx,
+                        canonical,
+                        0,
+                        canonical_bmp,
+                        canonical_tile,
+                    );
                 }
             }
         }

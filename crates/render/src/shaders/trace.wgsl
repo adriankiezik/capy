@@ -16,6 +16,18 @@ struct TraceStats {
     shadow_blocked: atomic<u32>,
     lod_hits: atomic<u32>,
     material_hits: atomic<u32>,
+    grass_trace_calls: atomic<u32>,
+    grass_run_visits: atomic<u32>,
+    grass_steps: atomic<u32>,
+    grass_candidates: atomic<u32>,
+    grass_tile_rejects: atomic<u32>,
+    grass_heightmap_reads: atomic<u32>,
+    grass_column_misses: atomic<u32>,
+    grass_y_checks: atomic<u32>,
+    grass_y_rejects: atomic<u32>,
+    grass_trace_hits: atomic<u32>,
+    grass_visible_pixels: atomic<u32>,
+    grass_shadow_rays: atomic<u32>,
 };
 @group(0) @binding(12) var<storage, read_write> trace_stats: TraceStats;
 
@@ -97,6 +109,18 @@ fn commit_trace_stats(
     if shadow_blocked > 0u {
         atomicAdd(&trace_stats.shadow_blocked, shadow_blocked);
     }
+    atomicAdd(&trace_stats.grass_trace_calls, trace_stats_grass_trace_calls);
+    atomicAdd(&trace_stats.grass_run_visits, trace_stats_grass_run_visits);
+    atomicAdd(&trace_stats.grass_steps, trace_stats_grass_steps);
+    atomicAdd(&trace_stats.grass_candidates, trace_stats_grass_candidates);
+    atomicAdd(&trace_stats.grass_tile_rejects, trace_stats_grass_tile_rejects);
+    atomicAdd(&trace_stats.grass_heightmap_reads, trace_stats_grass_heightmap_reads);
+    atomicAdd(&trace_stats.grass_column_misses, trace_stats_grass_column_misses);
+    atomicAdd(&trace_stats.grass_y_checks, trace_stats_grass_y_checks);
+    atomicAdd(&trace_stats.grass_y_rejects, trace_stats_grass_y_rejects);
+    atomicAdd(&trace_stats.grass_trace_hits, trace_stats_grass_trace_hits);
+    atomicAdd(&trace_stats.grass_visible_pixels, trace_stats_grass_visible_pixels);
+    atomicAdd(&trace_stats.grass_shadow_rays, trace_stats_grass_shadow_rays);
 }
 
 @compute @workgroup_size(8, 8)
@@ -197,6 +221,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         textureStore(motion_vectors_out, pixel, vec4<f32>(motion, 0.0, 0.0));
     } else if use_grass {
         // Grass blade is in front of any voxel
+        trace_stats_grass_visible_pixels += 1u;
         let base = grass.color;
         let shading_pos = grass.pos;
         let shading_normal = grass.normal;
@@ -206,6 +231,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             let sun_dir = normalize(render_settings.sun_direction.xyz);
             let shadow_origin = shading_pos + shading_normal * render_settings.ray_epsilon;
             let in_shadow = trace_shadow_ray(shadow_origin, sun_dir);
+            trace_stats_grass_shadow_rays += 1u;
             shadow_ray_count = 1u;
             shadow_blocked_count = select(0u, 1u, in_shadow);
             shadow = select(1.0, 0.0, in_shadow);

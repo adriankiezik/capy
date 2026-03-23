@@ -90,6 +90,7 @@ pub fn patch_baked_chunk(old: &BakedChunkData, edits: &[VoxelEdit]) -> BakedChun
         // Bitmap and bands are recomputed by compact_baked_chunk after patching.
         foliage_bitmap: None,
         foliage_y_bands: 0,
+        foliage_tile_y_ranges: None,
     }
 }
 
@@ -167,6 +168,7 @@ pub fn patch_baked_chunk_bricks_owned(
         // Bitmap and bands are recomputed by compact_baked_chunk after patching.
         foliage_bitmap: None,
         foliage_y_bands: 0,
+        foliage_tile_y_ranges: None,
     }
 }
 

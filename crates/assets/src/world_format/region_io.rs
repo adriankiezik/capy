@@ -126,6 +126,7 @@ pub fn load_region(
                 foliage_y_max: 0,
                 foliage_bitmap: None,
                 foliage_y_bands: 0,
+                foliage_tile_y_ranges: None,
             },
         );
     }
