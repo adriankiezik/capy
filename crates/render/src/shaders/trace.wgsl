@@ -288,11 +288,20 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         textureStore(dlss_depth_out, pixel, vec4<f32>(hardware_depth, 0.0, 0.0, 0.0));
         textureStore(motion_vectors_out, pixel, vec4<f32>(motion, 0.0, 0.0));
     } else {
+        // Sky miss: place at a very far world-space point along the ray
+        // so DLSS computes correct temporal reprojection for sky pixels
+        let sky_pos = camera.camera_pos + ray_dir * 100000.0;
+        let sky_clip = camera.clip_from_world * vec4<f32>(sky_pos, 1.0);
+        let sky_prev_clip = camera.prev_clip_from_world * vec4<f32>(sky_pos, 1.0);
+        let sky_curr_ndc = sky_clip.xy / sky_clip.w;
+        let sky_prev_ndc = sky_prev_clip.xy / sky_prev_clip.w;
+        let sky_motion = (sky_curr_ndc - sky_prev_ndc) * vec2<f32>(0.5, -0.5);
+
         textureStore(gbuf_color_out, pixel, vec4<f32>(0.0, 0.0, 0.0, 0.0));
         textureStore(gbuf_normal_out, pixel, vec4<f32>(0.0, 0.0, 0.0, -1.0));
         textureStore(gbuf_depth_out, pixel, vec4<f32>(0.0, 0.0, 0.0, 0.0));
-        textureStore(dlss_depth_out, pixel, vec4<f32>(0.0, 0.0, 0.0, 0.0));
-        textureStore(motion_vectors_out, pixel, vec4<f32>(0.0, 0.0, 0.0, 0.0));
+        textureStore(dlss_depth_out, pixel, vec4<f32>(1.0, 0.0, 0.0, 0.0));
+        textureStore(motion_vectors_out, pixel, vec4<f32>(sky_motion, 0.0, 0.0));
     }
 
     commit_trace_stats(hit, shadow_ray_count, shadow_blocked_count);

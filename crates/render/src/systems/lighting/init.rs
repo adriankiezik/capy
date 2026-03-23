@@ -47,6 +47,7 @@ pub(crate) fn init_lighting(world: &mut World) {
             &trace.gbuf_depth,
             &voxels.render_settings_buffer,
             ao_texture,
+            &voxels.camera_buffer,
             resolution.width,
             resolution.height,
         );
@@ -62,6 +63,7 @@ pub(crate) fn init_lighting(world: &mut World) {
         &trace.gbuf_depth,
         &voxels.render_settings_buffer,
         ao_texture,
+        &voxels.camera_buffer,
         resolution.width,
         resolution.height,
     );

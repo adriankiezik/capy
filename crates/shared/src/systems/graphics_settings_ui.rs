@@ -29,7 +29,7 @@ pub fn graphics_settings_ui(world: &mut World) {
             #[cfg(not(feature = "dlss"))]
             let dlss_active = false;
 
-            let fsr_active = fsr.as_ref().is_some_and(|s| s.enabled && s.supported);
+            let fsr_active = fsr.as_ref().is_some_and(|s| s.enabled && s.supported) && !dlss_active;
 
             let upscaler_active = dlss_active || fsr_active;
 

@@ -51,6 +51,7 @@ pub(crate) fn resize_lighting_system(
             &trace.gbuf_depth,
             &voxels.render_settings_buffer,
             ao_texture,
+            &voxels.camera_buffer,
             [resolution.width, resolution.height],
         );
         lighting.ao_source_is_rtao = want_rtao;
@@ -62,6 +63,7 @@ pub(crate) fn resize_lighting_system(
             &trace.gbuf_depth,
             &voxels.render_settings_buffer,
             ao_texture,
+            &voxels.camera_buffer,
         );
         lighting.ao_source_is_rtao = want_rtao;
     }

@@ -22,6 +22,7 @@ impl LightingLayout {
                 ),
                 bgl_uniform(4),
                 bgl_sampled_texture(5),
+                bgl_uniform(6),
             ],
         });
         Self { layout }
@@ -41,6 +42,7 @@ impl LightingLayout {
         output_color: &GpuTexture,
         render_settings_buffer: &wgpu::Buffer,
         ao_texture: &GpuTexture,
+        camera_buffer: &wgpu::Buffer,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Lighting Bind Group"),
@@ -70,6 +72,10 @@ impl LightingLayout {
                     binding: 5,
                     resource: wgpu::BindingResource::TextureView(&ao_texture.view),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: camera_buffer.as_entire_binding(),
+                },
             ],
         })
     }
@@ -94,6 +100,7 @@ impl LightingPipeline {
         gbuf_depth: &GpuTexture,
         render_settings_buffer: &wgpu::Buffer,
         ao_texture: &GpuTexture,
+        camera_buffer: &wgpu::Buffer,
         width: u32,
         height: u32,
     ) -> Self {
@@ -123,6 +130,7 @@ impl LightingPipeline {
             &output_color,
             render_settings_buffer,
             ao_texture,
+            camera_buffer,
         );
 
         Self {
@@ -145,6 +153,7 @@ impl LightingPipeline {
         gbuf_depth: &GpuTexture,
         render_settings_buffer: &wgpu::Buffer,
         ao_texture: &GpuTexture,
+        camera_buffer: &wgpu::Buffer,
     ) {
         self.bind_group = self.layout.bind(
             device,
@@ -154,6 +163,7 @@ impl LightingPipeline {
             &self.output_color,
             render_settings_buffer,
             ao_texture,
+            camera_buffer,
         );
     }
 
@@ -166,6 +176,7 @@ impl LightingPipeline {
         gbuf_depth: &GpuTexture,
         render_settings_buffer: &wgpu::Buffer,
         ao_texture: &GpuTexture,
+        camera_buffer: &wgpu::Buffer,
         size: [u32; 2],
     ) {
         let [width, height] = size;
@@ -186,6 +197,7 @@ impl LightingPipeline {
             &self.output_color,
             render_settings_buffer,
             ao_texture,
+            camera_buffer,
         );
     }
 }

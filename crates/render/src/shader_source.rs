@@ -61,6 +61,8 @@ pub(crate) fn build_trace_shader_source() -> String {
 
 pub(crate) fn build_lighting_shader_source() -> String {
     let mut out = String::new();
+    out.push_str(COMMON_CAMERA);
+    out.push('\n');
     out.push_str(COMMON_RENDER_SETTINGS);
     out.push('\n');
     out.push_str(SHADER_LIGHTING.trim_start_matches('\u{feff}'));
