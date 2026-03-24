@@ -69,9 +69,11 @@ pub(crate) fn upload_uniforms_system(
 
         let current_clip_from_world = clip_from_world(&camera).to_cols_array();
         let previous_clip_from_world = temporal.previous_clip_from_world(current_clip_from_world);
-        let camera_underwater = mesh
-            .as_deref()
-            .is_some_and(|mesh| mesh.is_water_at(camera.position.to_array()));
+        let water_enabled = settings.as_deref().map_or(true, |s| s.water_enabled);
+        let camera_underwater = water_enabled
+            && mesh
+                .as_deref()
+                .is_some_and(|mesh| mesh.is_water_at(camera.position.to_array()));
 
         scene.upload_camera(
             &gpu.queue,

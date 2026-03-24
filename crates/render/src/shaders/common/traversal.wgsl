@@ -288,15 +288,18 @@ fn traverse_chunk(
                 if bit_is_set_64(ml, mh, ci) {
                     let mat = get_leaf_material_pool(pool_base, no, ci);
                     if mat != 0u {
-                        if render_settings.water_enabled > 0.5 && (mat & WATER_BIT_MASK) != 0u {
-                            // Water voxel at entry — record and fall through to DDA
-                            let wp = (pos - vec3<f32>(1.0)) * ws;
-                            let wt = dot(wp - ray_origin_world, dir);
-                            if !dda_water_hit.hit || wt < dda_water_hit.t {
-                                dda_water_hit.hit = true;
-                                dda_water_hit.t = wt;
-                                dda_water_hit.entry_normal = axis_normal(entry_axis, ray_dir_world);
+                        if (mat & WATER_BIT_MASK) != 0u {
+                            // Water voxel at entry — record surface and fall through to DDA
+                            if render_settings.water_enabled > 0.5 {
+                                let wp = (pos - vec3<f32>(1.0)) * ws;
+                                let wt = dot(wp - ray_origin_world, dir);
+                                if !dda_water_hit.hit || wt < dda_water_hit.t {
+                                    dda_water_hit.hit = true;
+                                    dda_water_hit.t = wt;
+                                    dda_water_hit.entry_normal = axis_normal(entry_axis, ray_dir_world);
+                                }
                             }
+                            // Water disabled: treat as air — skip this voxel
                         } else {
                             result.hit = true;
                             result.material = mat;
@@ -384,16 +387,19 @@ fn traverse_chunk(
         if n_il && bit_is_set_64(n_ml, n_mh, child_idx) {
             let mat = get_leaf_material_pool(pool_base, node_idx, child_idx);
             if mat != 0u {
-                if render_settings.water_enabled > 0.5 && (mat & WATER_BIT_MASK) != 0u {
+                if (mat & WATER_BIT_MASK) != 0u {
                     // Water voxel — record surface hit and continue DDA
-                    let dda_frac_w = unmirror_pos(pos, dir);
-                    let wp = (dda_frac_w - vec3<f32>(1.0)) * ws;
-                    let wt = dot(wp - ray_origin_world, dir);
-                    if !dda_water_hit.hit || wt < dda_water_hit.t {
-                        dda_water_hit.hit = true;
-                        dda_water_hit.t = wt;
-                        dda_water_hit.entry_normal = axis_normal(last_axis, ray_dir_world);
+                    if render_settings.water_enabled > 0.5 {
+                        let dda_frac_w = unmirror_pos(pos, dir);
+                        let wp = (dda_frac_w - vec3<f32>(1.0)) * ws;
+                        let wt = dot(wp - ray_origin_world, dir);
+                        if !dda_water_hit.hit || wt < dda_water_hit.t {
+                            dda_water_hit.hit = true;
+                            dda_water_hit.t = wt;
+                            dda_water_hit.entry_normal = axis_normal(last_axis, ray_dir_world);
+                        }
                     }
+                    // Water disabled: treat as air — skip this voxel
                 } else {
                     result.hit = true;
                     result.material = mat;
@@ -704,7 +710,7 @@ fn traverse_chunk_shadow(
             if il {
                 if bit_is_set_64(ml, mh, ci) {
                     let mat = get_leaf_material_pool(pool_base, no, ci);
-                    if mat != 0u && !(render_settings.water_enabled > 0.5 && (mat & WATER_BIT_MASK) != 0u) {
+                    if mat != 0u && (mat & WATER_BIT_MASK) == 0u {
                         return true;
                     }
                 }
@@ -757,7 +763,7 @@ fn traverse_chunk_shadow(
 
         if n_il && bit_is_set_64(n_ml, n_mh, child_idx) {
             let mat = get_leaf_material_pool(pool_base, node_idx, child_idx);
-            if mat != 0u && !(render_settings.water_enabled > 0.5 && (mat & WATER_BIT_MASK) != 0u) {
+            if mat != 0u && (mat & WATER_BIT_MASK) == 0u {
                 return true;
             }
         }

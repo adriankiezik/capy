@@ -52,7 +52,7 @@ impl VoxelSceneBuffers {
             width,
             height,
             settings.lod_bias,
-            mesh.is_water_at(camera.position.to_array()),
+            settings.water_enabled && mesh.is_water_at(camera.position.to_array()),
             [0.0, 0.0],
             clip_from_world(camera).to_cols_array(),
             0.0,

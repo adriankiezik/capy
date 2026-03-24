@@ -23,25 +23,15 @@ fn underwater_surface_depth(ray_dir: vec3<f32>) -> f32 {
 }
 
 fn underwater_distort_pixel(pixel: vec2<i32>, dims: vec2<u32>) -> vec2<i32> {
-    // Reconstruct ray direction for this pixel
+    // Single-layer noise in screen UV space — cheap wobble that looks good enough underwater.
+    // Uses noise2d directly (1 eval each for x/y) instead of multi-octave fbm2 (was 12 evals).
     let uv_x = (f32(pixel.x) + 0.5) / camera.resolution.x;
     let uv_y = 1.0 - (f32(pixel.y) + 0.5) / camera.resolution.y;
-    let ray_dir = normalize(camera.ray_corner + camera.ray_right * (uv_x * 2.0) + camera.ray_up * (uv_y * 2.0));
-
-    // Estimate where this ray exits the water surface
-    let surface_t = underwater_surface_depth(ray_dir);
-    let surface_pos = camera.camera_pos + ray_dir * surface_t;
-
-    // Sample noise in screen UV space so distortion doesn't speed up with camera movement
     let screen_uv = vec2<f32>(uv_x, uv_y);
-    let scale1 = 3.0;
-    let speed1 = 0.3;
-    let scale2 = 7.0;
-    let speed2 = 0.7;
-    let p1 = screen_uv * scale1 + vec2<f32>(camera.time * speed1, camera.time * speed1 * 0.7);
-    let p2 = screen_uv * scale2 + vec2<f32>(-camera.time * speed2 * 0.6, camera.time * speed2);
-    let noise_x = (fbm2(p1) + fbm2(p2) * 0.5) - 0.5;
-    let noise_y = (fbm2(p1 + vec2<f32>(7.3, 13.7)) + fbm2(p2 + vec2<f32>(7.3, 13.7)) * 0.5) - 0.5;
+
+    let p = screen_uv * 4.0 + vec2<f32>(camera.time * 0.3, camera.time * 0.21);
+    let noise_x = noise2d(p) - 0.5;
+    let noise_y = noise2d(p + vec2<f32>(7.3, 13.7)) - 0.5;
 
     // Fade distortion to zero near screen edges to avoid stretched sampling
     let edge = vec2<f32>(f32(pixel.x), f32(pixel.y));
@@ -117,10 +107,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if x >= dims.x || y >= dims.y { return; }
 
     let pixel = vec2<i32>(i32(x), i32(y));
+    let is_underwater = camera.camera_underwater > 0.5;
+
+    // Compute ray direction once — reused for sky, underwater lighting, and absorption
+    let uv_x = (f32(x) + 0.5) / camera.resolution.x;
+    let uv_y = 1.0 - (f32(y) + 0.5) / camera.resolution.y;
+    let ray_dir = normalize(camera.ray_corner + camera.ray_right * (uv_x * 2.0) + camera.ray_up * (uv_y * 2.0));
 
     // When underwater, distort all g-buffer reads for a consistent wobble effect
     var sample_pixel = pixel;
-    if camera.camera_underwater > 0.5 {
+    if is_underwater {
         sample_pixel = underwater_distort_pixel(pixel, dims);
     }
 
@@ -128,10 +124,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let hit_flag = normal_sample.w;
 
     if hit_flag <= 0.0 {
-        // Reconstruct ray direction (must match trace.wgsl)
-        let uv_x = (f32(x) + 0.5) / camera.resolution.x;
-        let uv_y = 1.0 - (f32(y) + 0.5) / camera.resolution.y;
-        let ray_dir = normalize(camera.ray_corner + camera.ray_right * (uv_x * 2.0) + camera.ray_up * (uv_y * 2.0));
         let sun_dir = normalize(render_settings.sun_direction.xyz);
         let sky = sky_color(ray_dir, sun_dir);
         textureStore(output_color, pixel, vec4<f32>(sky, 1.0));
@@ -148,9 +140,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Water pixels (normal.w ~= 0.5) are pre-lit in trace pass —
     // only apply shadow darkening, skip AO and diffuse lighting.
     if hit_flag > 0.3 && hit_flag < 0.7 {
-        // When viewing water from above, distort the sample to create a refractive wobble
+        // When viewing water from above, distort the sample to create a refractive wobble.
+        // Skip this when underwater — the underwater distortion already handles wobble.
         var water_sample_pixel = sample_pixel;
-        if camera.camera_underwater <= 0.5 {
+        if !is_underwater {
             water_sample_pixel = water_surface_distort_pixel(pixel, dims);
             // Only use distorted pixel if it's also water, to avoid bleeding land into water
             let distorted_flag = textureLoad(gbuf_normal, water_sample_pixel, 0).w;
@@ -159,14 +152,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             }
         }
         let water_color_sample = textureLoad(gbuf_color, water_sample_pixel, 0);
-        // Water: color is already Fresnel-blended reflection+refraction+specular.
-        // Modulate by shadow only (shadow is in color_sample.a).
         let water_light = mix(0.5, 1.0, water_color_sample.a);
         var water_color = water_color_sample.rgb * water_light;
-        if camera.camera_underwater > 0.5 {
-            let uv_x = (f32(x) + 0.5) / camera.resolution.x;
-            let uv_y = 1.0 - (f32(y) + 0.5) / camera.resolution.y;
-            let ray_dir = normalize(camera.ray_corner + camera.ray_right * (uv_x * 2.0) + camera.ray_up * (uv_y * 2.0));
+        if is_underwater {
             let scene_t = textureLoad(gbuf_depth, sample_pixel, 0).r;
             water_color = apply_underwater_lighting(water_color, ray_dir, scene_t);
         }
@@ -178,10 +166,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let n_dot_l = max(dot(normal, sun_dir), 0.0);
     let light = render_settings.ambient_light * ao + render_settings.sun_contribution * n_dot_l * shadow;
     var lit_color = base_color * light;
-    if camera.camera_underwater > 0.5 {
-        let uv_x = (f32(x) + 0.5) / camera.resolution.x;
-        let uv_y = 1.0 - (f32(y) + 0.5) / camera.resolution.y;
-        let ray_dir = normalize(camera.ray_corner + camera.ray_right * (uv_x * 2.0) + camera.ray_up * (uv_y * 2.0));
+    if is_underwater {
         let scene_t = textureLoad(gbuf_depth, sample_pixel, 0).r;
         lit_color = apply_underwater_lighting(lit_color, ray_dir, scene_t);
     }
