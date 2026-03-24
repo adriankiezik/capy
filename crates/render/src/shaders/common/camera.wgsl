@@ -2,7 +2,7 @@
 struct CameraUniform {
     inv_view_proj: mat4x4<f32>,
     camera_pos: vec3<f32>,
-    _pad0: f32,
+    camera_underwater: f32,
     resolution: vec2<f32>,
     lod_bias: f32,
     pixel_size: f32,

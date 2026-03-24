@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use bevy_ecs::resource::Resource;
 
-use crate::{BakedChunkData, MATERIAL_PALETTE_SIZE};
+use crate::{BakedChunkData, MATERIAL_PALETTE_SIZE, MaterialId, is_water_material};
 
 /// Number of u32 words per slot in the indirection table.
 const INDIRECTION_STRIDE: usize = 9;
@@ -13,6 +13,38 @@ const FOLIAGE_BITMAP_ALL: u32 = 0xFFFFFFFE;
 const FOLIAGE_BITMAP_NONE: u32 = 0xFFFFFFFF;
 /// Sentinel value: no per-tile Y-range data (uniform foliage or no foliage).
 const FOLIAGE_TILE_NONE: u32 = 0xFFFFFFFF;
+const MAX_CHILD_FRACTION: f32 = 0.999_999_94;
+
+#[derive(Clone, Copy)]
+struct SlotTreeInfo {
+    world_size: u32,
+    root_offset: u32,
+    depth: u32,
+    pool_offset: u32,
+}
+
+fn bit_is_set_64(lo: u32, hi: u32, bit: u32) -> bool {
+    if bit < 32 {
+        (lo & (1u32 << bit)) != 0
+    } else {
+        (hi & (1u32 << (bit - 32))) != 0
+    }
+}
+
+fn popcount_below(lo: u32, hi: u32, bit: u32) -> u32 {
+    if bit < 32 {
+        let mask = if bit == 0 { 0 } else { (1u32 << bit) - 1 };
+        (lo & mask).count_ones()
+    } else {
+        let hi_bits = bit - 32;
+        let hi_mask = if hi_bits == 0 {
+            0
+        } else {
+            (1u32 << hi_bits) - 1
+        };
+        lo.count_ones() + (hi & hi_mask).count_ones()
+    }
+}
 
 #[derive(Resource)]
 pub struct VoxelMeshData {
@@ -92,6 +124,109 @@ fn pool_foliage_tile_y_ranges(pool: &mut Vec<u32>, tile_y_bands: &Option<Vec<u32
 }
 
 impl VoxelMeshData {
+    pub fn material_at(&self, world_pos: [f32; 3]) -> MaterialId {
+        let chunk_size_xz = self.chunk_size_xz as f32;
+        let chunk_size_y = self.chunk_size_y as f32;
+        let chunk_coord = [
+            (world_pos[0] / chunk_size_xz).floor() as i32,
+            (world_pos[1] / chunk_size_y).floor() as i32,
+            (world_pos[2] / chunk_size_xz).floor() as i32,
+        ];
+        let Some(info) = self.lookup_chunk_info(chunk_coord) else {
+            return 0;
+        };
+
+        let chunk_min = [
+            chunk_coord[0] as f32 * chunk_size_xz,
+            chunk_coord[1] as f32 * chunk_size_y,
+            chunk_coord[2] as f32 * chunk_size_xz,
+        ];
+        let world_size = info.world_size as f32;
+        if world_size <= 0.0 {
+            return 0;
+        }
+
+        let mut scaled = [
+            ((world_pos[0] - chunk_min[0]) / world_size).clamp(0.0, MAX_CHILD_FRACTION),
+            ((world_pos[1] - chunk_min[1]) / world_size).clamp(0.0, MAX_CHILD_FRACTION),
+            ((world_pos[2] - chunk_min[2]) / world_size).clamp(0.0, MAX_CHILD_FRACTION),
+        ];
+
+        let pool_base = info.pool_offset as usize;
+        let mut node_offset = info.root_offset as usize;
+        let mut mask_lo = self
+            .pool_dag
+            .get(pool_base + node_offset)
+            .copied()
+            .unwrap_or(0);
+        let mut mask_hi = self
+            .pool_dag
+            .get(pool_base + node_offset + 1)
+            .copied()
+            .unwrap_or(0);
+        let mut is_leaf = self
+            .pool_dag
+            .get(pool_base + node_offset + 2)
+            .copied()
+            .unwrap_or(0)
+            & 1
+            != 0;
+
+        for _ in 0..info.depth {
+            let cell_x = (scaled[0] * 4.0).floor().clamp(0.0, 3.0) as u32;
+            let cell_y = (scaled[1] * 4.0).floor().clamp(0.0, 3.0) as u32;
+            let cell_z = (scaled[2] * 4.0).floor().clamp(0.0, 3.0) as u32;
+            let cell_index = cell_x + cell_y * 4 + cell_z * 16;
+
+            if is_leaf {
+                if !bit_is_set_64(mask_lo, mask_hi, cell_index) {
+                    return 0;
+                }
+                return self.leaf_material(pool_base, node_offset, cell_index);
+            }
+
+            if !bit_is_set_64(mask_lo, mask_hi, cell_index) {
+                return 0;
+            }
+
+            let packed_index = popcount_below(mask_lo, mask_hi, cell_index) as usize;
+            node_offset = self
+                .pool_dag
+                .get(pool_base + node_offset + 3 + packed_index)
+                .copied()
+                .unwrap_or(0) as usize;
+            mask_lo = self
+                .pool_dag
+                .get(pool_base + node_offset)
+                .copied()
+                .unwrap_or(0);
+            mask_hi = self
+                .pool_dag
+                .get(pool_base + node_offset + 1)
+                .copied()
+                .unwrap_or(0);
+            is_leaf = self
+                .pool_dag
+                .get(pool_base + node_offset + 2)
+                .copied()
+                .unwrap_or(0)
+                & 1
+                != 0;
+
+            scaled = [
+                (scaled[0] * 4.0 - cell_x as f32).clamp(0.0, MAX_CHILD_FRACTION),
+                (scaled[1] * 4.0 - cell_y as f32).clamp(0.0, MAX_CHILD_FRACTION),
+                (scaled[2] * 4.0 - cell_z as f32).clamp(0.0, MAX_CHILD_FRACTION),
+            ];
+        }
+
+        0
+    }
+
+    pub fn is_water_at(&self, world_pos: [f32; 3]) -> bool {
+        is_water_material(self.material_at(world_pos))
+    }
+
     pub fn empty() -> Self {
         Self {
             pool_dag: vec![0],
@@ -291,5 +426,47 @@ impl VoxelMeshData {
             chunk_size_y,
             material_palette,
         }
+    }
+
+    fn lookup_chunk_info(&self, chunk_coord: [i32; 3]) -> Option<SlotTreeInfo> {
+        let local_x = chunk_coord[0] - self.grid_min[0];
+        let local_y = chunk_coord[1] - self.grid_min[1];
+        let local_z = chunk_coord[2] - self.grid_min[2];
+        if local_x < 0
+            || local_y < 0
+            || local_z < 0
+            || local_x >= self.grid_dim[0] as i32
+            || local_y >= self.grid_dim[1] as i32
+            || local_z >= self.grid_dim[2] as i32
+        {
+            return None;
+        }
+
+        let slot_index = local_x as usize
+            + local_y as usize * self.grid_dim[0] as usize
+            + local_z as usize * self.grid_dim[0] as usize * self.grid_dim[1] as usize;
+        let base = slot_index * INDIRECTION_STRIDE;
+        let world_size = *self.indirection.get(base)?;
+        if world_size == 0 {
+            return None;
+        }
+
+        Some(SlotTreeInfo {
+            world_size,
+            root_offset: *self.indirection.get(base + 1)?,
+            depth: *self.indirection.get(base + 2)?,
+            pool_offset: *self.indirection.get(base + 3)?,
+        })
+    }
+
+    fn leaf_material(&self, pool_base: usize, node_offset: usize, bit: u32) -> MaterialId {
+        let word_index = bit as usize / 2;
+        let half_offset = bit % 2;
+        let word = self
+            .pool_dag
+            .get(pool_base + node_offset + 3 + word_index)
+            .copied()
+            .unwrap_or(0);
+        ((word >> (half_offset * 16)) & 0xFFFF) as MaterialId
     }
 }

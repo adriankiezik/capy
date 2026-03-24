@@ -154,6 +154,19 @@ var<private> dda_grass_hit: GrassHit;
 // When true, trace_ray() ignores grass entirely (used by pick shader for editor tools).
 var<private> skip_grass: bool;
 
+// Water voxel hit found during DDA traversal, read by trace.wgsl after trace_ray().
+// The traversal skips water voxels (treats them as transparent) and records the
+// closest water surface hit here. The solid hit behind water (if any) is returned
+// normally as the HitResult from trace_ray().
+const WATER_BIT_MASK: u32 = 0x4000u;
+
+struct WaterHit {
+    hit: bool,
+    t: f32,                   // ray parameter at water surface (world-space distance)
+    entry_normal: vec3<f32>,  // flat face normal from entry axis (before wave perturbation)
+};
+var<private> dda_water_hit: WaterHit;
+
 var<private> trace_stats_primary_chunk_steps: u32;
 var<private> trace_stats_primary_node_steps: u32;
 var<private> trace_stats_primary_descents: u32;
@@ -275,12 +288,23 @@ fn traverse_chunk(
                 if bit_is_set_64(ml, mh, ci) {
                     let mat = get_leaf_material_pool(pool_base, no, ci);
                     if mat != 0u {
-                        result.hit = true;
-                        result.material = mat;
-                        result.hit_pos_local = (pos - vec3<f32>(1.0)) * ws;
-                        result.t = dot(result.hit_pos_local - ray_origin_world, dir);
-                        result.normal = axis_normal(entry_axis, ray_dir_world);
-                        return result;
+                        if render_settings.water_enabled > 0.5 && (mat & WATER_BIT_MASK) != 0u {
+                            // Water voxel at entry — record and fall through to DDA
+                            let wp = (pos - vec3<f32>(1.0)) * ws;
+                            let wt = dot(wp - ray_origin_world, dir);
+                            if !dda_water_hit.hit || wt < dda_water_hit.t {
+                                dda_water_hit.hit = true;
+                                dda_water_hit.t = wt;
+                                dda_water_hit.entry_normal = axis_normal(entry_axis, ray_dir_world);
+                            }
+                        } else {
+                            result.hit = true;
+                            result.material = mat;
+                            result.hit_pos_local = (pos - vec3<f32>(1.0)) * ws;
+                            result.t = dot(result.hit_pos_local - ray_origin_world, dir);
+                            result.normal = axis_normal(entry_axis, ray_dir_world);
+                            return result;
+                        }
                     }
                 }
                 break;
@@ -360,13 +384,25 @@ fn traverse_chunk(
         if n_il && bit_is_set_64(n_ml, n_mh, child_idx) {
             let mat = get_leaf_material_pool(pool_base, node_idx, child_idx);
             if mat != 0u {
-                result.hit = true;
-                result.material = mat;
-                let dda_frac = unmirror_pos(pos, dir);
-                result.hit_pos_local = (dda_frac - vec3<f32>(1.0)) * ws;
-                result.t = dot(result.hit_pos_local - ray_origin_world, dir);
-                result.normal = axis_normal(last_axis, ray_dir_world);
-                return result;
+                if render_settings.water_enabled > 0.5 && (mat & WATER_BIT_MASK) != 0u {
+                    // Water voxel — record surface hit and continue DDA
+                    let dda_frac_w = unmirror_pos(pos, dir);
+                    let wp = (dda_frac_w - vec3<f32>(1.0)) * ws;
+                    let wt = dot(wp - ray_origin_world, dir);
+                    if !dda_water_hit.hit || wt < dda_water_hit.t {
+                        dda_water_hit.hit = true;
+                        dda_water_hit.t = wt;
+                        dda_water_hit.entry_normal = axis_normal(last_axis, ray_dir_world);
+                    }
+                } else {
+                    result.hit = true;
+                    result.material = mat;
+                    let dda_frac = unmirror_pos(pos, dir);
+                    result.hit_pos_local = (dda_frac - vec3<f32>(1.0)) * ws;
+                    result.t = dot(result.hit_pos_local - ray_origin_world, dir);
+                    result.normal = axis_normal(last_axis, ray_dir_world);
+                    return result;
+                }
             }
         }
 
@@ -435,6 +471,9 @@ fn trace_ray(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> HitResult {
     // Reset DDA grass hit for this ray.
     dda_grass_hit.hit = false;
     dda_grass_hit.t = 1e20;
+
+    // Reset water hit for this ray.
+    dda_water_hit.hit = false;
 
     var result: HitResult;
     result.hit = false;
@@ -665,7 +704,9 @@ fn traverse_chunk_shadow(
             if il {
                 if bit_is_set_64(ml, mh, ci) {
                     let mat = get_leaf_material_pool(pool_base, no, ci);
-                    if mat != 0u { return true; }
+                    if mat != 0u && !(render_settings.water_enabled > 0.5 && (mat & WATER_BIT_MASK) != 0u) {
+                        return true;
+                    }
                 }
                 break;
             }
@@ -716,7 +757,9 @@ fn traverse_chunk_shadow(
 
         if n_il && bit_is_set_64(n_ml, n_mh, child_idx) {
             let mat = get_leaf_material_pool(pool_base, node_idx, child_idx);
-            if mat != 0u { return true; }
+            if mat != 0u && !(render_settings.water_enabled > 0.5 && (mat & WATER_BIT_MASK) != 0u) {
+                return true;
+            }
         }
 
         var adv_se = scale_exp;

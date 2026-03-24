@@ -65,6 +65,10 @@ pub fn graphics_settings_ui(world: &mut World) {
             ui.collapsing("Vegetation", |ui| {
                 vegetation_ui(ui, &mut settings);
             });
+
+            ui.collapsing("Water", |ui| {
+                water_ui(ui, &mut settings);
+            });
         });
 
     *world.resource_mut::<RendererSettings>() = settings;
@@ -324,6 +328,10 @@ fn vegetation_ui(ui: &mut egui::Ui, settings: &mut RendererSettings) {
                 .text("shadow distance"),
         );
     }
+}
+
+fn water_ui(ui: &mut egui::Ui, settings: &mut RendererSettings) {
+    ui.checkbox(&mut settings.water_enabled, "Enabled");
 }
 
 fn lighting_ui(ui: &mut egui::Ui, settings: &mut RendererSettings) {

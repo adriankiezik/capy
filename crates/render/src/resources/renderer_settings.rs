@@ -44,6 +44,8 @@ pub struct RendererSettings {
     pub vegetation_shadow_distance: f32,
     pub vegetation_animation_distance: f32,
 
+    pub water_enabled: bool,
+
     /// Internal render resolution as a fraction of window size.
     /// 1.0 = native, 0.5 = half resolution, 0.25 = quarter resolution.
     pub render_scale: f32,
@@ -88,6 +90,7 @@ impl Default for RendererSettings {
             vegetation_shadow_enabled: true,
             vegetation_shadow_distance: 4000.0,
             vegetation_animation_distance: 2000.0,
+            water_enabled: true,
             render_scale: DEFAULT_RENDER_SCALE,
         }
     }

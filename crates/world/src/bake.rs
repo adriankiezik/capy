@@ -1,4 +1,4 @@
-use capy_core::{BakedChunkData, is_foliage_material};
+use capy_core::{BakedChunkData, is_foliage_material, is_water_material};
 
 use crate::dag::reduce_to_dag;
 use crate::error::Result;
@@ -35,9 +35,13 @@ fn scan_foliage(grid: &VoxelGrid) -> (u32, u32, Option<Vec<u32>>, u32, Option<Ve
                 if !is_foliage_material(mat) {
                     continue;
                 }
-                let above_is_air =
-                    y + 1 >= grid.size_y || grid.get(x as i32, (y + 1) as i32, z as i32) == 0;
-                if above_is_air {
+                let above_mat = if y + 1 >= grid.size_y {
+                    0
+                } else {
+                    grid.get(x as i32, (y + 1) as i32, z as i32)
+                };
+                let above_is_open = above_mat == 0 || is_water_material(above_mat);
+                if above_is_open {
                     col_surface_y[col] = y;
                     y_min = y_min.min(y);
                     y_max = y_max.max(y + 1);
@@ -179,23 +183,25 @@ pub fn recompute_foliage_bitmap(baked: &mut BakedChunkData, chunk_size_xz: u32) 
                         continue;
                     }
 
-                    // Check if the voxel above is air (this is a surface voxel).
-                    let above_is_air = if ly + 1 < BRANCH as u32 {
+                    // Check if the voxel above is air or water (this is a surface voxel).
+                    let above_is_open = if ly + 1 < BRANCH as u32 {
                         let above_bit =
                             (lx + (ly + 1) * BRANCH as u32 + lz * BRANCH as u32 * BRANCH as u32)
                                 as usize;
-                        brick.materials[above_bit] == 0
+                        let am = brick.materials[above_bit];
+                        am == 0 || is_water_material(am)
                     } else {
                         match brick_map.get(&(brick.bx, brick.by + 1, brick.bz)) {
                             None => true,
                             Some(&above_idx) => {
                                 let above_bit = (lx + lz * BRANCH as u32 * BRANCH as u32) as usize;
-                                bricks[above_idx].materials[above_bit] == 0
+                                let am = bricks[above_idx].materials[above_bit];
+                                am == 0 || is_water_material(am)
                             }
                         }
                     };
 
-                    if above_is_air {
+                    if above_is_open {
                         col_surface_y[col] = vy;
                         y_min = y_min.min(vy);
                         y_max = y_max.max(vy + 1);

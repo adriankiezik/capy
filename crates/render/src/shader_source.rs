@@ -11,6 +11,7 @@ const COMMON_MASK64: &str = include_str!("shaders/common/mask64.wgsl");
 const COMMON_RENDER_SETTINGS: &str = include_str!("shaders/common/render_settings.wgsl");
 const COMMON_TRAVERSAL: &str = include_str!("shaders/common/traversal.wgsl");
 const COMMON_GRASS: &str = include_str!("shaders/common/grass.wgsl");
+const COMMON_WATER: &str = include_str!("shaders/common/water.wgsl");
 
 const VOXEL_SCENE_BINDINGS: &str = r"
 @group(0) @binding(0) var<uniform> camera: CameraUniform;
@@ -48,6 +49,8 @@ fn build_common_prefix() -> String {
     out.push('\n');
     out.push_str(COMMON_GRASS);
     out.push('\n');
+    out.push_str(COMMON_WATER);
+    out.push('\n');
     out.push_str(COMMON_TRAVERSAL);
     out.push('\n');
     out
@@ -64,6 +67,8 @@ pub(crate) fn build_lighting_shader_source() -> String {
     out.push_str(COMMON_CAMERA);
     out.push('\n');
     out.push_str(COMMON_RENDER_SETTINGS);
+    out.push('\n');
+    out.push_str(COMMON_WATER);
     out.push('\n');
     out.push_str(SHADER_LIGHTING.trim_start_matches('\u{feff}'));
     out

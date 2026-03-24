@@ -82,6 +82,28 @@ fn apply_selection_tint(base: vec3<f32>, pos: vec3<f32>) -> vec3<f32> {
     return desaturated * 0.7;
 }
 
+const UNDERWATER_SURFACE_DEPTH_MIN: f32 = 2.5;
+const UNDERWATER_SURFACE_DEPTH_MAX: f32 = 18.0;
+
+fn underwater_surface_depth(ray_dir: vec3<f32>) -> f32 {
+    let up = clamp(ray_dir.y, 0.0, 1.0);
+    return mix(UNDERWATER_SURFACE_DEPTH_MAX, UNDERWATER_SURFACE_DEPTH_MIN, sqrt(up));
+}
+
+fn underwater_sky_view(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> vec3<f32> {
+    let sun_dir = normalize(render_settings.sun_direction.xyz);
+    let surface_t = underwater_surface_depth(ray_dir);
+    let surface_pos = ray_origin + ray_dir * surface_t;
+    let surface_n = water_normal(surface_pos.xz, camera.time);
+    // Sky distortion is handled by the lighting pass screen-space wobble;
+    // here we only apply absorption, edge fade, and ripple shading.
+    let sky_dir = normalize(vec3<f32>(ray_dir.x, max(ray_dir.y, 0.05), ray_dir.z));
+    let transmitted = water_absorb(sky_color(sky_dir, sun_dir), surface_t);
+    let edge_fade = pow(1.0 - clamp(ray_dir.y, 0.0, 1.0), 1.5);
+    let ripple_shade = mix(0.92, 1.0, surface_n.y);
+    return mix(transmitted * ripple_shade, WATER_DEEP_COLOR, edge_fade * 0.18);
+}
+
 fn commit_trace_stats(
     hit: HitResult,
     shadow_rays: u32,
@@ -184,6 +206,25 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
     }
 
+    // Check if a visible water surface is the closest hit.
+    // When the camera starts underwater, the first recorded water hit belongs to
+    // the surrounding water volume, so it should not suppress grass/voxel hits.
+    let water = dda_water_hit;
+    var use_water = water.hit && camera.camera_underwater <= 0.5;
+    let water_is_top_face = water.entry_normal.y > 0.5;
+    // Grass above water beats water
+    if use_water && use_grass && grass.t < water.t {
+        use_water = false;
+    }
+    // Preview in front of water beats water
+    if use_water && use_preview && preview_hit_result.hit && preview_hit_result.t < water.t {
+        use_water = false;
+    }
+    if use_water {
+        // Water surface is in front — grass behind water is handled as underwater color
+        use_grass = false;
+    }
+
     let pixel_idx = actual_y * u32(camera.resolution.x) + actual_x;
     if pixel_idx < arrayLength(&lod_debug_buf) {
         lod_debug_buf[pixel_idx] = hit.lod_scale_exp;
@@ -193,7 +234,83 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     var shadow_ray_count = 0u;
     var shadow_blocked_count = 0u;
 
-    if use_preview {
+    if use_water {
+        let surface_pos = ray_origin + ray_dir * water.t;
+        let sun_dir = normalize(render_settings.sun_direction.xyz);
+
+        var water_color: vec3<f32>;
+        var water_n: vec3<f32>;
+        var shadow = 1.0;
+
+        // Underwater color shared by both top-surface and side-face paths
+        var refraction = WATER_DEEP_COLOR;
+        let grass_behind = grass.hit && (!hit.hit || grass.t < hit.t);
+        if grass_behind {
+            let uw_dist = grass.t - water.t;
+            refraction = water_absorb(grass.color, uw_dist);
+        } else if hit.hit {
+            let uw_dist = hit.t - water.t;
+            var uw_color: vec3<f32>;
+            if hit.is_lod_hit {
+                uw_color = hit.color_override;
+            } else {
+                uw_color = render_settings.material_colors[min(hit.material & 0x3FFFu, 1023u)].rgb;
+            }
+            refraction = water_absorb(uw_color, uw_dist);
+        }
+
+        if water_is_top_face {
+            // --- Top-face: full water surface shading (waves, Fresnel, reflections) ---
+            let snapped_xz = snap_water_xz(surface_pos.xz);
+            let snapped_surface = vec3<f32>(snapped_xz.x, surface_pos.y, snapped_xz.y);
+            let perturbed_n = water_normal(snapped_xz, camera.time);
+
+            let tile_view_dir = normalize(camera.camera_pos - snapped_surface);
+            let cos_theta = max(dot(tile_view_dir, perturbed_n), 0.0);
+            let fresnel = schlick_fresnel(cos_theta, 0.02) * 0.25;
+
+            let tile_ray_dir = -tile_view_dir;
+            let reflect_dir = reflect(tile_ray_dir, perturbed_n);
+            let sky_refl = sky_color(reflect_dir, sun_dir) * 0.4;
+
+            let half_vec = normalize(tile_view_dir + sun_dir);
+            let spec_base = pow(max(dot(perturbed_n, half_vec), 0.0), 256.0) * render_settings.sun_contribution * 0.3;
+            // Fade specular with distance so distant glare doesn't blow out
+            let spec_fade = 1.0 / (1.0 + water.t * 0.01);
+            let spec = spec_base * spec_fade;
+            let specular = vec3<f32>(1.0, 0.95, 0.8) * spec;
+
+            water_color = mix(refraction, sky_refl, fresnel) + specular;
+            water_n = perturbed_n;
+        } else {
+            // --- Side-face: simple absorption view through the water wall ---
+            water_color = refraction;
+            water_n = water.entry_normal;
+        }
+
+        // Shadow ray from water surface
+        if render_settings.sun_contribution > 0.0 {
+            let shadow_origin = surface_pos + water.entry_normal * render_settings.ray_epsilon;
+            let in_shadow = trace_shadow_ray(shadow_origin, sun_dir);
+            shadow_ray_count = 1u;
+            shadow_blocked_count = select(0u, 1u, in_shadow);
+            shadow = select(1.0, 0.0, in_shadow);
+        }
+
+        let clip_pos = camera.clip_from_world * vec4<f32>(surface_pos, 1.0);
+        let prev_clip_pos = camera.prev_clip_from_world * vec4<f32>(surface_pos, 1.0);
+        let curr_ndc = clip_pos.xy / clip_pos.w;
+        let prev_ndc = prev_clip_pos.xy / prev_clip_pos.w;
+        let motion = (curr_ndc - prev_ndc) * vec2<f32>(0.5, -0.5);
+        let hardware_depth = clamp(clip_pos.z / clip_pos.w, 0.0, 1.0);
+
+        // Water flag: normal.w = 0.5 tells the lighting pass this is pre-lit water
+        textureStore(gbuf_color_out, pixel, vec4<f32>(water_color, shadow));
+        textureStore(gbuf_normal_out, pixel, vec4<f32>(water_n, 0.5));
+        textureStore(gbuf_depth_out, pixel, vec4<f32>(water.t, 0.0, 0.0, 0.0));
+        textureStore(dlss_depth_out, pixel, vec4<f32>(hardware_depth, 0.0, 0.0, 0.0));
+        textureStore(motion_vectors_out, pixel, vec4<f32>(motion, 0.0, 0.0));
+    } else if use_preview {
         // Preview wins — tint the material color
         let tint_color = vec3<f32>(preview.tint_r, preview.tint_g, preview.tint_b);
         var base: vec3<f32>;
@@ -297,8 +414,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let sky_prev_ndc = sky_prev_clip.xy / sky_prev_clip.w;
         let sky_motion = (sky_curr_ndc - sky_prev_ndc) * vec2<f32>(0.5, -0.5);
 
-        textureStore(gbuf_color_out, pixel, vec4<f32>(0.0, 0.0, 0.0, 0.0));
-        textureStore(gbuf_normal_out, pixel, vec4<f32>(0.0, 0.0, 0.0, -1.0));
+        if camera.camera_underwater > 0.5 {
+            let underwater_sky = underwater_sky_view(ray_origin, ray_dir);
+            textureStore(gbuf_color_out, pixel, vec4<f32>(underwater_sky, 1.0));
+            textureStore(gbuf_normal_out, pixel, vec4<f32>(0.0, 1.0, 0.0, 0.5));
+        } else {
+            textureStore(gbuf_color_out, pixel, vec4<f32>(0.0, 0.0, 0.0, 0.0));
+            textureStore(gbuf_normal_out, pixel, vec4<f32>(0.0, 0.0, 0.0, -1.0));
+        }
         textureStore(gbuf_depth_out, pixel, vec4<f32>(0.0, 0.0, 0.0, 0.0));
         textureStore(dlss_depth_out, pixel, vec4<f32>(1.0, 0.0, 0.0, 0.0));
         textureStore(motion_vectors_out, pixel, vec4<f32>(sky_motion, 0.0, 0.0));

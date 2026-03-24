@@ -14,8 +14,8 @@ pub use input_messages::{
 };
 pub use key_code::KeyCode;
 pub use material::{
-    FOLIAGE_BIT, MATERIAL_COLORS, MATERIAL_PALETTE_SIZE, MaterialId, closest_material,
-    is_foliage_material, visual_material,
+    FOLIAGE_BIT, MATERIAL_COLORS, MATERIAL_PALETTE_SIZE, MaterialId, WATER_BIT, closest_material,
+    is_foliage_material, is_water_material, visual_material,
 };
 pub use plugin::Plugin;
 pub use resources::{

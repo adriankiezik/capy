@@ -1,4 +1,4 @@
-use capy_core::{BakedChunkData, FOLIAGE_BIT, MaterialId};
+use capy_core::{BakedChunkData, FOLIAGE_BIT, MaterialId, WATER_BIT};
 
 use crate::bake;
 use crate::error::Result;
@@ -13,9 +13,16 @@ pub const CHUNK_Y: u32 = 1024;
 /// Default solid-fill height for unedited flat terrain.
 pub const FLAT_FILL_HEIGHT: u32 = 128;
 
+/// Height up to which water voxels are placed (y = FLAT_FILL_HEIGHT..WATER_FILL_HEIGHT).
+pub const WATER_FILL_HEIGHT: u32 = 132;
+
 /// Material ID used for the flat-fill solid layer (0 = air).
 /// Includes the foliage bit so grass grows on the default terrain.
 pub const FLAT_FILL_MATERIAL: MaterialId = 1 | FOLIAGE_BIT;
+
+/// Material ID for water voxels (blue palette entry 8 + water flag).
+/// When water rendering is disabled, these render as solid blue blocks.
+pub const WATER_MATERIAL: MaterialId = 8 | WATER_BIT;
 
 /// Generate a flat-world voxel grid: solid from y=0..FLAT_FILL_HEIGHT, air above.
 pub fn generate_flat_grid() -> Result<(VoxelGrid, Vec<u16>)> {

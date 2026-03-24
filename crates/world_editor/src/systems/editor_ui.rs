@@ -5,7 +5,7 @@ use glam::{Mat4, Vec3, Vec4};
 
 use crate::resources::{
     BrushShape, EditorState, EditorTool, Face, FoliageAction, PrefabLibrary, SaveResult, SaveState,
-    SelectionPhase, SelectionState,
+    SelectionPhase, SelectionState, WaterAction,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -58,6 +58,7 @@ pub(crate) fn editor_ui(
                 ui.selectable_value(&mut state.active_tool, EditorTool::Prefab, "Prefab (8)");
                 ui.selectable_value(&mut state.active_tool, EditorTool::Select, "Select (9)");
                 ui.selectable_value(&mut state.active_tool, EditorTool::Foliage, "Foliage (0)");
+                ui.selectable_value(&mut state.active_tool, EditorTool::Water, "Water (-)");
             });
 
             if state.active_tool == EditorTool::Select {
@@ -104,7 +105,16 @@ pub(crate) fn editor_ui(
                     ui.separator();
                 }
 
-                if state.active_tool != EditorTool::Foliage {
+                if state.active_tool == EditorTool::Water {
+                    ui.label("Water Action");
+                    ui.horizontal(|ui| {
+                        ui.selectable_value(&mut state.water_action, WaterAction::Place, "Place");
+                        ui.selectable_value(&mut state.water_action, WaterAction::Remove, "Remove");
+                    });
+                    ui.separator();
+                }
+
+                if !matches!(state.active_tool, EditorTool::Foliage | EditorTool::Water) {
                     ui.label("Color");
                     let mut color = egui::Color32::from_rgb(
                         state.picked_color[0],

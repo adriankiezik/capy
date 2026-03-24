@@ -1,6 +1,6 @@
 use bevy_ecs::change_detection::DetectChanges;
 use bevy_ecs::system::{NonSend, NonSendMut, Res, ResMut};
-use capy_core::{Camera, PreviewGpuData, SelectionHighlight};
+use capy_core::{Camera, PreviewGpuData, SelectionHighlight, VoxelMeshData};
 
 use crate::camera::clip_from_world;
 use crate::resources::voxel_scene::VoxelSceneBuffers;
@@ -18,6 +18,7 @@ pub(crate) fn upload_uniforms_system(
     camera: Option<Res<Camera>>,
     render_resolution: Res<RenderResolution>,
     settings: Option<Res<RendererSettings>>,
+    mesh: Option<Res<VoxelMeshData>>,
     mut temporal: ResMut<TemporalCameraState>,
     preview_gpu: Option<Res<PreviewGpuData>>,
     selection_highlight: Option<Res<SelectionHighlight>>,
@@ -68,6 +69,9 @@ pub(crate) fn upload_uniforms_system(
 
         let current_clip_from_world = clip_from_world(&camera).to_cols_array();
         let previous_clip_from_world = temporal.previous_clip_from_world(current_clip_from_world);
+        let camera_underwater = mesh
+            .as_deref()
+            .is_some_and(|mesh| mesh.is_water_at(camera.position.to_array()));
 
         scene.upload_camera(
             &gpu.queue,
@@ -75,6 +79,7 @@ pub(crate) fn upload_uniforms_system(
             render_resolution.width,
             render_resolution.height,
             lod_bias,
+            camera_underwater,
             jitter,
             previous_clip_from_world,
             temporal.elapsed_secs(),

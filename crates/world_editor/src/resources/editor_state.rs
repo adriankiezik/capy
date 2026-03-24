@@ -16,6 +16,8 @@ pub enum EditorTool {
     Select,
     /// Paint or remove foliage (grass) on surface voxels.
     Foliage,
+    /// Place or remove water voxels.
+    Water,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,6 +26,14 @@ pub enum FoliageAction {
     Paint,
     /// Remove foliage material from surface voxels (replace with dirt).
     Erase,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WaterAction {
+    /// Place water voxels in empty space.
+    Place,
+    /// Remove water voxels.
+    Remove,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,6 +61,8 @@ pub struct EditorState {
     pub prefab_rotation: u8,
     /// Current foliage tool action (paint or erase).
     pub foliage_action: FoliageAction,
+    /// Current water tool action (place or remove).
+    pub water_action: WaterAction,
 }
 
 impl Default for EditorState {
@@ -71,6 +83,7 @@ impl Default for EditorState {
             prefab_scroll_last: None,
             prefab_rotation: 0,
             foliage_action: FoliageAction::Paint,
+            water_action: WaterAction::Place,
         }
     }
 }

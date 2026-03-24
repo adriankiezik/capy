@@ -21,7 +21,7 @@ struct RenderSettingsUniform {
     vegetation_shadow_distance: f32,
     vegetation_shadow_enabled: f32,
     vegetation_animation_distance: f32,
-    _veg_pad0: f32,
-    _veg_pad1: f32,
-    _veg_pad2: f32,
+    water_enabled: f32,
+    _water_pad0: f32,
+    _water_pad1: f32,
 };
