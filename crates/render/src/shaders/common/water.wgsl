@@ -137,7 +137,7 @@ fn schlick_fresnel(cos_theta: f32, f0: f32) -> f32 {
 
 // ---- Beer's law absorption ----
 
-const WATER_ABSORPTION: vec3<f32> = vec3<f32>(0.10, 0.02, 0.01);
+const WATER_ABSORPTION: vec3<f32> = vec3<f32>(0.03, 0.006, 0.003);
 const WATER_DEEP_COLOR: vec3<f32> = vec3<f32>(0.08, 0.25, 0.38);
 
 // Max underwater distance before absorption converges to WATER_DEEP_COLOR.
@@ -151,7 +151,7 @@ const WATER_REFL_SKIP_DIST: f32 = 2000.0;
 // Underwater depth beyond which grass is fully absorbed and tracing can be skipped.
 // At 10 units: red exp(-1.0)=37%, green exp(-0.2)=82%, blue exp(-0.1)=90%.
 // Grass color contribution is minor and fading fast — not worth tracing.
-const WATER_GRASS_SKIP_DEPTH: f32 = 10.0;
+const WATER_GRASS_SKIP_DEPTH: f32 = 30.0;
 
 fn water_absorb(underwater_color: vec3<f32>, depth: f32) -> vec3<f32> {
     let absorption = exp(-depth * WATER_ABSORPTION);
