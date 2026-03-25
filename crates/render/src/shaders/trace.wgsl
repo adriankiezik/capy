@@ -318,17 +318,49 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
             let tile_view_dir = normalize(camera.camera_pos - snapped_surface);
             let cos_theta = max(dot(tile_view_dir, perturbed_n), 0.0);
-            let fresnel = schlick_fresnel(cos_theta, 0.02) * 0.25;
+            let fresnel = schlick_fresnel(cos_theta, 0.04) * 0.6;
 
-            // Skip sky reflection at extreme distance — use a cheap constant
-            var sky_refl: vec3<f32>;
+            // Reflection: use smooth (unsnapped) normal & view so reflections aren't pixelated
+            var smooth_n: vec3<f32>;
             if water.t > WATER_NORMAL_FLAT_DIST {
-                sky_refl = WATER_DEEP_COLOR;
+                smooth_n = vec3<f32>(0.0, 1.0, 0.0);
+            } else if water.t > WATER_NORMAL_LOD2_DIST {
+                smooth_n = water_normal_lod(surface_pos.xz, camera.time, 1);
+            } else if water.t > WATER_NORMAL_LOD1_DIST {
+                smooth_n = water_normal_lod(surface_pos.xz, camera.time, 2);
+            } else {
+                smooth_n = water_normal(surface_pos.xz, camera.time);
+            }
+            let smooth_view_dir = normalize(camera.camera_pos - surface_pos);
+            let smooth_ray_dir = -smooth_view_dir;
+            let reflect_dir = reflect(smooth_ray_dir, smooth_n);
+
+            var refl_color: vec3<f32>;
+            if water.t > WATER_NORMAL_FLAT_DIST {
+                // Extreme distance — cheap constant
+                refl_color = WATER_DEEP_COLOR;
+            } else if render_settings.water_reflections > 0.5 && water.t < WATER_REFL_SKIP_DIST {
+                // Ray-traced reflection: trace into the scene from the water surface
+                let refl_origin = surface_pos + smooth_n * render_settings.ray_epsilon;
+                let refl_hit = trace_reflection_ray(refl_origin, reflect_dir, render_settings.water_reflection_distance, surface_pos.y);
+                if refl_hit.hit {
+                    // Apply the same lighting model as the lighting pass:
+                    // ambient + directional * NdotL * shadow
+                    let refl_ndotl = max(dot(refl_hit.normal, sun_dir), 0.0);
+                    var refl_shadow = 1.0;
+                    if render_settings.sun_contribution > 0.0 {
+                        let refl_shadow_origin = refl_hit.world_pos + refl_hit.normal * render_settings.ray_epsilon;
+                        refl_shadow = select(1.0, 0.0, trace_shadow_ray(refl_shadow_origin, sun_dir));
+                    }
+                    let refl_light = render_settings.ambient_light + render_settings.sun_contribution * refl_ndotl * refl_shadow;
+                    refl_color = refl_hit.color * refl_light;
+                } else {
+                    if ENABLE_TRACE_STATS { trace_stats_water_sky_evals += 1u; }
+                    refl_color = sky_color(reflect_dir, sun_dir) * 0.4;
+                }
             } else {
                 if ENABLE_TRACE_STATS { trace_stats_water_sky_evals += 1u; }
-                let tile_ray_dir = -tile_view_dir;
-                let reflect_dir = reflect(tile_ray_dir, perturbed_n);
-                sky_refl = sky_color(reflect_dir, sun_dir) * 0.4;
+                refl_color = sky_color(reflect_dir, sun_dir) * 0.4;
             }
 
             let half_vec = normalize(tile_view_dir + sun_dir);
@@ -338,7 +370,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             let spec = spec_base * spec_fade;
             let specular = vec3<f32>(1.0, 0.95, 0.8) * spec;
 
-            water_color = mix(refraction, sky_refl, fresnel) + specular;
+            water_color = mix(refraction, refl_color, fresnel) + specular;
             water_n = perturbed_n;
         } else {
             if ENABLE_TRACE_STATS { trace_stats_water_side_face_pixels += 1u; }
@@ -347,8 +379,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             water_n = water.entry_normal;
         }
 
-        // Shadow ray from water surface (skip for distant water — imperceptible)
-        if render_settings.sun_contribution > 0.0 && water.t < WATER_SHADOW_MAX_DIST {
+        // Shadow ray from water surface (skip if disabled or distant water)
+        if render_settings.water_shadows > 0.5 && render_settings.sun_contribution > 0.0 && water.t < render_settings.water_shadow_distance {
             if ENABLE_TRACE_STATS { trace_stats_water_shadow_rays += 1u; }
             let shadow_origin = surface_pos + water.entry_normal * render_settings.ray_epsilon;
             let in_shadow = trace_shadow_ray(shadow_origin, sun_dir);

@@ -145,8 +145,8 @@ const WATER_DEEP_COLOR: vec3<f32> = vec3<f32>(0.08, 0.25, 0.38);
 // Beyond this, the seabed color contribution is truly negligible.
 const WATER_DEEP_ABSORB_DIST: f32 = 400.0;
 
-// Max distance for water shadow rays (shadow detail imperceptible at distance)
-const WATER_SHADOW_MAX_DIST: f32 = 2000.0;
+// Skip reflection rays for water surfaces further than this from the camera
+const WATER_REFL_SKIP_DIST: f32 = 2000.0;
 
 // Underwater depth beyond which grass is fully absorbed and tracing can be skipped.
 // At 10 units: red exp(-1.0)=37%, green exp(-0.2)=82%, blue exp(-0.1)=90%.

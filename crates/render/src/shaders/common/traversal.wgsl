@@ -1062,6 +1062,213 @@ fn trace_ao_ray(ray_origin: vec3<f32>, ray_dir: vec3<f32>, max_dist: f32) -> boo
     return false;
 }
 
+struct ReflectionHit {
+    hit: bool,
+    color: vec3<f32>,
+    normal: vec3<f32>,
+    world_pos: vec3<f32>,
+};
+
+// Trace a reflection ray through the voxel scene, returning the color of the
+// first solid (non-water) voxel or grass hit within max_dist that is ABOVE water_y.
+// Hits below the water surface are discarded so reflections only show geometry
+// above the waterline, not the seabed visible through transparent water voxels.
+fn trace_reflection_ray(
+    ray_origin: vec3<f32>,
+    ray_dir: vec3<f32>,
+    max_dist: f32,
+    water_y: f32,
+) -> ReflectionHit {
+    var refl: ReflectionHit;
+    refl.hit = false;
+    refl.color = vec3<f32>(0.0);
+    refl.normal = vec3<f32>(0.0, 1.0, 0.0);
+    refl.world_pos = vec3<f32>(0.0);
+
+    let cs_xz = f32(streaming.chunk_size_xz);
+    let cs_y = f32(streaming.chunk_size_y);
+    let cs = vec3<f32>(cs_xz, cs_y, cs_xz);
+    var dir = ray_dir;
+    let eps_d = 1e-10;
+    if abs(dir.x) < eps_d { dir.x = select(-eps_d, eps_d, dir.x >= 0.0); }
+    if abs(dir.y) < eps_d { dir.y = select(-eps_d, eps_d, dir.y >= 0.0); }
+    if abs(dir.z) < eps_d { dir.z = select(-eps_d, eps_d, dir.z >= 0.0); }
+
+    let inv_dir = 1.0 / dir;
+
+    let world_min = vec3<f32>(
+        f32(streaming.grid_min_x) * cs_xz,
+        f32(streaming.grid_min_y) * cs_y,
+        f32(streaming.grid_min_z) * cs_xz,
+    );
+    let world_max = vec3<f32>(
+        f32(i32(streaming.grid_dim_x) + streaming.grid_min_x) * cs_xz,
+        f32(i32(streaming.grid_dim_y) + streaming.grid_min_y) * cs_y,
+        f32(i32(streaming.grid_dim_z) + streaming.grid_min_z) * cs_xz,
+    );
+
+    let t_world = intersect_aabb(ray_origin, dir, world_min, world_max);
+    if t_world.x >= t_world.y || t_world.y <= 0.0 {
+        return refl;
+    }
+
+    var t_current = max(t_world.x, 0.0);
+
+    let ray_eps = max(render_settings.ray_epsilon, 0.0);
+    let first_entry = ray_origin + dir * (t_current + ray_eps);
+    var cc = world_to_chunk_coord(
+        clamp(first_entry, world_min + vec3<f32>(0.001), world_max - vec3<f32>(0.001)),
+        cs_xz, cs_y,
+    );
+
+    let step = vec3<i32>(
+        select(-1, 1, dir.x > 0.0),
+        select(-1, 1, dir.y > 0.0),
+        select(-1, 1, dir.z > 0.0),
+    );
+    let t_delta = abs(cs * inv_dir);
+
+    var t_max = vec3<f32>(
+        (f32(cc.x + select(0, 1, dir.x > 0.0)) * cs_xz - ray_origin.x) * inv_dir.x,
+        (f32(cc.y + select(0, 1, dir.y > 0.0)) * cs_y - ray_origin.y) * inv_dir.y,
+        (f32(cc.z + select(0, 1, dir.z > 0.0)) * cs_xz - ray_origin.z) * inv_dir.z,
+    );
+
+    var entry_axis: i32 = -1;
+    let do_grass = render_settings.vegetation_enabled > 0.5;
+    var best_grass: GrassHit;
+    best_grass.hit = false;
+    best_grass.t = 1e20;
+
+    let max_chunk_steps = u32(max(round(render_settings.max_chunk_steps), 1.0));
+    for (var chunk_iter = 0u; chunk_iter < max_chunk_steps; chunk_iter++) {
+        // If we already found grass and DDA has stepped past it, stop
+        if do_grass && best_grass.hit && max(t_current, 0.0) >= best_grass.t {
+            break;
+        }
+
+        let info = lookup_chunk_info(cc);
+
+        if info.world_size != 0u {
+            let pool_base = info.pool_offset;
+            let chunk_min = vec3<f32>(f32(cc.x) * cs_xz, f32(cc.y) * cs_y, f32(cc.z) * cs_xz);
+            let local_origin = ray_origin - chunk_min;
+
+            let chunk_hit = traverse_chunk(
+                pool_base,
+                info.world_size,
+                info.root_offset,
+                info.depth,
+                local_origin,
+                dir,
+                max(t_current, 0.0),
+                entry_axis,
+            );
+
+            let chunk_t_exit = min(t_max.x, min(t_max.y, t_max.z));
+
+            if chunk_hit.hit {
+                // Check for closer grass in this chunk before accepting voxel
+                if do_grass && info.foliage_y_min < info.foliage_y_max {
+                    let voxel_t = chunk_hit.t;
+                    let grass_max = select(voxel_t, min(voxel_t, best_grass.t), best_grass.hit);
+                    let foliage_base_y = chunk_min.y + f32(info.foliage_y_min);
+                    let foliage_top_y = chunk_min.y + f32(info.foliage_y_max) + GRASS_BLADE_HEIGHT;
+                    let grass = trace_grass_ray_bounded(
+                        ray_origin, dir, camera.time, grass_max,
+                        foliage_base_y, foliage_top_y,
+                        max(t_current, 0.0), chunk_t_exit,
+                        info.foliage_bitmap_offset, chunk_min.x, chunk_min.z, cs_xz,
+                        chunk_min.y, info.foliage_y_bands,
+                        info.foliage_tile_y_ranges_offset,
+                    );
+                    if grass.hit && grass.t < best_grass.t {
+                        best_grass = grass;
+                    }
+                }
+
+                // Grass closer than voxel — use grass
+                if best_grass.hit && best_grass.t < chunk_hit.t {
+                    if best_grass.pos.y >= water_y {
+                        refl.hit = true;
+                        refl.color = best_grass.color;
+                        refl.normal = best_grass.normal;
+                        refl.world_pos = best_grass.pos;
+                    }
+                    return refl;
+                }
+
+                // Voxel hit — check above water
+                let hit_world_pos = chunk_hit.hit_pos_local + chunk_min;
+                if hit_world_pos.y >= water_y {
+                    refl.hit = true;
+                    refl.normal = chunk_hit.normal;
+                    refl.world_pos = hit_world_pos;
+                    if chunk_hit.is_lod_hit {
+                        refl.color = chunk_hit.color_override;
+                    } else {
+                        refl.color = render_settings.material_colors[min(chunk_hit.material & 0x3FFFu, 1023u)].rgb;
+                    }
+                    return refl;
+                }
+                // Hit is below water surface — stop
+                return refl;
+            } else if do_grass && info.foliage_y_min < info.foliage_y_max {
+                // No voxel hit — trace grass in this chunk
+                let grass_max = select(1e20, best_grass.t, best_grass.hit);
+                let foliage_base_y = chunk_min.y + f32(info.foliage_y_min);
+                let foliage_top_y = chunk_min.y + f32(info.foliage_y_max) + GRASS_BLADE_HEIGHT;
+                let grass = trace_grass_ray_bounded(
+                    ray_origin, dir, camera.time, grass_max,
+                    foliage_base_y, foliage_top_y,
+                    max(t_current, 0.0), chunk_t_exit,
+                    info.foliage_bitmap_offset, chunk_min.x, chunk_min.z, cs_xz,
+                    chunk_min.y, info.foliage_y_bands,
+                    info.foliage_tile_y_ranges_offset,
+                );
+                if grass.hit && grass.t < best_grass.t {
+                    best_grass = grass;
+                }
+            }
+        }
+
+        if t_max.x < t_max.y && t_max.x < t_max.z {
+            entry_axis = 0;
+            t_current = t_max.x;
+            cc.x += step.x;
+            t_max.x += t_delta.x;
+        } else if t_max.y < t_max.z {
+            entry_axis = 1;
+            t_current = t_max.y;
+            cc.y += step.y;
+            t_max.y += t_delta.y;
+        } else {
+            entry_axis = 2;
+            t_current = t_max.z;
+            cc.z += step.z;
+            t_max.z += t_delta.z;
+        }
+
+        if cc.y < 0 {
+            break;
+        }
+
+        if t_current >= min(t_world.y, max_dist) {
+            break;
+        }
+    }
+
+    // After loop: grass may have been found without a closer voxel
+    if best_grass.hit && best_grass.pos.y >= water_y {
+        refl.hit = true;
+        refl.color = best_grass.color;
+        refl.normal = best_grass.normal;
+        refl.world_pos = best_grass.pos;
+    }
+
+    return refl;
+}
+
 fn trace_shadow_ray(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> bool {
     let cs_xz = f32(streaming.chunk_size_xz);
     let cs_y = f32(streaming.chunk_size_y);

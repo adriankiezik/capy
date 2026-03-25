@@ -54,6 +54,10 @@ pub(crate) fn to_render_settings_uniform(settings: &RendererSettings) -> RenderS
         },
         vegetation_animation_distance: settings.vegetation_animation_distance.max(0.0),
         water_enabled: if settings.water_enabled { 1.0 } else { 0.0 },
+        water_reflections: if settings.water_reflections { 1.0 } else { 0.0 },
+        water_reflection_distance: settings.water_reflection_distance.max(0.0),
+        water_shadows: if settings.water_shadows { 1.0 } else { 0.0 },
+        water_shadow_distance: settings.water_shadow_distance.max(0.0),
         _water_pad0: 0.0,
         _water_pad1: 0.0,
     }
@@ -85,11 +89,15 @@ pub(crate) struct RenderSettingsUniform {
     vegetation_shadow_enabled: f32,
     vegetation_animation_distance: f32,
     water_enabled: f32,
+    water_reflections: f32,
+    water_reflection_distance: f32,
+    water_shadows: f32,
+    water_shadow_distance: f32,
     _water_pad0: f32,
     _water_pad1: f32,
 }
 
-const _: () = assert!(std::mem::size_of::<RenderSettingsUniform>() == 16496);
+const _: () = assert!(std::mem::size_of::<RenderSettingsUniform>() == 16512);
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]

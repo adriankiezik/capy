@@ -6,8 +6,6 @@
 @group(0) @binding(5) var ao_texture: texture_2d<f32>;
 @group(0) @binding(6) var<uniform> camera: CameraUniform;
 
-const UNDERWATER_SURFACE_DEPTH_MIN: f32 = 2.5;
-const UNDERWATER_SURFACE_DEPTH_MAX: f32 = 18.0;
 const UNDERWATER_NEAR_DEPTH_DOWN: f32 = 1.5;
 const UNDERWATER_NEAR_DEPTH_UP: f32 = 3.5;
 
@@ -16,11 +14,6 @@ const UNDERWATER_DISTORTION_PX: f32 = 30.0;
 
 // Screen-space distortion for water surface viewed from above
 const WATER_SURFACE_DISTORTION_PX: f32 = 24.0;
-
-fn underwater_surface_depth(ray_dir: vec3<f32>) -> f32 {
-    let up = clamp(ray_dir.y, 0.0, 1.0);
-    return mix(UNDERWATER_SURFACE_DEPTH_MAX, UNDERWATER_SURFACE_DEPTH_MIN, sqrt(up));
-}
 
 fn underwater_distort_pixel(pixel: vec2<i32>, dims: vec2<u32>) -> vec2<i32> {
     // Single-layer noise in screen UV space — cheap wobble that looks good enough underwater.
@@ -76,7 +69,9 @@ fn water_surface_distort_pixel(pixel: vec2<i32>, dims: vec2<u32>) -> vec2<i32> {
     let fade_y = min(edge.y, f32(dims.y) - 1.0 - edge.y) / margin;
     let fade = clamp(min(fade_x, fade_y), 0.0, 1.0);
 
-    let offset = vec2<f32>(noise_x, noise_y) * WATER_SURFACE_DISTORTION_PX * fade;
+    // Fade out distortion for nearby water to prevent top faces visually detaching from side faces
+    let dist_fade = smoothstep(5.0, 60.0, scene_t);
+    let offset = vec2<f32>(noise_x, noise_y) * WATER_SURFACE_DISTORTION_PX * fade * dist_fade;
     let distorted = clamp(
         edge + offset,
         vec2<f32>(0.0),
@@ -85,17 +80,10 @@ fn water_surface_distort_pixel(pixel: vec2<i32>, dims: vec2<u32>) -> vec2<i32> {
     return vec2<i32>(i32(distorted.x), i32(distorted.y));
 }
 
-fn underwater_view_depth(ray_dir: vec3<f32>, scene_t: f32) -> f32 {
-    if camera.camera_underwater <= 0.5 {
-        return scene_t;
-    }
-    return min(scene_t, underwater_surface_depth(ray_dir));
-}
-
 fn apply_underwater_lighting(color: vec3<f32>, ray_dir: vec3<f32>, scene_t: f32) -> vec3<f32> {
     let up = clamp(ray_dir.y, 0.0, 1.0);
     let min_depth = mix(UNDERWATER_NEAR_DEPTH_DOWN, UNDERWATER_NEAR_DEPTH_UP, sqrt(up));
-    return water_absorb(color, max(underwater_view_depth(ray_dir, scene_t), min_depth));
+    return water_absorb(color, max(scene_t, min_depth));
 }
 
 @compute @workgroup_size(8, 8)
@@ -125,7 +113,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     if hit_flag <= 0.0 {
         let sun_dir = normalize(render_settings.sun_direction.xyz);
-        let sky = sky_color(ray_dir, sun_dir);
+        var sky = sky_color(ray_dir, sun_dir);
+        if is_underwater {
+            sky = water_absorb(sky, WATER_DEEP_ABSORB_DIST);
+        }
         textureStore(output_color, pixel, vec4<f32>(sky, 1.0));
         return;
     }

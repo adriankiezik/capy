@@ -332,6 +332,25 @@ fn vegetation_ui(ui: &mut egui::Ui, settings: &mut RendererSettings) {
 
 fn water_ui(ui: &mut egui::Ui, settings: &mut RendererSettings) {
     ui.checkbox(&mut settings.water_enabled, "Enabled");
+    if !settings.water_enabled {
+        return;
+    }
+
+    ui.checkbox(&mut settings.water_reflections, "Ray-traced reflections");
+    if settings.water_reflections {
+        ui.add(
+            egui::Slider::new(&mut settings.water_reflection_distance, 50.0..=1000.0)
+                .text("reflection distance"),
+        );
+    }
+
+    ui.checkbox(&mut settings.water_shadows, "Shadows");
+    if settings.water_shadows {
+        ui.add(
+            egui::Slider::new(&mut settings.water_shadow_distance, 100.0..=4000.0)
+                .text("shadow distance"),
+        );
+    }
 }
 
 fn lighting_ui(ui: &mut egui::Ui, settings: &mut RendererSettings) {
