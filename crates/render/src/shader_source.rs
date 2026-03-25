@@ -5,6 +5,7 @@ const SHADER_GTAO: &str = include_str!("shaders/gtao.wgsl");
 #[cfg(feature = "dlss")]
 const SHADER_RTAO: &str = include_str!("shaders/rtao.wgsl");
 
+const COMMON_TRACE_STATS_CONFIG: &str = include_str!("shaders/common/trace_stats_config.wgsl");
 const COMMON_CAMERA: &str = include_str!("shaders/common/camera.wgsl");
 const COMMON_AABB: &str = include_str!("shaders/common/aabb.wgsl");
 const COMMON_MASK64: &str = include_str!("shaders/common/mask64.wgsl");
@@ -39,6 +40,8 @@ pub fn create_compute_shader(
 
 fn build_common_prefix() -> String {
     let mut out = String::new();
+    out.push_str(COMMON_TRACE_STATS_CONFIG);
+    out.push('\n');
     out.push_str(COMMON_CAMERA);
     out.push('\n');
     out.push_str(COMMON_AABB);

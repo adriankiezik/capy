@@ -201,6 +201,7 @@ fn hash_leaf(buf: &[u32], offset: u32) -> u64 {
     let mut h = FNV_OFFSET;
     h = fnv_mix(h, buf[o]);
     h = fnv_mix(h, buf[o + 1]);
+    h = fnv_mix(h, buf[o + 2]);
     for i in 0..LEAF_DATA_WORDS as usize {
         h = fnv_mix(h, buf[o + 3 + i]);
     }
@@ -215,6 +216,7 @@ fn hash_inner(buf: &[u32], offset: u32, node_hash: &FxHashMap<u32, u64>) -> u64 
     let mut h = FNV_OFFSET;
     h = fnv_mix(h, mask_lo);
     h = fnv_mix(h, mask_hi);
+    h = fnv_mix(h, buf[o + 2]);
 
     let mut combined = (mask_lo as u64) | ((mask_hi as u64) << 32);
     let mut child_packed_idx: usize = 0;

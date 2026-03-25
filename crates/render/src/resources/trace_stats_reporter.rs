@@ -30,6 +30,18 @@ struct TraceStatsAccum {
     grass_trace_hits: u64,
     grass_visible_pixels: u64,
     grass_shadow_rays: u64,
+    water_pixels: u64,
+    water_top_face_pixels: u64,
+    water_side_face_pixels: u64,
+    water_shadow_rays: u64,
+    water_absorb_evals: u64,
+    water_underwater_sky: u64,
+    water_dda_chunks_behind: u64,
+    water_deep_no_hit: u64,
+    water_normal_evals: u64,
+    water_sky_evals: u64,
+    water_normal_lod: u64,
+    water_shadow_skipped: u64,
 }
 
 /// Periodically logs averaged traversal counters collected from the trace pass.
@@ -85,6 +97,18 @@ impl TraceStatsReporter {
         self.accum.grass_trace_hits += u64::from(snapshot.grass_trace_hits);
         self.accum.grass_visible_pixels += u64::from(snapshot.grass_visible_pixels);
         self.accum.grass_shadow_rays += u64::from(snapshot.grass_shadow_rays);
+        self.accum.water_pixels += u64::from(snapshot.water_pixels);
+        self.accum.water_top_face_pixels += u64::from(snapshot.water_top_face_pixels);
+        self.accum.water_side_face_pixels += u64::from(snapshot.water_side_face_pixels);
+        self.accum.water_shadow_rays += u64::from(snapshot.water_shadow_rays);
+        self.accum.water_absorb_evals += u64::from(snapshot.water_absorb_evals);
+        self.accum.water_underwater_sky += u64::from(snapshot.water_underwater_sky);
+        self.accum.water_dda_chunks_behind += u64::from(snapshot.water_dda_chunks_behind);
+        self.accum.water_deep_no_hit += u64::from(snapshot.water_deep_no_hit);
+        self.accum.water_normal_evals += u64::from(snapshot.water_normal_evals);
+        self.accum.water_sky_evals += u64::from(snapshot.water_sky_evals);
+        self.accum.water_normal_lod += u64::from(snapshot.water_normal_lod);
+        self.accum.water_shadow_skipped += u64::from(snapshot.water_shadow_skipped);
         self.frame_count += 1;
 
         if self.last_report.elapsed().as_secs_f32() >= self.report_interval_secs {
@@ -123,10 +147,29 @@ impl TraceStatsReporter {
             self.accum.grass_y_rejects as f64 / grass_y_checks as f64 * 100.0;
         let grass_hit_ratio = self.accum.grass_trace_hits as f64 / grass_calls as f64 * 100.0;
 
+        let water_pixels = self.accum.water_pixels.max(1);
+        let water_visible_ratio = self.accum.water_pixels as f64 / total_pixels as f64 * 100.0;
+        let water_top_ratio = self.accum.water_top_face_pixels as f64 / water_pixels as f64 * 100.0;
+        let water_shadow_ratio = self.accum.water_shadow_rays as f64 / water_pixels as f64 * 100.0;
+        let water_absorb_ratio = self.accum.water_absorb_evals as f64 / water_pixels as f64 * 100.0;
+        let water_uw_sky_ratio =
+            self.accum.water_underwater_sky as f64 / total_pixels as f64 * 100.0;
+        let water_deep_no_hit_ratio =
+            self.accum.water_deep_no_hit as f64 / water_pixels as f64 * 100.0;
+        let water_chunks_behind_per_pix =
+            self.accum.water_dda_chunks_behind as f64 / water_pixels as f64;
+        let water_normal_ratio = self.accum.water_normal_evals as f64 / water_pixels as f64 * 100.0;
+        let water_sky_ratio = self.accum.water_sky_evals as f64 / water_pixels as f64 * 100.0;
+        let water_normal_lod_ratio =
+            self.accum.water_normal_lod as f64 / water_pixels as f64 * 100.0;
+        let water_shadow_skip_ratio =
+            self.accum.water_shadow_skipped as f64 / water_pixels as f64 * 100.0;
+
         tracing::info!(
             "[trace-stats] hit={hit_ratio:.0}% lod={lod_ratio:.0}% \
              | primary: chunks/pix={:.1} nodes/pix={:.1} desc/pix={:.1} \
              | grass: vis={grass_visible_ratio:.0}% calls/pix={:.2} tiles/call={:.1} steps/call={:.1} cand/step={:.1} tile-rej={grass_tile_reject_ratio:.0}% hm/cand={:.0}% col-miss/read={grass_column_miss_ratio:.0}% y-rej/check={grass_y_reject_ratio:.0}% hit/call={grass_hit_ratio:.0}% shadow/vis={:.1} \
+             | water: vis={water_visible_ratio:.0}% top={water_top_ratio:.0}% shadow={water_shadow_ratio:.0}% absorb={water_absorb_ratio:.0}% uw-sky={water_uw_sky_ratio:.0}% deep-miss={water_deep_no_hit_ratio:.0}% chunks-behind/pix={water_chunks_behind_per_pix:.1} normals={water_normal_ratio:.0}% sky={water_sky_ratio:.0}% n-lod={water_normal_lod_ratio:.0}% shad-skip={water_shadow_skip_ratio:.0}% \
              | shadow: rays/hit={:.1} blocked={shadow_blocked_ratio:.0}% chunks/ray={:.1} nodes/ray={:.1} desc/ray={:.1}",
             self.accum.primary_chunk_steps as f64 / total_pixels as f64,
             self.accum.primary_node_steps as f64 / total_pixels as f64,

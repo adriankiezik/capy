@@ -1,6 +1,8 @@
 use capy_core::{BakedChunkData, MaterialId, is_foliage_material};
 
-use crate::sparse64tree::{compute_leaf_avg_color, local_to_bit};
+use crate::sparse64tree::{
+    compute_leaf_avg_color, inner_node_flags, leaf_node_flags, local_to_bit,
+};
 
 const BRANCH: u32 = 4;
 const BRANCH_CUBED: usize = (BRANCH * BRANCH * BRANCH) as usize;
@@ -411,7 +413,7 @@ fn patch_subtree(
     }
 
     // Recompute avg color from children.
-    recompute_avg_color(buf, avg_buf, new_offset, new_child_count);
+    recompute_inner_metadata(buf, avg_buf, new_offset, new_child_count);
 
     new_offset
 }
@@ -542,7 +544,7 @@ fn build_fresh_subtree(
         buf.push(ptr);
     }
 
-    recompute_avg_color(buf, avg_buf, offset, child_count);
+    recompute_inner_metadata(buf, avg_buf, offset, child_count);
 
     offset
 }
@@ -719,7 +721,7 @@ fn append_leaf(
 
     buf.push(mask as u32);
     buf.push((mask >> 32) as u32);
-    buf.push(1); // flags: is_leaf = 1
+    buf.push(leaf_node_flags(mask, materials));
 
     for chunk in materials.chunks(2) {
         let first = chunk[0] as u32;
@@ -785,7 +787,7 @@ fn append_inner_with_update(
             );
         }
 
-        recompute_avg_color(buf, avg_buf, new_offset, new_child_count);
+        recompute_inner_metadata(buf, avg_buf, new_offset, new_child_count);
 
         new_offset
     } else {
@@ -797,20 +799,25 @@ fn append_inner_with_update(
         buf.push(0);
         buf.push(new_child_off);
 
-        avg_buf.resize(buf.len(), 0);
-        let child_avg = avg_buf.get(new_child_off as usize).copied().unwrap_or(0);
-        avg_buf[new_offset as usize] = child_avg;
+        recompute_inner_metadata(buf, avg_buf, new_offset, 1);
 
         new_offset
     }
 }
 
-fn recompute_avg_color(buf: &[u32], avg_buf: &mut Vec<u32>, node_offset: u32, child_count: usize) {
+fn recompute_inner_metadata(
+    buf: &mut Vec<u32>,
+    avg_buf: &mut Vec<u32>,
+    node_offset: u32,
+    child_count: usize,
+) {
     let mut color_sum = [0.0f32; 3];
+    let mut child_flags = Vec::with_capacity(child_count);
     avg_buf.resize(buf.len(), 0);
     for i in 0..child_count {
         let child_off = buf[node_offset as usize + HEADER_WORDS + i];
         let child_avg = avg_buf.get(child_off as usize).copied().unwrap_or(0);
+        child_flags.push(buf[child_off as usize + 2]);
         color_sum[0] += (child_avg & 0xFF) as f32;
         color_sum[1] += ((child_avg >> 8) & 0xFF) as f32;
         color_sum[2] += ((child_avg >> 16) & 0xFF) as f32;
@@ -822,6 +829,9 @@ fn recompute_avg_color(buf: &[u32], avg_buf: &mut Vec<u32>, node_offset: u32, ch
             | (((color_sum[2] / n).round() as u32) << 16);
         avg_buf[node_offset as usize] = avg_word;
     }
+    let mask = (buf[node_offset as usize] as u64) | ((buf[node_offset as usize + 1] as u64) << 32);
+    let flags = inner_node_flags(mask, &child_flags);
+    buf[node_offset as usize + 2] = flags;
 }
 
 // ---------------------------------------------------------------------------

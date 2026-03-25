@@ -1,10 +1,34 @@
 use crate::voxel_grid::VoxelGrid;
-use capy_core::{MATERIAL_COLORS, MATERIAL_PALETTE_SIZE, MaterialId};
+use capy_core::{MATERIAL_COLORS, MATERIAL_PALETTE_SIZE, MaterialId, is_water_material};
 
 const BRANCH: u32 = 4;
 const BRANCH_CUBED: usize = (BRANCH * BRANCH * BRANCH) as usize;
+pub(crate) const NODE_FLAG_LEAF: u32 = 1;
+pub(crate) const NODE_FLAG_UNIFORM_WATER: u32 = 1 << 1;
+
 pub(crate) fn local_to_bit(lx: u32, ly: u32, lz: u32) -> u32 {
     lx + ly * BRANCH + lz * BRANCH * BRANCH
+}
+
+pub(crate) fn leaf_node_flags(mask: u64, materials: &[MaterialId; BRANCH_CUBED]) -> u32 {
+    let mut flags = NODE_FLAG_LEAF;
+    if mask == u64::MAX && materials.iter().all(|&mat| is_water_material(mat)) {
+        flags |= NODE_FLAG_UNIFORM_WATER;
+    }
+    flags
+}
+
+pub(crate) fn inner_node_flags(mask: u64, child_flags: &[u32]) -> u32 {
+    if mask == u64::MAX
+        && child_flags.len() == BRANCH_CUBED
+        && child_flags
+            .iter()
+            .all(|&flags| (flags & NODE_FLAG_UNIFORM_WATER) != 0)
+    {
+        NODE_FLAG_UNIFORM_WATER
+    } else {
+        0
+    }
 }
 
 fn next_power_of_4(size: u32) -> u32 {
@@ -374,7 +398,7 @@ impl TreeBuilder<'_> {
 
             self.buffer.push(mask as u32);
             self.buffer.push((mask >> 32) as u32);
-            self.buffer.push(1);
+            self.buffer.push(leaf_node_flags(mask, &materials));
 
             for chunk in materials.chunks(2) {
                 let first = chunk[0] as u32;
@@ -430,9 +454,11 @@ impl TreeBuilder<'_> {
             .resize(self.buffer.len().max(offset as usize + 1), 0);
 
         let mut color_sum = [0.0f32; 3];
+        let mut child_flags = Vec::with_capacity(child_count);
         for (i, &child_origin) in child_positions.iter().enumerate() {
             let child_offset = self.build_subtree(child_origin, child_size, remaining_depth - 1);
             self.buffer[ptrs_start + i] = child_offset;
+            child_flags.push(self.buffer[child_offset as usize + 2]);
 
             let child_avg = self
                 .avg_color_buf
@@ -451,6 +477,8 @@ impl TreeBuilder<'_> {
                 | (((color_sum[2] / n).round() as u32) << 16);
             self.avg_color_buf[offset as usize] = avg_word;
         }
+
+        self.buffer[offset as usize + 2] = inner_node_flags(mask, &child_flags);
 
         offset
     }
@@ -509,4 +537,75 @@ pub(crate) fn tree_to_gpu_data(flat: FlatTree) -> (TreeInfoUniform, Vec<u32>, Ve
     let mut avg_color = flat.avg_color_buf;
     avg_color.resize(buf_len, 0);
     (info, flat.buffer, avg_color)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        NODE_FLAG_LEAF, NODE_FLAG_UNIFORM_WATER, build_and_serialize_tree_with_heights,
+        build_tree_from_mip,
+    };
+    use crate::voxel_grid::VoxelGrid;
+    use capy_core::WATER_BIT;
+
+    const WATER_MATERIAL: u16 = 8 | WATER_BIT;
+
+    fn uniform_grid(size: u32, material: u16) -> VoxelGrid {
+        VoxelGrid::new(
+            size,
+            size,
+            size,
+            vec![material; (size * size * size) as usize],
+        )
+        .expect("grid dimensions should match data length")
+    }
+
+    #[test]
+    fn full_water_leaf_sets_uniform_water_flag() {
+        let grid = uniform_grid(4, WATER_MATERIAL);
+        let flat = build_and_serialize_tree_with_heights(&grid, None);
+
+        assert_eq!(flat.depth, 1);
+        assert_eq!(
+            flat.buffer[flat.root_offset as usize + 2],
+            NODE_FLAG_LEAF | NODE_FLAG_UNIFORM_WATER
+        );
+    }
+
+    #[test]
+    fn full_water_inner_node_sets_uniform_water_flag() {
+        let grid = uniform_grid(16, WATER_MATERIAL);
+        let flat = build_and_serialize_tree_with_heights(&grid, None);
+
+        assert_eq!(flat.depth, 2);
+        assert_ne!(
+            flat.buffer[flat.root_offset as usize + 2] & NODE_FLAG_UNIFORM_WATER,
+            0
+        );
+    }
+
+    #[test]
+    fn partial_water_leaf_does_not_set_uniform_water_flag() {
+        let mut grid = uniform_grid(4, WATER_MATERIAL);
+        grid.set(0, 0, 0, 0);
+        let flat = build_and_serialize_tree_with_heights(&grid, None);
+
+        assert_eq!(flat.depth, 1);
+        assert_eq!(
+            flat.buffer[flat.root_offset as usize + 2] & NODE_FLAG_UNIFORM_WATER,
+            0
+        );
+    }
+
+    #[test]
+    fn incremental_build_keeps_uniform_water_flag() {
+        let grid = uniform_grid(16, WATER_MATERIAL);
+        let occ = crate::sparse64tree::ChunkOccupancy::build(&grid, None);
+        let flat = build_tree_from_mip(&grid, &occ);
+
+        assert_ne!(
+            flat.buffer[flat.root_offset as usize + 2] & NODE_FLAG_UNIFORM_WATER,
+            0
+        );
+    }
 }

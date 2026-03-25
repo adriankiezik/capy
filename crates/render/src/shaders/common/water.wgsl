@@ -1,5 +1,19 @@
 // Water rendering utilities: noise-based animated normals, Fresnel, absorption, refraction.
 
+// ---- per-thread water stats (accumulated into TraceStats via atomicAdd) ----
+var<private> trace_stats_water_pixels: u32;
+var<private> trace_stats_water_top_face_pixels: u32;
+var<private> trace_stats_water_side_face_pixels: u32;
+var<private> trace_stats_water_shadow_rays: u32;
+var<private> trace_stats_water_absorb_evals: u32;
+var<private> trace_stats_water_underwater_sky: u32;
+var<private> trace_stats_water_dda_chunks_behind: u32;  // chunk steps after water hit recorded
+var<private> trace_stats_water_deep_no_hit: u32;        // water pixels with no solid behind (deep color fallback)
+var<private> trace_stats_water_normal_evals: u32;       // water_normal() calls (6x fbm each)
+var<private> trace_stats_water_sky_evals: u32;           // sky_color() calls for reflection
+var<private> trace_stats_water_normal_lod: u32;          // water pixels using reduced-octave or flat normal
+var<private> trace_stats_water_shadow_skipped: u32;      // water pixels where shadow ray was skipped (distance)
+
 // ---- simple hash-based noise (no texture dependency) ----
 
 fn hash2(p: vec2<f32>) -> f32 {
@@ -33,6 +47,18 @@ fn fbm2(p: vec2<f32>) -> f32 {
     return val;
 }
 
+fn fbm2_lod(p: vec2<f32>, octaves: i32) -> f32 {
+    var val = 0.0;
+    var amp = 0.5;
+    var pos = p;
+    for (var i = 0; i < octaves; i++) {
+        val += amp * noise2d(pos);
+        amp *= 0.5;
+        pos *= 2.01;
+    }
+    return val;
+}
+
 // ---- pixelation: snap world XZ to a grid so water matches voxel aesthetics ----
 
 const WATER_PIXEL_SIZE: f32 = 2.0;  // world units per water "pixel"
@@ -43,7 +69,16 @@ fn snap_water_xz(world_xz: vec2<f32>) -> vec2<f32> {
 
 // ---- water surface normal from animated noise ----
 
+// Distance thresholds for water normal LOD (world-space ray distance)
+const WATER_NORMAL_LOD1_DIST: f32 = 500.0;   // switch from 3 to 2 fbm octaves
+const WATER_NORMAL_LOD2_DIST: f32 = 1500.0;  // switch from 2 to 1 fbm octave
+const WATER_NORMAL_FLAT_DIST: f32 = 4000.0;  // return flat normal, skip noise entirely
+
 fn water_normal(world_xz: vec2<f32>, time: f32) -> vec3<f32> {
+    return water_normal_lod(world_xz, time, 3);
+}
+
+fn water_normal_lod(world_xz: vec2<f32>, time: f32, octaves: i32) -> vec3<f32> {
     let scale1 = 0.02;
     let speed1 = 0.3;
     let scale2 = 0.08;
@@ -53,9 +88,9 @@ fn water_normal(world_xz: vec2<f32>, time: f32) -> vec3<f32> {
     let p2 = world_xz * scale2 + vec2<f32>(-time * speed2 * 0.6, time * speed2);
 
     let eps = 0.5;
-    let h = fbm2(p1) + fbm2(p2) * 0.5;
-    let hx = fbm2(p1 + vec2<f32>(eps, 0.0)) + fbm2(p2 + vec2<f32>(eps, 0.0)) * 0.5;
-    let hz = fbm2(p1 + vec2<f32>(0.0, eps)) + fbm2(p2 + vec2<f32>(0.0, eps)) * 0.5;
+    let h = fbm2_lod(p1, octaves) + fbm2_lod(p2, octaves) * 0.5;
+    let hx = fbm2_lod(p1 + vec2<f32>(eps, 0.0), octaves) + fbm2_lod(p2 + vec2<f32>(eps, 0.0), octaves) * 0.5;
+    let hz = fbm2_lod(p1 + vec2<f32>(0.0, eps), octaves) + fbm2_lod(p2 + vec2<f32>(0.0, eps), octaves) * 0.5;
 
     let dhdx = (hx - h) / eps;
     let dhdz = (hz - h) / eps;
@@ -104,6 +139,19 @@ fn schlick_fresnel(cos_theta: f32, f0: f32) -> f32 {
 
 const WATER_ABSORPTION: vec3<f32> = vec3<f32>(0.10, 0.02, 0.01);
 const WATER_DEEP_COLOR: vec3<f32> = vec3<f32>(0.08, 0.25, 0.38);
+
+// Max underwater distance before absorption converges to WATER_DEEP_COLOR.
+// At depth 400: red≈0, green exp(-8)≈0.03%, blue exp(-4)≈1.8%.
+// Beyond this, the seabed color contribution is truly negligible.
+const WATER_DEEP_ABSORB_DIST: f32 = 400.0;
+
+// Max distance for water shadow rays (shadow detail imperceptible at distance)
+const WATER_SHADOW_MAX_DIST: f32 = 2000.0;
+
+// Underwater depth beyond which grass is fully absorbed and tracing can be skipped.
+// At 10 units: red exp(-1.0)=37%, green exp(-0.2)=82%, blue exp(-0.1)=90%.
+// Grass color contribution is minor and fading fast — not worth tracing.
+const WATER_GRASS_SKIP_DEPTH: f32 = 10.0;
 
 fn water_absorb(underwater_color: vec3<f32>, depth: f32) -> vec3<f32> {
     let absorption = exp(-depth * WATER_ABSORPTION);

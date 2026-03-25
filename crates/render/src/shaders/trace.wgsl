@@ -28,6 +28,18 @@ struct TraceStats {
     grass_trace_hits: atomic<u32>,
     grass_visible_pixels: atomic<u32>,
     grass_shadow_rays: atomic<u32>,
+    water_pixels: atomic<u32>,
+    water_top_face_pixels: atomic<u32>,
+    water_side_face_pixels: atomic<u32>,
+    water_shadow_rays: atomic<u32>,
+    water_absorb_evals: atomic<u32>,
+    water_underwater_sky: atomic<u32>,
+    water_dda_chunks_behind: atomic<u32>,
+    water_deep_no_hit: atomic<u32>,
+    water_normal_evals: atomic<u32>,
+    water_sky_evals: atomic<u32>,
+    water_normal_lod: atomic<u32>,
+    water_shadow_skipped: atomic<u32>,
 };
 @group(0) @binding(12) var<storage, read_write> trace_stats: TraceStats;
 
@@ -144,6 +156,18 @@ fn commit_trace_stats(
     atomicAdd(&trace_stats.grass_trace_hits, trace_stats_grass_trace_hits);
     atomicAdd(&trace_stats.grass_visible_pixels, trace_stats_grass_visible_pixels);
     atomicAdd(&trace_stats.grass_shadow_rays, trace_stats_grass_shadow_rays);
+    atomicAdd(&trace_stats.water_pixels, trace_stats_water_pixels);
+    atomicAdd(&trace_stats.water_top_face_pixels, trace_stats_water_top_face_pixels);
+    atomicAdd(&trace_stats.water_side_face_pixels, trace_stats_water_side_face_pixels);
+    atomicAdd(&trace_stats.water_shadow_rays, trace_stats_water_shadow_rays);
+    atomicAdd(&trace_stats.water_absorb_evals, trace_stats_water_absorb_evals);
+    atomicAdd(&trace_stats.water_underwater_sky, trace_stats_water_underwater_sky);
+    atomicAdd(&trace_stats.water_dda_chunks_behind, trace_stats_water_dda_chunks_behind);
+    atomicAdd(&trace_stats.water_deep_no_hit, trace_stats_water_deep_no_hit);
+    atomicAdd(&trace_stats.water_normal_evals, trace_stats_water_normal_evals);
+    atomicAdd(&trace_stats.water_sky_evals, trace_stats_water_sky_evals);
+    atomicAdd(&trace_stats.water_normal_lod, trace_stats_water_normal_lod);
+    atomicAdd(&trace_stats.water_shadow_skipped, trace_stats_water_shadow_skipped);
 }
 
 @compute @workgroup_size(8, 8)
@@ -235,6 +259,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     var shadow_blocked_count = 0u;
 
     if use_water {
+        if ENABLE_TRACE_STATS { trace_stats_water_pixels += 1u; }
         let surface_pos = ray_origin + ray_dir * water.t;
         let sun_dir = normalize(render_settings.sun_direction.xyz);
 
@@ -246,9 +271,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         var refraction = WATER_DEEP_COLOR;
         let grass_behind = grass.hit && (!hit.hit || grass.t < hit.t);
         if grass_behind {
+            if ENABLE_TRACE_STATS { trace_stats_water_absorb_evals += 1u; }
             let uw_dist = grass.t - water.t;
             refraction = water_absorb(grass.color, uw_dist);
         } else if hit.hit {
+            if ENABLE_TRACE_STATS { trace_stats_water_absorb_evals += 1u; }
             let uw_dist = hit.t - water.t;
             var uw_color: vec3<f32>;
             if hit.is_lod_hit {
@@ -259,19 +286,50 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             refraction = water_absorb(uw_color, uw_dist);
         }
 
+        // Track when nothing was found behind the water (deep color fallback)
+        if ENABLE_TRACE_STATS {
+            let has_solid_behind = grass_behind || hit.hit;
+            if !has_solid_behind {
+                trace_stats_water_deep_no_hit += 1u;
+            }
+        }
+
         if water_is_top_face {
+            if ENABLE_TRACE_STATS { trace_stats_water_top_face_pixels += 1u; }
             // --- Top-face: full water surface shading (waves, Fresnel, reflections) ---
             let snapped_xz = snap_water_xz(surface_pos.xz);
             let snapped_surface = vec3<f32>(snapped_xz.x, surface_pos.y, snapped_xz.y);
-            let perturbed_n = water_normal(snapped_xz, camera.time);
+
+            // Distance-based water normal LOD: fewer fbm octaves at distance
+            if ENABLE_TRACE_STATS { trace_stats_water_normal_evals += 1u; }
+            var perturbed_n: vec3<f32>;
+            if water.t > WATER_NORMAL_FLAT_DIST {
+                if ENABLE_TRACE_STATS { trace_stats_water_normal_lod += 1u; }
+                perturbed_n = vec3<f32>(0.0, 1.0, 0.0);
+            } else if water.t > WATER_NORMAL_LOD2_DIST {
+                if ENABLE_TRACE_STATS { trace_stats_water_normal_lod += 1u; }
+                perturbed_n = water_normal_lod(snapped_xz, camera.time, 1);
+            } else if water.t > WATER_NORMAL_LOD1_DIST {
+                if ENABLE_TRACE_STATS { trace_stats_water_normal_lod += 1u; }
+                perturbed_n = water_normal_lod(snapped_xz, camera.time, 2);
+            } else {
+                perturbed_n = water_normal(snapped_xz, camera.time);
+            }
 
             let tile_view_dir = normalize(camera.camera_pos - snapped_surface);
             let cos_theta = max(dot(tile_view_dir, perturbed_n), 0.0);
             let fresnel = schlick_fresnel(cos_theta, 0.02) * 0.25;
 
-            let tile_ray_dir = -tile_view_dir;
-            let reflect_dir = reflect(tile_ray_dir, perturbed_n);
-            let sky_refl = sky_color(reflect_dir, sun_dir) * 0.4;
+            // Skip sky reflection at extreme distance — use a cheap constant
+            var sky_refl: vec3<f32>;
+            if water.t > WATER_NORMAL_FLAT_DIST {
+                sky_refl = WATER_DEEP_COLOR;
+            } else {
+                if ENABLE_TRACE_STATS { trace_stats_water_sky_evals += 1u; }
+                let tile_ray_dir = -tile_view_dir;
+                let reflect_dir = reflect(tile_ray_dir, perturbed_n);
+                sky_refl = sky_color(reflect_dir, sun_dir) * 0.4;
+            }
 
             let half_vec = normalize(tile_view_dir + sun_dir);
             let spec_base = pow(max(dot(perturbed_n, half_vec), 0.0), 256.0) * render_settings.sun_contribution * 0.3;
@@ -283,18 +341,22 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             water_color = mix(refraction, sky_refl, fresnel) + specular;
             water_n = perturbed_n;
         } else {
+            if ENABLE_TRACE_STATS { trace_stats_water_side_face_pixels += 1u; }
             // --- Side-face: simple absorption view through the water wall ---
             water_color = refraction;
             water_n = water.entry_normal;
         }
 
-        // Shadow ray from water surface
-        if render_settings.sun_contribution > 0.0 {
+        // Shadow ray from water surface (skip for distant water — imperceptible)
+        if render_settings.sun_contribution > 0.0 && water.t < WATER_SHADOW_MAX_DIST {
+            if ENABLE_TRACE_STATS { trace_stats_water_shadow_rays += 1u; }
             let shadow_origin = surface_pos + water.entry_normal * render_settings.ray_epsilon;
             let in_shadow = trace_shadow_ray(shadow_origin, sun_dir);
             shadow_ray_count = 1u;
             shadow_blocked_count = select(0u, 1u, in_shadow);
             shadow = select(1.0, 0.0, in_shadow);
+        } else if ENABLE_TRACE_STATS && render_settings.sun_contribution > 0.0 {
+            trace_stats_water_shadow_skipped += 1u;
         }
 
         let clip_pos = camera.clip_from_world * vec4<f32>(surface_pos, 1.0);
@@ -415,6 +477,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let sky_motion = (sky_curr_ndc - sky_prev_ndc) * vec2<f32>(0.5, -0.5);
 
         if camera.camera_underwater > 0.5 {
+            if ENABLE_TRACE_STATS { trace_stats_water_underwater_sky += 1u; }
             let underwater_sky = underwater_sky_view(ray_origin, ray_dir);
             textureStore(gbuf_color_out, pixel, vec4<f32>(underwater_sky, 1.0));
             textureStore(gbuf_normal_out, pixel, vec4<f32>(0.0, 1.0, 0.0, 0.5));

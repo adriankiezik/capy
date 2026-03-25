@@ -86,12 +86,45 @@ fn get_leaf_material_pool(pool_base: u32, node_offset: u32, bit: u32) -> u32 {
     return (word >> (half_off * 16u)) & 0xFFFFu;
 }
 
+const NODE_FLAG_LEAF: u32 = 0x1u;
+const NODE_FLAG_UNIFORM_WATER: u32 = 0x2u;
+
+fn get_node_flags_pool(pool_base: u32, node_offset: u32) -> u32 {
+    return pool_read(pool_base, node_offset + 2u);
+}
+
+fn node_is_leaf(flags: u32) -> bool {
+    return (flags & NODE_FLAG_LEAF) != 0u;
+}
+
+fn node_is_uniform_water(flags: u32) -> bool {
+    return (flags & NODE_FLAG_UNIFORM_WATER) != 0u;
+}
+
 fn get_node_avg_color_pool(pool_base: u32, node_offset: u32) -> vec3<f32> {
     let packed = pool_read_avg(pool_base, node_offset);
     let r = f32(packed & 0xFFu) / 255.0;
     let g = f32((packed >> 8u) & 0xFFu) / 255.0;
     let b = f32((packed >> 16u) & 0xFFu) / 255.0;
     return vec3<f32>(r, g, b);
+}
+
+fn record_water_surface_hit(
+    ray_origin_world: vec3<f32>,
+    ray_dir_world: vec3<f32>,
+    water_pos_local: vec3<f32>,
+    entry_axis: i32,
+) {
+    if render_settings.water_enabled <= 0.5 {
+        return;
+    }
+
+    let wt = dot(water_pos_local - ray_origin_world, ray_dir_world);
+    if !dda_water_hit.hit || wt < dda_water_hit.t {
+        dda_water_hit.hit = true;
+        dda_water_hit.t = wt;
+        dda_water_hit.entry_normal = axis_normal(entry_axis, ray_dir_world);
+    }
 }
 
 fn get_cell_index(pos: vec3<f32>, scale_exp: u32) -> u32 {
@@ -193,6 +226,18 @@ fn reset_trace_private_stats() {
     trace_stats_grass_trace_hits = 0u;
     trace_stats_grass_visible_pixels = 0u;
     trace_stats_grass_shadow_rays = 0u;
+    trace_stats_water_pixels = 0u;
+    trace_stats_water_top_face_pixels = 0u;
+    trace_stats_water_side_face_pixels = 0u;
+    trace_stats_water_shadow_rays = 0u;
+    trace_stats_water_absorb_evals = 0u;
+    trace_stats_water_underwater_sky = 0u;
+    trace_stats_water_dda_chunks_behind = 0u;
+    trace_stats_water_deep_no_hit = 0u;
+    trace_stats_water_normal_evals = 0u;
+    trace_stats_water_sky_evals = 0u;
+    trace_stats_water_normal_lod = 0u;
+    trace_stats_water_shadow_skipped = 0u;
 }
 
 struct HitResult {
@@ -226,7 +271,11 @@ fn is_voxel_solid(world_pos: vec3<f32>) -> bool {
     var se = 21u;
     var ml = pool_read(pool_base, no);
     var mh = pool_read(pool_base, no + 1u);
-    var il = (pool_read(pool_base, no + 2u) & 1u) != 0u;
+    var flags = get_node_flags_pool(pool_base, no);
+    if node_is_uniform_water(flags) {
+        return true;
+    }
+    var il = node_is_leaf(flags);
 
     for (var d = 0u; d < info.depth; d++) {
         let ci = get_cell_index(pos, se);
@@ -241,10 +290,16 @@ fn is_voxel_solid(world_pos: vec3<f32>) -> bool {
             return false;
         }
         let pi = popcount_below(ml, mh, ci);
-        no = get_child_offset_pool(pool_base, no, pi);
+        let child_no = get_child_offset_pool(pool_base, no, pi);
+        let child_flags = get_node_flags_pool(pool_base, child_no);
+        if node_is_uniform_water(child_flags) {
+            return true;
+        }
+        no = child_no;
         ml = pool_read(pool_base, no);
         mh = pool_read(pool_base, no + 1u);
-        il = (pool_read(pool_base, no + 2u) & 1u) != 0u;
+        flags = child_flags;
+        il = node_is_leaf(flags);
         se -= 2u;
     }
     return false;
@@ -274,13 +329,25 @@ fn traverse_chunk(
     let origin_frac = ray_origin_world / ws + vec3<f32>(1.0);
     let entry_world = ray_origin_world + dir * t_entry;
     var pos = clamp(entry_world / ws + vec3<f32>(1.0), vec3<f32>(1.0), vec3<f32>(1.9999999));
+    let root_flags = get_node_flags_pool(pool_base, tree_info_root);
+
+    if node_is_uniform_water(root_flags) {
+        record_water_surface_hit(
+            ray_origin_world,
+            ray_dir_world,
+            (pos - vec3<f32>(1.0)) * ws,
+            entry_axis,
+        );
+        return result;
+    }
 
     {
         var no = tree_info_root;
         var se = root_se;
         var ml = pool_read(pool_base, no);
         var mh = pool_read(pool_base, no + 1u);
-        var il = (pool_read(pool_base, no + 2u) & 1u) != 0u;
+        var flags = root_flags;
+        var il = node_is_leaf(flags);
 
         for (var d = 0u; d < depth; d++) {
             let ci = get_cell_index(pos, se);
@@ -290,15 +357,12 @@ fn traverse_chunk(
                     if mat != 0u {
                         if (mat & WATER_BIT_MASK) != 0u {
                             // Water voxel at entry — record surface and fall through to DDA
-                            if render_settings.water_enabled > 0.5 {
-                                let wp = (pos - vec3<f32>(1.0)) * ws;
-                                let wt = dot(wp - ray_origin_world, dir);
-                                if !dda_water_hit.hit || wt < dda_water_hit.t {
-                                    dda_water_hit.hit = true;
-                                    dda_water_hit.t = wt;
-                                    dda_water_hit.entry_normal = axis_normal(entry_axis, ray_dir_world);
-                                }
-                            }
+                            record_water_surface_hit(
+                                ray_origin_world,
+                                ray_dir_world,
+                                (pos - vec3<f32>(1.0)) * ws,
+                                entry_axis,
+                            );
                             // Water disabled: treat as air — skip this voxel
                         } else {
                             result.hit = true;
@@ -314,10 +378,22 @@ fn traverse_chunk(
             }
             if !bit_is_set_64(ml, mh, ci) { break; }
             let pi = popcount_below(ml, mh, ci);
-            no = get_child_offset_pool(pool_base, no, pi);
+            let child_no = get_child_offset_pool(pool_base, no, pi);
+            let child_flags = get_node_flags_pool(pool_base, child_no);
+            if node_is_uniform_water(child_flags) {
+                record_water_surface_hit(
+                    ray_origin_world,
+                    ray_dir_world,
+                    (pos - vec3<f32>(1.0)) * ws,
+                    entry_axis,
+                );
+                break;
+            }
+            no = child_no;
             ml = pool_read(pool_base, no);
             mh = pool_read(pool_base, no + 1u);
-            il = (pool_read(pool_base, no + 2u) & 1u) != 0u;
+            flags = child_flags;
+            il = node_is_leaf(flags);
             se -= 2u;
         }
     }
@@ -334,7 +410,8 @@ fn traverse_chunk(
     var node_idx = tree_info_root;
     var n_ml = pool_read(pool_base, node_idx);
     var n_mh = pool_read(pool_base, node_idx + 1u);
-    var n_il = (pool_read(pool_base, node_idx + 2u) & 1u) != 0u;
+    var n_flags = root_flags;
+    var n_il = node_is_leaf(n_flags);
     var scale_exp = root_se;
     var last_axis: i32 = -1;
     var side_dist = vec3<f32>(0.0);
@@ -347,6 +424,21 @@ fn traverse_chunk(
 
             if n_il || !bit_is_set_64(n_ml, n_mh, child_idx) { break; }
 
+            let pi = popcount_below(n_ml, n_mh, child_idx);
+            let child_node_idx = get_child_offset_pool(pool_base, node_idx, pi);
+            let child_flags = get_node_flags_pool(pool_base, child_node_idx);
+
+            if node_is_uniform_water(child_flags) {
+                let water_frac = unmirror_pos(pos, dir);
+                record_water_surface_hit(
+                    ray_origin_world,
+                    ray_dir_world,
+                    (water_frac - vec3<f32>(1.0)) * ws,
+                    last_axis,
+                );
+                break;
+            }
+
             if camera.lod_bias > 0.0 {
                 let child_world_size = ws * exp2(f32(i32(scale_exp) - i32(root_se)));
                 let pos_frac = unmirror_pos(pos, dir);
@@ -356,8 +448,6 @@ fn traverse_chunk(
                 let threshold = camera.pixel_size * camera.lod_bias * render_settings.node_lod_scale;
 
                 if projected < threshold {
-                    let pi = popcount_below(n_ml, n_mh, child_idx);
-                    let child_node_idx = get_child_offset_pool(pool_base, node_idx, pi);
                     let avg_color = get_node_avg_color_pool(pool_base, child_node_idx);
 
                     result.hit = true;
@@ -373,11 +463,11 @@ fn traverse_chunk(
 
             stk[scale_exp >> 1u] = StackEntry(node_idx, n_ml, n_mh, n_il);
 
-            let pi = popcount_below(n_ml, n_mh, child_idx);
-            node_idx = get_child_offset_pool(pool_base, node_idx, pi);
+            node_idx = child_node_idx;
             n_ml = pool_read(pool_base, node_idx);
             n_mh = pool_read(pool_base, node_idx + 1u);
-            n_il = (pool_read(pool_base, node_idx + 2u) & 1u) != 0u;
+            n_flags = child_flags;
+            n_il = node_is_leaf(n_flags);
             scale_exp -= 2u;
             if ENABLE_TRACE_STATS { trace_stats_primary_descents += 1u; }
         }
@@ -389,16 +479,13 @@ fn traverse_chunk(
             if mat != 0u {
                 if (mat & WATER_BIT_MASK) != 0u {
                     // Water voxel — record surface hit and continue DDA
-                    if render_settings.water_enabled > 0.5 {
-                        let dda_frac_w = unmirror_pos(pos, dir);
-                        let wp = (dda_frac_w - vec3<f32>(1.0)) * ws;
-                        let wt = dot(wp - ray_origin_world, dir);
-                        if !dda_water_hit.hit || wt < dda_water_hit.t {
-                            dda_water_hit.hit = true;
-                            dda_water_hit.t = wt;
-                            dda_water_hit.entry_normal = axis_normal(last_axis, ray_dir_world);
-                        }
-                    }
+                    let dda_frac_w = unmirror_pos(pos, dir);
+                    record_water_surface_hit(
+                        ray_origin_world,
+                        ray_dir_world,
+                        (dda_frac_w - vec3<f32>(1.0)) * ws,
+                        last_axis,
+                    );
                     // Water disabled: treat as air — skip this voxel
                 } else {
                     result.hit = true;
@@ -544,19 +631,49 @@ fn trace_ray(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> HitResult {
 
     let max_chunk_steps = u32(max(round(render_settings.max_chunk_steps), 1.0));
     for (var chunk_iter = 0u; chunk_iter < max_chunk_steps; chunk_iter++) {
+        var do_grass = !skip_grass;
+
         // Grass hits are clamped to the current chunk segment in trace_grass_ray_bounded(),
         // so once the next chunk entry is past the best grass hit, no later chunk can
         // occlude it and the primary DDA can stop immediately.
-        if !skip_grass && dda_grass_hit.hit && max(t_current, 0.0) >= dda_grass_hit.t {
+        if do_grass && dda_grass_hit.hit && max(t_current, 0.0) >= dda_grass_hit.t {
             return result;
         }
 
-        if ENABLE_TRACE_STATS { trace_stats_primary_chunk_steps += 1u; }
+        // Deep-water early-out: if the ray has traveled far enough underwater that
+        // absorption fully converges to deep color, stop looking for seabed.
+        // Skip when camera is underwater — the initial water hit is the surrounding
+        // volume, not a surface the ray is looking through.
+        if dda_water_hit.hit && camera.camera_underwater <= 0.5
+            && (max(t_current, 0.0) - dda_water_hit.t) > WATER_DEEP_ABSORB_DIST {
+            return result;
+        }
+
+        if ENABLE_TRACE_STATS {
+            trace_stats_primary_chunk_steps += 1u;
+            if dda_water_hit.hit {
+                trace_stats_water_dda_chunks_behind += 1u;
+            }
+        }
         let info = lookup_chunk_info(cc);
 
-        if info.world_size != 0u {
+        // Skip grass when the chunk's foliage band is deep enough below the water
+        // surface that absorption makes it invisible. Uses vertical depth (Y),
+        // not ray distance, so horizontal rays don't incorrectly skip surface-level grass.
+        if do_grass && dda_water_hit.hit && camera.camera_underwater <= 0.5 {
+            let water_surface_y = ray_origin.y + dir.y * dda_water_hit.t;
+            let chunk_min_y = f32(cc.y) * cs_y;
+            let foliage_top_world_y = chunk_min_y + f32(info.foliage_y_max);
+            if (water_surface_y - foliage_top_world_y) > WATER_GRASS_SKIP_DEPTH {
+                do_grass = false;
+            }
+        }
 
-            if camera.lod_bias > 0.0 {
+        if info.world_size != 0u {
+            let pool_base = info.pool_offset;
+            let root_flags = get_node_flags_pool(pool_base, info.root_offset);
+
+            if camera.lod_bias > 0.0 && !node_is_uniform_water(root_flags) {
                 let chunk_center = vec3<f32>(
                     (f32(cc.x) + 0.5) * cs_xz,
                     (f32(cc.y) + 0.5) * cs_y,
@@ -565,7 +682,6 @@ fn trace_ray(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> HitResult {
                 let dist = max(length(chunk_center - ray_origin), 1.0);
                 let projected = cs_xz / dist;
                 if projected < camera.pixel_size * camera.lod_bias * render_settings.chunk_lod_scale {
-                    let pool_base = info.pool_offset;
                     let avg_color = get_node_avg_color_pool(pool_base, info.root_offset);
                     if avg_color.x > 0.001 || avg_color.y > 0.001 || avg_color.z > 0.001 {
                         result.hit = true;
@@ -580,7 +696,6 @@ fn trace_ray(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> HitResult {
                 }
             }
 
-            let pool_base = info.pool_offset;
             let chunk_min = vec3<f32>(f32(cc.x) * cs_xz, f32(cc.y) * cs_y, f32(cc.z) * cs_xz);
             let local_origin = ray_origin - chunk_min;
 
@@ -599,7 +714,7 @@ fn trace_ray(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> HitResult {
             let chunk_t_exit = min(t_max.x, min(t_max.y, t_max.z));
 
             if chunk_hit.hit {
-                if !skip_grass {
+                if do_grass {
                     // Before returning, check if grass in this chunk is closer.
                     if info.foliage_y_min < info.foliage_y_max {
                         let voxel_t = chunk_hit.t;
@@ -622,13 +737,13 @@ fn trace_ray(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> HitResult {
 
                 // Grass hits are restricted to this chunk segment, so if the voxel is
                 // farther away than the best grass hit we can stop immediately.
-                if skip_grass || !dda_grass_hit.hit || chunk_hit.t <= dda_grass_hit.t {
+                if !do_grass || !dda_grass_hit.hit || chunk_hit.t <= dda_grass_hit.t {
                     var world_hit = chunk_hit;
                     world_hit.hit_pos_local = chunk_hit.hit_pos_local + chunk_min;
                     return world_hit;
                 }
                 return result;
-            } else if !skip_grass && info.foliage_y_min < info.foliage_y_max {
+            } else if do_grass && info.foliage_y_min < info.foliage_y_max {
                 // No voxel hit in this chunk, but it has foliage — trace grass.
                 let grass_max = select(1e20, dda_grass_hit.t, dda_grass_hit.hit);
                 let foliage_base_y = chunk_min.y + f32(info.foliage_y_min);
@@ -697,13 +812,18 @@ fn traverse_chunk_shadow(
     let origin_frac = ray_origin_world / ws + vec3<f32>(1.0);
     let entry_world = ray_origin_world + dir * t_entry;
     var pos = clamp(entry_world / ws + vec3<f32>(1.0), vec3<f32>(1.0), vec3<f32>(1.9999999));
+    let root_flags = get_node_flags_pool(pool_base, tree_info_root);
+    if node_is_uniform_water(root_flags) {
+        return false;
+    }
 
     {
         var no = tree_info_root;
         var se = root_se;
         var ml = pool_read(pool_base, no);
         var mh = pool_read(pool_base, no + 1u);
-        var il = (pool_read(pool_base, no + 2u) & 1u) != 0u;
+        var flags = root_flags;
+        var il = node_is_leaf(flags);
 
         for (var d = 0u; d < depth; d++) {
             let ci = get_cell_index(pos, se);
@@ -718,10 +838,16 @@ fn traverse_chunk_shadow(
             }
             if !bit_is_set_64(ml, mh, ci) { break; }
             let pi = popcount_below(ml, mh, ci);
-            no = get_child_offset_pool(pool_base, no, pi);
+            let child_no = get_child_offset_pool(pool_base, no, pi);
+            let child_flags = get_node_flags_pool(pool_base, child_no);
+            if node_is_uniform_water(child_flags) {
+                break;
+            }
+            no = child_no;
             ml = pool_read(pool_base, no);
             mh = pool_read(pool_base, no + 1u);
-            il = (pool_read(pool_base, no + 2u) & 1u) != 0u;
+            flags = child_flags;
+            il = node_is_leaf(flags);
             se -= 2u;
         }
     }
@@ -738,7 +864,8 @@ fn traverse_chunk_shadow(
     var node_idx = tree_info_root;
     var n_ml = pool_read(pool_base, node_idx);
     var n_mh = pool_read(pool_base, node_idx + 1u);
-    var n_il = (pool_read(pool_base, node_idx + 2u) & 1u) != 0u;
+    var n_flags = root_flags;
+    var n_il = node_is_leaf(n_flags);
     var scale_exp = root_se;
     var side_dist = vec3<f32>(0.0);
 
@@ -749,12 +876,17 @@ fn traverse_chunk_shadow(
             let child_idx = get_cell_index(pos, scale_exp) ^ mirror_mask;
             if n_il || !bit_is_set_64(n_ml, n_mh, child_idx) { break; }
 
-            stk[scale_exp >> 1u] = StackEntry(node_idx, n_ml, n_mh, n_il);
             let pi = popcount_below(n_ml, n_mh, child_idx);
-            node_idx = get_child_offset_pool(pool_base, node_idx, pi);
+            let child_node_idx = get_child_offset_pool(pool_base, node_idx, pi);
+            let child_flags = get_node_flags_pool(pool_base, child_node_idx);
+            if node_is_uniform_water(child_flags) { break; }
+
+            stk[scale_exp >> 1u] = StackEntry(node_idx, n_ml, n_mh, n_il);
+            node_idx = child_node_idx;
             n_ml = pool_read(pool_base, node_idx);
             n_mh = pool_read(pool_base, node_idx + 1u);
-            n_il = (pool_read(pool_base, node_idx + 2u) & 1u) != 0u;
+            n_flags = child_flags;
+            n_il = node_is_leaf(n_flags);
             scale_exp -= 2u;
             if ENABLE_TRACE_STATS { trace_stats_shadow_descents += 1u; }
         }

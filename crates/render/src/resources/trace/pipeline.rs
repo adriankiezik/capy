@@ -55,6 +55,18 @@ pub(crate) struct TraceStatsSnapshot {
     pub(crate) grass_trace_hits: u32,
     pub(crate) grass_visible_pixels: u32,
     pub(crate) grass_shadow_rays: u32,
+    pub(crate) water_pixels: u32,
+    pub(crate) water_top_face_pixels: u32,
+    pub(crate) water_side_face_pixels: u32,
+    pub(crate) water_shadow_rays: u32,
+    pub(crate) water_absorb_evals: u32,
+    pub(crate) water_underwater_sky: u32,
+    pub(crate) water_dda_chunks_behind: u32,
+    pub(crate) water_deep_no_hit: u32,
+    pub(crate) water_normal_evals: u32,
+    pub(crate) water_sky_evals: u32,
+    pub(crate) water_normal_lod: u32,
+    pub(crate) water_shadow_skipped: u32,
 }
 
 pub(crate) struct TraceLayout {

@@ -30,9 +30,6 @@ const GRASS_WIND_BASE_LEAN: f32 = 0.25;     // constant lean in wind direction
 const GRASS_COLOR_DARKEN: f32  = 0.75;  // base is 75% of material color
 const GRASS_COLOR_LIGHTEN: f32 = 1.0;   // tip matches material color
 
-// Toggle to disable per-invocation trace-stat counters for shipping builds.
-const ENABLE_TRACE_STATS: bool = false;
-
 fn grass_hash(x: i32, z: i32) -> u32 {
     var h = u32(x) * 374761393u + u32(z) * 668265263u;
     h = (h ^ (h >> 13u)) * 1274126177u;
