@@ -40,6 +40,7 @@ impl capy_core::Plugin for EditorPlugin {
                 systems::prefab_sync,
                 systems::prefab_preview_bake,
                 systems::edit_apply,
+                systems::color_pick,
                 systems::prefab_preview_position,
                 systems::undo_redo,
                 systems::editor_ui,

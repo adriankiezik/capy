@@ -18,6 +18,8 @@ pub enum EditorTool {
     Foliage,
     /// Place or remove water voxels.
     Water,
+    /// Pick a voxel color from the world (ignores grass and water).
+    ColorPick,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

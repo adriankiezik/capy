@@ -1,3 +1,4 @@
+mod color_pick;
 mod edit_apply;
 mod editor_startup;
 mod editor_ui;
@@ -11,6 +12,7 @@ mod shortcuts;
 mod undo_redo;
 mod world_save;
 
+pub(crate) use color_pick::color_pick;
 pub(crate) use edit_apply::edit_apply;
 pub(crate) use editor_startup::editor_startup;
 pub(crate) use editor_ui::editor_ui;

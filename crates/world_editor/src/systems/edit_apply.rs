@@ -119,6 +119,9 @@ pub(crate) fn edit_apply(
     if tool == EditorTool::Select {
         return;
     }
+    if tool == EditorTool::ColorPick {
+        return;
+    }
 
     // Water Remove only needs a water surface hit, all other tools need a solid hit.
     let water_remove = tool == EditorTool::Water && state.water_action == WaterAction::Remove;

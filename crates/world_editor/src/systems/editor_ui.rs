@@ -59,7 +59,27 @@ pub(crate) fn editor_ui(
                 ui.selectable_value(&mut state.active_tool, EditorTool::Select, "Select (9)");
                 ui.selectable_value(&mut state.active_tool, EditorTool::Foliage, "Foliage (0)");
                 ui.selectable_value(&mut state.active_tool, EditorTool::Water, "Water (-)");
+                ui.selectable_value(&mut state.active_tool, EditorTool::ColorPick, "Pick (=)");
             });
+            ui.separator();
+
+            if state.active_tool == EditorTool::ColorPick {
+                ui.label("Click a voxel to pick its color.");
+                let mat = state.selected_material;
+                let matched = MATERIAL_COLORS[mat as usize];
+                let matched_color = egui::Color32::from_rgb(
+                    (matched[0] * 255.0) as u8,
+                    (matched[1] * 255.0) as u8,
+                    (matched[2] * 255.0) as u8,
+                );
+                ui.horizontal(|ui| {
+                    let (rect, _) =
+                        ui.allocate_exact_size(egui::vec2(20.0, 20.0), egui::Sense::hover());
+                    ui.painter().rect_filled(rect, 2.0, matched_color);
+                    ui.label(format!("Palette #{mat}"));
+                });
+                ui.separator();
+            }
 
             if state.active_tool == EditorTool::Select {
                 if let Some(dims) = sel.dimensions() {
@@ -71,8 +91,10 @@ pub(crate) fn editor_ui(
                 ui.separator();
             }
 
-            let is_brush_tool =
-                !matches!(state.active_tool, EditorTool::Prefab | EditorTool::Select);
+            let is_brush_tool = !matches!(
+                state.active_tool,
+                EditorTool::Prefab | EditorTool::Select | EditorTool::ColorPick
+            );
             if is_brush_tool {
                 ui.label("Brush Size");
                 let mut radius = state.brush_radius;
