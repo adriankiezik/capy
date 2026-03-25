@@ -29,6 +29,14 @@ pub enum FoliageAction {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FoliageMode {
+    /// Only affect voxels at the exact Y level of the ray hit.
+    SingleLevel,
+    /// Affect all surface voxels (air above) within the brush, at any Y level.
+    Surface,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WaterAction {
     /// Place water voxels in empty space.
     Place,
@@ -61,6 +69,8 @@ pub struct EditorState {
     pub prefab_rotation: u8,
     /// Current foliage tool action (paint or erase).
     pub foliage_action: FoliageAction,
+    /// Foliage brush mode: single Y level or all surface voxels.
+    pub foliage_mode: FoliageMode,
     /// Current water tool action (place or remove).
     pub water_action: WaterAction,
 }
@@ -83,6 +93,7 @@ impl Default for EditorState {
             prefab_scroll_last: None,
             prefab_rotation: 0,
             foliage_action: FoliageAction::Paint,
+            foliage_mode: FoliageMode::SingleLevel,
             water_action: WaterAction::Place,
         }
     }

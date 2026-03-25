@@ -90,7 +90,7 @@ impl Default for RendererSettings {
             vegetation_far_step_scale: 4.0,
             vegetation_far_reduce_start: 500.0,
             vegetation_near_search_radius: 1,
-            vegetation_far_search_radius: 0,
+            vegetation_far_search_radius: 1,
             vegetation_shadow_enabled: true,
             vegetation_shadow_distance: 4000.0,
             vegetation_animation_distance: 2000.0,

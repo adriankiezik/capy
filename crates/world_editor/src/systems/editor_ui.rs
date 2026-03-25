@@ -4,8 +4,8 @@ use capy_ui::EguiContext;
 use glam::{Mat4, Vec3, Vec4};
 
 use crate::resources::{
-    BrushShape, EditorState, EditorTool, Face, FoliageAction, PrefabLibrary, SaveResult, SaveState,
-    SelectionPhase, SelectionState, WaterAction,
+    BrushShape, EditorState, EditorTool, Face, FoliageAction, FoliageMode, PrefabLibrary,
+    SaveResult, SaveState, SelectionPhase, SelectionState, WaterAction,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -100,6 +100,19 @@ pub(crate) fn editor_ui(
                             &mut state.foliage_action,
                             FoliageAction::Erase,
                             "Erase",
+                        );
+                    });
+                    ui.label("Foliage Mode");
+                    ui.horizontal(|ui| {
+                        ui.selectable_value(
+                            &mut state.foliage_mode,
+                            FoliageMode::SingleLevel,
+                            "Single Level",
+                        );
+                        ui.selectable_value(
+                            &mut state.foliage_mode,
+                            FoliageMode::Surface,
+                            "Surface",
                         );
                     });
                     ui.separator();

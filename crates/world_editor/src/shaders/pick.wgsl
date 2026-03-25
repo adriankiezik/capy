@@ -14,6 +14,13 @@ struct PickOutput {
     normal_y: f32,
     normal_z: f32,
     material: u32,
+    water_hit: u32,
+    water_pos_x: f32,
+    water_pos_y: f32,
+    water_pos_z: f32,
+    water_normal_x: f32,
+    water_normal_y: f32,
+    water_normal_z: f32,
 };
 
 @group(0) @binding(6) var<uniform> pick_input: PickInput;
@@ -52,5 +59,24 @@ fn main() {
         pick_output.normal_y = 0.0;
         pick_output.normal_z = 0.0;
         pick_output.material = 0u;
+    }
+
+    if dda_water_hit.hit {
+        let water_pos = ray_origin + ray_dir * dda_water_hit.t;
+        pick_output.water_hit = 1u;
+        pick_output.water_pos_x = water_pos.x;
+        pick_output.water_pos_y = water_pos.y;
+        pick_output.water_pos_z = water_pos.z;
+        pick_output.water_normal_x = dda_water_hit.entry_normal.x;
+        pick_output.water_normal_y = dda_water_hit.entry_normal.y;
+        pick_output.water_normal_z = dda_water_hit.entry_normal.z;
+    } else {
+        pick_output.water_hit = 0u;
+        pick_output.water_pos_x = 0.0;
+        pick_output.water_pos_y = 0.0;
+        pick_output.water_pos_z = 0.0;
+        pick_output.water_normal_x = 0.0;
+        pick_output.water_normal_y = 0.0;
+        pick_output.water_normal_z = 0.0;
     }
 }

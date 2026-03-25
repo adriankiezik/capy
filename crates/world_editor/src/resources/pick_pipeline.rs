@@ -7,7 +7,7 @@ use capy_render::SharedVoxelBuffers;
 use super::VoxelHit;
 
 const PICK_SHADER: &str = include_str!("../shaders/pick.wgsl");
-pub(crate) const PICK_OUTPUT_SIZE: u64 = 32;
+pub(crate) const PICK_OUTPUT_SIZE: u64 = 60;
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -131,17 +131,34 @@ impl PickPipeline {
                 let values: &[f32] = bytemuck::cast_slice(&data);
                 let hit_bits = bytemuck::cast::<f32, u32>(values[0]);
                 let material_bits = bytemuck::cast::<f32, u32>(values[7]);
+                let water_hit_bits = bytemuck::cast::<f32, u32>(values[8]);
 
                 let hit = hit_bits != 0;
-                let result = if hit {
-                    VoxelHit {
-                        hit: true,
-                        position: Vec3::new(values[1], values[2], values[3]),
-                        normal: Vec3::new(values[4], values[5], values[6]),
-                        material: material_bits,
-                    }
-                } else {
-                    VoxelHit::default()
+                let water_hit = water_hit_bits != 0;
+                let result = VoxelHit {
+                    hit,
+                    position: if hit {
+                        Vec3::new(values[1], values[2], values[3])
+                    } else {
+                        Vec3::ZERO
+                    },
+                    normal: if hit {
+                        Vec3::new(values[4], values[5], values[6])
+                    } else {
+                        Vec3::ZERO
+                    },
+                    material: material_bits,
+                    water_hit,
+                    water_position: if water_hit {
+                        Vec3::new(values[9], values[10], values[11])
+                    } else {
+                        Vec3::ZERO
+                    },
+                    water_normal: if water_hit {
+                        Vec3::new(values[12], values[13], values[14])
+                    } else {
+                        Vec3::ZERO
+                    },
                 };
 
                 drop(data);

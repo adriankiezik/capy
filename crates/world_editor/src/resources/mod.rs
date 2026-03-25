@@ -21,7 +21,9 @@ pub(crate) use clipboard::Clipboard;
 pub(crate) use edit_history::{BrickChange, EditAction, EditHistory, SelectionChange};
 pub(crate) use edit_task::{EditTask, EditTaskOutput, UpdatedChunk};
 pub(crate) use editable_world::{EditableChunk, EditableWorld};
-pub(crate) use editor_state::{BrushShape, EditorState, EditorTool, FoliageAction, WaterAction};
+pub(crate) use editor_state::{
+    BrushShape, EditorState, EditorTool, FoliageAction, FoliageMode, WaterAction,
+};
 pub(crate) use input_edge::InputEdge;
 pub(crate) use mesh_dirty::MeshDirty;
 pub(crate) use pending_edits::PendingEdits;

@@ -4,14 +4,14 @@ use std::time::Instant;
 
 use bevy_ecs::system::{NonSendMut, Res, ResMut};
 use capy_assets::VoxelPrefabAsset;
-use capy_core::{MaterialId, MouseButton};
+use capy_core::{MaterialId, MouseButton, is_water_material};
 use capy_world::LeafBrickEdit;
 use tracing::{error, info};
 
 use crate::resources::{
     BrickChange, BrushShape, EditAction, EditHistory, EditTask, EditTaskOutput, EditableChunk,
-    EditableWorld, EditorState, EditorTool, FoliageAction, InputEdge, MeshDirty, PendingEdits,
-    PrefabLibrary, UpdatedChunk, VoxelHit, WaterAction, WorldGrid,
+    EditableWorld, EditorState, EditorTool, FoliageAction, FoliageMode, InputEdge, MeshDirty,
+    PendingEdits, PrefabLibrary, UpdatedChunk, VoxelHit, WaterAction, WorldGrid,
 };
 
 const BRICK: u32 = 4;
@@ -114,12 +114,15 @@ pub(crate) fn edit_apply(
     let Some(hit) = voxel_hit else {
         return;
     };
-    if !hit.hit {
-        return;
-    }
 
     let tool = state.active_tool;
     if tool == EditorTool::Select {
+        return;
+    }
+
+    // Water Remove only needs a water surface hit, all other tools need a solid hit.
+    let water_remove = tool == EditorTool::Water && state.water_action == WaterAction::Remove;
+    if !hit.hit && !(water_remove && hit.water_hit) {
         return;
     }
     if tool == EditorTool::Prefab {
@@ -156,13 +159,18 @@ pub(crate) fn edit_apply(
     let selected_material = state.selected_material;
     let brush_shape = state.brush_shape;
     let foliage_action = state.foliage_action;
+    let foliage_mode = state.foliage_mode;
     let water_action = state.water_action;
     let r = state.brush_radius as i32;
     let cxz = capy_world::CHUNK_XZ as i32;
     let cy = capy_world::CHUNK_Y as i32;
 
     let place_adjacent = tool == EditorTool::Place;
-    let target = if place_adjacent {
+    let target = if water_remove && hit.water_hit {
+        // Target the water surface voxel, not the seabed behind it.
+        let p = hit.water_position - hit.water_normal * 0.5;
+        glam::IVec3::new(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32)
+    } else if place_adjacent {
         let p = hit.position + hit.normal * 0.5;
         glam::IVec3::new(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32)
     } else {
@@ -225,6 +233,7 @@ pub(crate) fn edit_apply(
                 r,
                 brush_shape,
                 foliage_action,
+                foliage_mode,
                 water_action,
                 chunk_snapshots,
             );
@@ -421,6 +430,7 @@ fn compute_edit_output(
     radius: i32,
     brush_shape: BrushShape,
     foliage_action: FoliageAction,
+    foliage_mode: FoliageMode,
     water_action: WaterAction,
     mut chunks: HashMap<[i32; 3], EditableChunk>,
 ) -> EditTaskOutput {
@@ -528,7 +538,7 @@ fn compute_edit_output(
 
                                         let new_mat = match tool {
                                             EditorTool::Place => {
-                                                if old != 0 {
+                                                if old != 0 && !is_water_material(old) {
                                                     continue;
                                                 }
                                                 selected_material
@@ -546,14 +556,15 @@ fn compute_edit_output(
                                                 selected_material
                                             }
                                             EditorTool::Foliage => {
-                                                // Only affect the surface layer at the clicked Y level.
                                                 if old == 0 {
                                                     continue;
                                                 }
-                                                // World-space Y of this voxel
-                                                let wy = org[1] + vy_base + ly;
-                                                if wy != target.y {
-                                                    continue;
+                                                // In SingleLevel mode, only affect voxels at the clicked Y.
+                                                if foliage_mode == FoliageMode::SingleLevel {
+                                                    let wy = org[1] + vy_base + ly;
+                                                    if wy != target.y {
+                                                        continue;
+                                                    }
                                                 }
                                                 let above_is_air = if ly + 1 < BRICK as i32 {
                                                     // Within the same brick
