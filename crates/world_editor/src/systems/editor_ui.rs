@@ -3,6 +3,7 @@ use capy_core::{Camera, GameWindow, MATERIAL_COLORS};
 use capy_ui::EguiContext;
 use glam::{Mat4, Vec3, Vec4};
 
+use crate::resources::path_state::{PathMode, PathState};
 use crate::resources::{
     BrushShape, EditorState, EditorTool, Face, FoliageAction, FoliageMode, PrefabLibrary,
     SaveResult, SaveState, SelectionPhase, SelectionState, WaterAction,
@@ -17,6 +18,7 @@ pub(crate) fn editor_ui(
     camera: Res<Camera>,
     window: Res<GameWindow>,
     mut save_state: ResMut<SaveState>,
+    mut path_state: ResMut<PathState>,
 ) {
     let mut selected_prefab = None;
     let mut regenerate_selected = None;
@@ -57,8 +59,11 @@ pub(crate) fn editor_ui(
                 ui.selectable_value(&mut state.active_tool, EditorTool::Prefab, "Prefab (7)");
                 ui.selectable_value(&mut state.active_tool, EditorTool::Select, "Select (8)");
                 ui.selectable_value(&mut state.active_tool, EditorTool::Foliage, "Foliage (9)");
+            });
+            ui.horizontal(|ui| {
                 ui.selectable_value(&mut state.active_tool, EditorTool::Water, "Water (0)");
                 ui.selectable_value(&mut state.active_tool, EditorTool::ColorPick, "Pick (-)");
+                ui.selectable_value(&mut state.active_tool, EditorTool::Path, "Path (P)");
             });
             ui.separator();
 
@@ -80,6 +85,58 @@ pub(crate) fn editor_ui(
                 ui.separator();
             }
 
+            if state.active_tool == EditorTool::Path {
+                ui.label("Path Width");
+                let mut pw = path_state.path_width;
+                ui.add(egui::Slider::new(&mut pw, 1..=32));
+                path_state.path_width = pw;
+
+                ui.label("Mode");
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut path_state.mode, PathMode::Flatten, "Flatten");
+                    ui.selectable_value(&mut path_state.mode, PathMode::Paint, "Paint");
+                });
+
+                ui.label("Color Jitter");
+                ui.add(egui::Slider::new(&mut state.color_jitter, 0.0..=1.0).fixed_decimals(2));
+
+                ui.label("Color");
+                let mut color = egui::Color32::from_rgb(
+                    state.picked_color[0],
+                    state.picked_color[1],
+                    state.picked_color[2],
+                );
+                let response = egui::color_picker::color_edit_button_srgba(
+                    ui,
+                    &mut color,
+                    egui::color_picker::Alpha::Opaque,
+                );
+                if response.changed() {
+                    state.picked_color = [color.r(), color.g(), color.b()];
+                    let color_f32 = [
+                        color.r() as f32 / 255.0,
+                        color.g() as f32 / 255.0,
+                        color.b() as f32 / 255.0,
+                    ];
+                    state.selected_material = capy_core::closest_material(color_f32);
+                }
+                let mat = state.selected_material;
+                let matched = MATERIAL_COLORS[mat as usize];
+                let matched_color = egui::Color32::from_rgb(
+                    (matched[0] * 255.0) as u8,
+                    (matched[1] * 255.0) as u8,
+                    (matched[2] * 255.0) as u8,
+                );
+                ui.horizontal(|ui| {
+                    let (rect, _) =
+                        ui.allocate_exact_size(egui::vec2(20.0, 20.0), egui::Sense::hover());
+                    ui.painter().rect_filled(rect, 2.0, matched_color);
+                    ui.label(format!("Palette #{mat}"));
+                });
+
+                ui.separator();
+            }
+
             if state.active_tool == EditorTool::Select {
                 if let Some(dims) = sel.dimensions() {
                     ui.label(format!("{} x {} x {} voxels", dims.x, dims.y, dims.z));
@@ -92,7 +149,7 @@ pub(crate) fn editor_ui(
 
             let is_brush_tool = !matches!(
                 state.active_tool,
-                EditorTool::Prefab | EditorTool::Select | EditorTool::ColorPick
+                EditorTool::Prefab | EditorTool::Select | EditorTool::ColorPick | EditorTool::Path
             );
             if is_brush_tool {
                 ui.label("Brush Size");
@@ -292,6 +349,11 @@ pub(crate) fn editor_ui(
         if sel.phase == SelectionPhase::Selected || sel.phase == SelectionPhase::Moving {
             draw_gizmo(&egui_ctx.0, &camera, &window, min, max, &sel);
         }
+    }
+
+    // Draw path preview overlay.
+    if state.active_tool == EditorTool::Path && !path_state.waypoints.is_empty() {
+        super::draw_path_preview(&egui_ctx.0, &camera, &window, &path_state);
     }
 
     if let Some(source_path) = selected_prefab {

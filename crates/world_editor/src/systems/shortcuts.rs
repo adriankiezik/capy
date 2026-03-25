@@ -37,6 +37,9 @@ pub(crate) fn shortcuts(edge: Res<InputEdge>, mut state: ResMut<EditorState>) {
     if edge.keys_just_pressed.contains(&KeyCode::Minus) {
         state.active_tool = EditorTool::ColorPick;
     }
+    if edge.keys_just_pressed.contains(&KeyCode::KeyP) {
+        state.active_tool = EditorTool::Path;
+    }
     if edge.keys_just_pressed.contains(&KeyCode::KeyB) {
         state.brush_shape = match state.brush_shape {
             BrushShape::Sphere => BrushShape::Cube,

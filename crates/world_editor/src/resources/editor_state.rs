@@ -19,6 +19,8 @@ pub enum EditorTool {
     Water,
     /// Pick a voxel color from the world (ignores grass and water).
     ColorPick,
+    /// Smart path creation: click waypoints, preview spline, confirm to apply.
+    Path,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

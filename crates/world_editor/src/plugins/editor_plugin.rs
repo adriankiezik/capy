@@ -4,6 +4,7 @@ use capy_core::WindowConfig;
 
 use capy_core::{PreviewGpuData, SelectionHighlight};
 
+use crate::resources::path_state::PathState;
 use crate::resources::{Clipboard, PreviewBake, SaveState, SelectionState};
 use crate::systems;
 
@@ -26,6 +27,7 @@ impl capy_core::Plugin for EditorPlugin {
         world.insert_resource(PreviewBake::default());
         world.insert_resource(PreviewGpuData::default());
         world.insert_resource(SelectionHighlight::default());
+        world.insert_resource(PathState::default());
 
         let mut schedules = world.get_resource_or_init::<Schedules>();
         schedules
@@ -39,6 +41,7 @@ impl capy_core::Plugin for EditorPlugin {
                 systems::selection_system,
                 systems::prefab_sync,
                 systems::prefab_preview_bake,
+                systems::path_tool,
                 systems::edit_apply,
                 systems::color_pick,
                 systems::prefab_preview_position,

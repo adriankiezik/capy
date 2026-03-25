@@ -6,6 +6,7 @@ mod editable_world;
 mod editor_state;
 mod input_edge;
 mod mesh_dirty;
+pub(crate) mod path_state;
 mod pending_edits;
 mod pick_pipeline;
 mod prefab_library;

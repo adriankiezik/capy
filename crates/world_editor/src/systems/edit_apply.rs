@@ -199,6 +199,9 @@ pub(crate) fn edit_apply(
     if tool == EditorTool::ColorPick {
         return;
     }
+    if tool == EditorTool::Path {
+        return;
+    }
 
     // Water Remove and Foliage accept a water surface hit even without a solid hit.
     let water_remove = tool == EditorTool::Water && state.water_action == WaterAction::Remove;
