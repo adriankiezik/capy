@@ -14,6 +14,83 @@ use crate::resources::{
     PendingEdits, PrefabLibrary, UpdatedChunk, VoxelHit, WaterAction, WorldGrid,
 };
 
+// ---------------------------------------------------------------------------
+// Brush parameters bundle (sent to background threads)
+// ---------------------------------------------------------------------------
+
+/// Lightweight bundle of brush settings captured from `EditorState` and sent
+/// to the background compute thread so we don't have to add more arguments to
+/// every compute function.
+#[derive(Clone)]
+struct BrushParams {
+    strength: f32,
+    color_jitter: f32,
+    noise_displacement: u32,
+    foliage_density: f32,
+    sculpt_step: u32,
+    smooth_kernel: u32,
+    smooth_iterations: u32,
+}
+
+// ---------------------------------------------------------------------------
+// Deterministic position-based hash (returns 0.0..1.0)
+// ---------------------------------------------------------------------------
+
+/// Fast deterministic hash for a 3D position, producing a float in [0, 1).
+/// Used for probabilistic brush strength / falloff / jitter.
+#[inline]
+fn position_hash(x: i32, y: i32, z: i32) -> f32 {
+    let mut h = (x as u32)
+        .wrapping_mul(374_761_393)
+        .wrapping_add((y as u32).wrapping_mul(668_265_263))
+        .wrapping_add((z as u32).wrapping_mul(1_274_126_177));
+    h = (h ^ (h >> 13)).wrapping_mul(1_103_515_245);
+    h = h ^ (h >> 16);
+    (h & 0xFFFF) as f32 / 65536.0
+}
+
+/// 2D variant for sculpt column hashing.
+#[inline]
+fn position_hash_2d(x: i32, z: i32) -> f32 {
+    position_hash(x, 0, z)
+}
+
+// ---------------------------------------------------------------------------
+// Falloff + strength probability
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Color jitter helpers
+// ---------------------------------------------------------------------------
+
+/// Build a small palette of jittered materials around the selected color.
+/// Returns a Vec of MaterialIds that can be indexed by `(hash * len) as usize`.
+fn build_jitter_palette(base_material: MaterialId, jitter: f32) -> Vec<MaterialId> {
+    if jitter <= 0.0 {
+        return vec![base_material];
+    }
+    let base_color = capy_core::MATERIAL_COLORS[base_material as usize];
+    let steps = 16usize;
+    let mut palette = Vec::with_capacity(steps);
+    for i in 0..steps {
+        // Distribute jitter offsets around the base color in RGB
+        let t = i as f32 / steps as f32;
+        let angle = t * std::f32::consts::TAU;
+        let (s, c) = angle.sin_cos();
+        // Jitter each channel by up to `jitter * 0.3`
+        let jr = jitter * 0.3 * c;
+        let jg = jitter * 0.3 * s;
+        let jb = jitter * 0.3 * (c + s) * 0.5;
+        let color = [
+            (base_color[0] + jr).clamp(0.0, 1.0),
+            (base_color[1] + jg).clamp(0.0, 1.0),
+            (base_color[2] + jb).clamp(0.0, 1.0),
+        ];
+        palette.push(capy_core::closest_material(color));
+    }
+    palette
+}
+
 const BRICK: u32 = 4;
 
 // ---------------------------------------------------------------------------
@@ -65,7 +142,7 @@ fn brick_distance_bounds_sq(target: [i32; 3], bx: u32, by: u32, bz: u32) -> (i32
 fn is_sculpt_tool(tool: EditorTool) -> bool {
     matches!(
         tool,
-        EditorTool::Raise | EditorTool::Lower | EditorTool::Flatten | EditorTool::Smooth
+        EditorTool::Raise | EditorTool::Lower | EditorTool::Smooth
     )
 }
 
@@ -123,9 +200,10 @@ pub(crate) fn edit_apply(
         return;
     }
 
-    // Water Remove only needs a water surface hit, all other tools need a solid hit.
+    // Water Remove and Foliage accept a water surface hit even without a solid hit.
     let water_remove = tool == EditorTool::Water && state.water_action == WaterAction::Remove;
-    if !hit.hit && !(water_remove && hit.water_hit) {
+    let foliage_on_water = tool == EditorTool::Foliage && hit.water_hit;
+    if !hit.hit && !(water_remove && hit.water_hit) && !foliage_on_water {
         return;
     }
     if tool == EditorTool::Prefab {
@@ -168,22 +246,41 @@ pub(crate) fn edit_apply(
     let cxz = capy_world::CHUNK_XZ as i32;
     let cy = capy_world::CHUNK_Y as i32;
 
+    let brush_params = BrushParams {
+        strength: state.brush_strength,
+        color_jitter: state.color_jitter,
+        noise_displacement: state.noise_displacement,
+        foliage_density: state.foliage_density,
+        sculpt_step: state.sculpt_step,
+        smooth_kernel: state.smooth_kernel,
+        smooth_iterations: state.smooth_iterations,
+    };
+
     let place_adjacent = tool == EditorTool::Place;
     let target = if water_remove && hit.water_hit {
         // Target the water surface voxel, not the seabed behind it.
+        let p = hit.water_position - hit.water_normal * 0.5;
+        glam::IVec3::new(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32)
+    } else if foliage_on_water && !hit.hit {
+        // Foliage on water with no solid hit: use water position to center brush.
         let p = hit.water_position - hit.water_normal * 0.5;
         glam::IVec3::new(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32)
     } else if place_adjacent {
         let p = hit.position + hit.normal * 0.5;
         glam::IVec3::new(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32)
     } else {
+        // For foliage on water with solid hit, this targets the seabed.
         let p = hit.position - hit.normal * 0.5;
         glam::IVec3::new(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32)
     };
 
     if is_sculpt_tool(tool) {
-        let flatten_target_y = target.y as u32;
-        let scan_r = if tool == EditorTool::Smooth { r + 1 } else { r };
+        let smooth_kernel = brush_params.smooth_kernel;
+        let scan_r = if tool == EditorTool::Smooth {
+            r + smooth_kernel as i32
+        } else {
+            r
+        };
         let cc_min = [
             (target.x - scan_r).div_euclid(cxz),
             0,
@@ -205,8 +302,8 @@ pub(crate) fn edit_apply(
                 selected_material,
                 r,
                 brush_shape,
-                flatten_target_y,
                 chunk_snapshots,
+                brush_params,
             );
             let _ = tx.send(output);
         });
@@ -239,6 +336,7 @@ pub(crate) fn edit_apply(
                 foliage_mode,
                 water_action,
                 chunk_snapshots,
+                brush_params,
             );
             let _ = tx.send(output);
         });
@@ -436,11 +534,25 @@ fn compute_edit_output(
     foliage_mode: FoliageMode,
     water_action: WaterAction,
     mut chunks: HashMap<[i32; 3], EditableChunk>,
+    params: BrushParams,
 ) -> EditTaskOutput {
     let cxz = capy_world::CHUNK_XZ as i32;
     let cy = capy_world::CHUNK_Y as i32;
     let r2 = radius * radius;
     let t_total = Instant::now();
+
+    // Pre-build jitter palette for paint / place tools
+    let jitter_palette =
+        if params.color_jitter > 0.0 && matches!(tool, EditorTool::Place | EditorTool::Paint) {
+            build_jitter_palette(selected_material, params.color_jitter)
+        } else {
+            vec![selected_material]
+        };
+
+    let use_probability =
+        params.strength < 1.0 && !matches!(tool, EditorTool::Water | EditorTool::Foliage);
+    let use_noise_disp = params.noise_displacement > 0 && tool == EditorTool::Place;
+    let use_foliage_density = params.foliage_density < 1.0 && tool == EditorTool::Foliage;
 
     let w_min = [target.x - radius, target.y - radius, target.z - radius];
     let w_max = [target.x + radius, target.y + radius, target.z + radius];
@@ -533,18 +645,62 @@ fn compute_edit_output(
                                             continue;
                                         }
 
+                                        // World-space coordinates for hashing
+                                        let wx = org[0] + vx;
+                                        let wy = org[1] + vy;
+                                        let wz = org[2] + vz;
+
+                                        // Noise displacement: shift the brush boundary for Place
+                                        if use_noise_disp {
+                                            let noise_val = position_hash(wx, 0, wz);
+                                            let disp = (noise_val * 2.0 - 1.0)
+                                                * params.noise_displacement as f32;
+                                            // Shift the effective dy by displacement
+                                            let eff_dy = dy as f32 + disp;
+                                            let eff_r2 = (dx * dx) as f32
+                                                + eff_dy * eff_dy
+                                                + (dz * dz) as f32;
+                                            if eff_r2 > r2 as f32 {
+                                                continue;
+                                            }
+                                        }
+
+                                        // Strength probability check
+                                        if use_probability
+                                            && position_hash(wx, wy, wz) >= params.strength
+                                        {
+                                            continue;
+                                        }
+
+                                        // Foliage density check
+                                        if use_foliage_density
+                                            && position_hash(wx, wy, wz) >= params.foliage_density
+                                        {
+                                            continue;
+                                        }
+
                                         let bit = (lx
                                             + ly * BRICK as i32
                                             + lz * BRICK as i32 * BRICK as i32)
                                             as usize;
                                         let old = new_brick[bit];
 
+                                        // Pick material (possibly jittered)
+                                        let effective_material = if jitter_palette.len() > 1 {
+                                            let idx = (position_hash(wx, wy, wz)
+                                                * jitter_palette.len() as f32)
+                                                as usize;
+                                            jitter_palette[idx.min(jitter_palette.len() - 1)]
+                                        } else {
+                                            selected_material
+                                        };
+
                                         let new_mat = match tool {
                                             EditorTool::Place => {
                                                 if old != 0 && !is_water_material(old) {
                                                     continue;
                                                 }
-                                                selected_material
+                                                effective_material
                                             }
                                             EditorTool::Remove => {
                                                 if old == 0 {
@@ -556,10 +712,10 @@ fn compute_edit_output(
                                                 if old == 0 {
                                                     continue;
                                                 }
-                                                selected_material
+                                                effective_material
                                             }
                                             EditorTool::Foliage => {
-                                                if old == 0 {
+                                                if old == 0 || is_water_material(old) {
                                                     continue;
                                                 }
                                                 // In SingleLevel mode, only affect voxels at the clicked Y.
@@ -569,17 +725,19 @@ fn compute_edit_output(
                                                         continue;
                                                     }
                                                 }
-                                                let above_is_air = if ly + 1 < BRICK as i32 {
+                                                // Surface check: voxel above must be air
+                                                // or water (so foliage works on seabed).
+                                                let above_mat = if ly + 1 < BRICK as i32 {
                                                     // Within the same brick
                                                     let above_bit = (lx
                                                         + (ly + 1) * BRICK as i32
                                                         + lz * BRICK as i32 * BRICK as i32)
                                                         as usize;
-                                                    new_brick[above_bit] == 0
+                                                    new_brick[above_bit]
                                                 } else {
                                                     let above_wy = vy_base + ly + 1;
                                                     if above_wy >= cy {
-                                                        true // top of chunk
+                                                        0 // top of chunk = air
                                                     } else {
                                                         let aby = by + 1;
                                                         let above_brick =
@@ -587,11 +745,13 @@ fn compute_edit_output(
                                                         let above_bit = (lx
                                                             + lz * BRICK as i32 * BRICK as i32)
                                                             as usize;
-                                                        above_brick[above_bit] == 0
+                                                        above_brick[above_bit]
                                                     }
                                                 };
-                                                if !above_is_air {
-                                                    continue; // not the surface voxel
+                                                let is_surface =
+                                                    above_mat == 0 || is_water_material(above_mat);
+                                                if !is_surface {
+                                                    continue;
                                                 }
                                                 match foliage_action {
                                                     FoliageAction::Paint => {
@@ -689,7 +849,7 @@ fn compute_edit_output(
 }
 
 // ---------------------------------------------------------------------------
-// Sculpt tools (Raise, Lower, Flatten, Smooth) — column-based height editing
+// Sculpt tools (Raise, Lower, Smooth) — column-based height editing
 // ---------------------------------------------------------------------------
 
 /// Find the Y of the highest solid voxel in the column at local (lx, lz).
@@ -746,12 +906,18 @@ fn world_to_chunk_local(wx: i32, wz: i32) -> ([i32; 3], u32, u32) {
     ([ccx, 0, ccz], lx, lz)
 }
 
-/// Average surface height from a 3x3 neighborhood for smoothing.
-fn neighbor_average(wx: i32, wz: i32, heights: &HashMap<(i32, i32), Option<u32>>) -> Option<u32> {
+/// Average surface height from an NxN neighborhood for smoothing.
+/// `kernel` is the radius: 1 → 3×3, 2 → 5×5, etc.
+fn neighbor_average(
+    wx: i32,
+    wz: i32,
+    heights: &HashMap<(i32, i32), Option<u32>>,
+    kernel: i32,
+) -> Option<u32> {
     let mut sum = 0u64;
     let mut count = 0u64;
-    for dz in -1..=1i32 {
-        for dx in -1..=1i32 {
+    for dz in -kernel..=kernel {
+        for dx in -kernel..=kernel {
             if let Some(&Some(h)) = heights.get(&(wx + dx, wz + dz)) {
                 sum += h as u64;
                 count += 1;
@@ -842,17 +1008,19 @@ fn compute_sculpt_edit(
     selected_material: MaterialId,
     radius: i32,
     brush_shape: BrushShape,
-    flatten_target_y: u32,
     mut chunks: HashMap<[i32; 3], EditableChunk>,
+    params: BrushParams,
 ) -> EditTaskOutput {
     let t_total = Instant::now();
 
-    // For smooth, scan a 1-voxel margin so edge columns have valid 3x3 neighbors.
+    let kernel = params.smooth_kernel.max(1) as i32;
+    // For smooth, scan a margin so edge columns have valid NxN neighbors.
     let scan_r = if tool == EditorTool::Smooth {
-        radius + 1
+        radius + kernel
     } else {
         radius
     };
+    let step = params.sculpt_step.max(1) as u32;
 
     let mut all_columns = Vec::new();
     for wz in (target.z - scan_r)..=(target.z + scan_r) {
@@ -878,38 +1046,66 @@ fn compute_sculpt_edit(
     // Track the truly original brick state (before any column in this edit touched it).
     let mut original_bricks: HashMap<([i32; 3], [u32; 3]), [MaterialId; 64]> = HashMap::new();
 
-    for &(wx, wz) in &all_columns {
-        // Only modify columns within the actual brush radius (skip margin).
-        if !column_in_brush(wx, wz, target.x, target.z, radius, brush_shape) {
-            continue;
-        }
+    // For smooth with multiple iterations, we need to iteratively update heights.
+    let iterations = if tool == EditorTool::Smooth {
+        params.smooth_iterations.max(1) as usize
+    } else {
+        1
+    };
 
-        let (cc, lx, lz) = world_to_chunk_local(wx, wz);
-        let chunk = chunks.entry(cc).or_default();
-        let current_h = heights.get(&(wx, wz)).copied().flatten();
-
-        let new_h: Option<u32> = match tool {
-            EditorTool::Raise => match current_h {
-                Some(h) if h < capy_world::CHUNK_Y - 1 => Some(h + 1),
-                Some(_) => current_h,
-                None => Some(0),
-            },
-            EditorTool::Lower => current_h.and_then(|h| if h > 0 { Some(h - 1) } else { None }),
-            EditorTool::Flatten => Some(flatten_target_y),
-            EditorTool::Smooth => neighbor_average(wx, wz, &heights),
-            _ => current_h,
+    for iteration in 0..iterations {
+        // Re-scan heights for subsequent smooth iterations (use current state).
+        let iter_heights = if iteration > 0 {
+            all_columns
+                .iter()
+                .map(|&(wx, wz)| {
+                    let (cc, lx, lz) = world_to_chunk_local(wx, wz);
+                    let chunk = chunks.entry(cc).or_default();
+                    ((wx, wz), find_surface_height(chunk, lx, lz))
+                })
+                .collect::<HashMap<_, _>>()
+        } else {
+            heights.clone()
         };
 
-        modify_column_height(
-            chunk,
-            lx,
-            lz,
-            current_h,
-            new_h,
-            selected_material,
-            cc,
-            &mut original_bricks,
-        );
+        for &(wx, wz) in &all_columns {
+            // Only modify columns within the actual brush radius (skip margin).
+            if !column_in_brush(wx, wz, target.x, target.z, radius, brush_shape) {
+                continue;
+            }
+
+            let (cc, lx, lz) = world_to_chunk_local(wx, wz);
+            let chunk = chunks.entry(cc).or_default();
+            let current_h = iter_heights.get(&(wx, wz)).copied().flatten();
+
+            let new_h: Option<u32> = match tool {
+                EditorTool::Raise => match current_h {
+                    Some(h) => {
+                        let new_y = h + step;
+                        if new_y < capy_world::CHUNK_Y {
+                            Some(new_y)
+                        } else {
+                            Some(capy_world::CHUNK_Y - 1)
+                        }
+                    }
+                    None => Some(step.saturating_sub(1)),
+                },
+                EditorTool::Lower => current_h.and_then(|h| h.checked_sub(step).or(Some(0))),
+                EditorTool::Smooth => neighbor_average(wx, wz, &iter_heights, kernel),
+                _ => current_h,
+            };
+
+            modify_column_height(
+                chunk,
+                lx,
+                lz,
+                current_h,
+                new_h,
+                selected_material,
+                cc,
+                &mut original_bricks,
+            );
+        }
     }
 
     let loop_ms = t_loop.elapsed().as_secs_f64() * 1000.0;

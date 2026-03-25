@@ -51,15 +51,14 @@ pub(crate) fn editor_ui(
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut state.active_tool, EditorTool::Raise, "Raise (4)");
                 ui.selectable_value(&mut state.active_tool, EditorTool::Lower, "Lower (5)");
-                ui.selectable_value(&mut state.active_tool, EditorTool::Flatten, "Flat (6)");
-                ui.selectable_value(&mut state.active_tool, EditorTool::Smooth, "Smooth (7)");
+                ui.selectable_value(&mut state.active_tool, EditorTool::Smooth, "Smooth (6)");
             });
             ui.horizontal(|ui| {
-                ui.selectable_value(&mut state.active_tool, EditorTool::Prefab, "Prefab (8)");
-                ui.selectable_value(&mut state.active_tool, EditorTool::Select, "Select (9)");
-                ui.selectable_value(&mut state.active_tool, EditorTool::Foliage, "Foliage (0)");
-                ui.selectable_value(&mut state.active_tool, EditorTool::Water, "Water (-)");
-                ui.selectable_value(&mut state.active_tool, EditorTool::ColorPick, "Pick (=)");
+                ui.selectable_value(&mut state.active_tool, EditorTool::Prefab, "Prefab (7)");
+                ui.selectable_value(&mut state.active_tool, EditorTool::Select, "Select (8)");
+                ui.selectable_value(&mut state.active_tool, EditorTool::Foliage, "Foliage (9)");
+                ui.selectable_value(&mut state.active_tool, EditorTool::Water, "Water (0)");
+                ui.selectable_value(&mut state.active_tool, EditorTool::ColorPick, "Pick (-)");
             });
             ui.separator();
 
@@ -108,7 +107,58 @@ pub(crate) fn editor_ui(
                     ui.selectable_value(&mut state.brush_shape, BrushShape::Cylinder, "Cylinder");
                     ui.selectable_value(&mut state.brush_shape, BrushShape::Diamond, "Diamond");
                 });
+
+                if !matches!(
+                    state.active_tool,
+                    EditorTool::Water
+                        | EditorTool::Foliage
+                        | EditorTool::Raise
+                        | EditorTool::Lower
+                        | EditorTool::Smooth
+                ) {
+                    ui.label("Strength");
+                    ui.add(
+                        egui::Slider::new(&mut state.brush_strength, 0.01..=1.0).fixed_decimals(2),
+                    );
+                }
                 ui.separator();
+
+                // Sculpt-specific settings
+                let is_sculpt = matches!(
+                    state.active_tool,
+                    EditorTool::Raise | EditorTool::Lower | EditorTool::Smooth
+                );
+                if is_sculpt {
+                    if matches!(state.active_tool, EditorTool::Raise | EditorTool::Lower) {
+                        ui.label("Step Size");
+                        let mut step = state.sculpt_step;
+                        ui.add(egui::Slider::new(&mut step, 1..=64));
+                        state.sculpt_step = step;
+                    }
+
+                    if state.active_tool == EditorTool::Smooth {
+                        ui.label("Kernel Size");
+                        let mut kernel = state.smooth_kernel;
+                        ui.add(egui::Slider::new(&mut kernel, 1..=5).suffix(" (NxN)"));
+                        state.smooth_kernel = kernel;
+
+                        ui.label("Iterations");
+                        let mut iters = state.smooth_iterations;
+                        ui.add(egui::Slider::new(&mut iters, 1..=10));
+                        state.smooth_iterations = iters;
+                    }
+
+                    ui.separator();
+                }
+
+                // Place-specific: noise displacement
+                if state.active_tool == EditorTool::Place {
+                    ui.label("Noise Displacement");
+                    let mut disp = state.noise_displacement;
+                    ui.add(egui::Slider::new(&mut disp, 0..=32));
+                    state.noise_displacement = disp;
+                    ui.separator();
+                }
 
                 if state.active_tool == EditorTool::Foliage {
                     ui.label("Foliage Action");
@@ -137,6 +187,10 @@ pub(crate) fn editor_ui(
                             "Surface",
                         );
                     });
+                    ui.label("Density");
+                    ui.add(
+                        egui::Slider::new(&mut state.foliage_density, 0.01..=1.0).fixed_decimals(2),
+                    );
                     ui.separator();
                 }
 
@@ -150,6 +204,12 @@ pub(crate) fn editor_ui(
                 }
 
                 if !matches!(state.active_tool, EditorTool::Foliage | EditorTool::Water) {
+                    if matches!(state.active_tool, EditorTool::Place | EditorTool::Paint) {
+                        ui.label("Color Jitter");
+                        ui.add(
+                            egui::Slider::new(&mut state.color_jitter, 0.0..=1.0).fixed_decimals(2),
+                        );
+                    }
                     ui.label("Color");
                     let mut color = egui::Color32::from_rgb(
                         state.picked_color[0],

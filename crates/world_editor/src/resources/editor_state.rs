@@ -10,7 +10,6 @@ pub enum EditorTool {
     Paint,
     Raise,
     Lower,
-    Flatten,
     Smooth,
     Prefab,
     Select,
@@ -75,6 +74,25 @@ pub struct EditorState {
     pub foliage_mode: FoliageMode,
     /// Current water tool action (place or remove).
     pub water_action: WaterAction,
+    /// Brush strength / opacity (0.0–1.0). Controls probability of each voxel
+    /// being affected. 1.0 = all voxels, 0.5 = ~50% of voxels (spray effect).
+    pub brush_strength: f32,
+    /// Sculpt step size for Raise/Lower (1–64). Number of voxels to raise or
+    /// lower per click.
+    pub sculpt_step: u32,
+    /// Smooth kernel radius (1–5). 1 = 3×3 neighborhood, 2 = 5×5, etc.
+    pub smooth_kernel: u32,
+    /// Number of smoothing iterations per click (1–10).
+    pub smooth_iterations: u32,
+    /// Color jitter amount (0.0–1.0). Randomly varies the painted color per
+    /// voxel for organic-looking terrain.
+    pub color_jitter: f32,
+    /// Noise displacement for Place tool (0–32). Adds random vertical roughness
+    /// to the brush surface.
+    pub noise_displacement: u32,
+    /// Foliage density (0.0–1.0). Probability of applying foliage per valid
+    /// surface voxel.
+    pub foliage_density: f32,
 }
 
 impl Default for EditorState {
@@ -97,6 +115,13 @@ impl Default for EditorState {
             foliage_action: FoliageAction::Paint,
             foliage_mode: FoliageMode::SingleLevel,
             water_action: WaterAction::Place,
+            brush_strength: 1.0,
+            sculpt_step: 1,
+            smooth_kernel: 1,
+            smooth_iterations: 1,
+            color_jitter: 0.0,
+            noise_displacement: 0,
+            foliage_density: 1.0,
         }
     }
 }

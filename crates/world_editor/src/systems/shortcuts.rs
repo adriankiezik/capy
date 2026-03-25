@@ -20,24 +20,21 @@ pub(crate) fn shortcuts(edge: Res<InputEdge>, mut state: ResMut<EditorState>) {
         state.active_tool = EditorTool::Lower;
     }
     if edge.keys_just_pressed.contains(&KeyCode::Digit6) {
-        state.active_tool = EditorTool::Flatten;
-    }
-    if edge.keys_just_pressed.contains(&KeyCode::Digit7) {
         state.active_tool = EditorTool::Smooth;
     }
-    if edge.keys_just_pressed.contains(&KeyCode::Digit8) {
+    if edge.keys_just_pressed.contains(&KeyCode::Digit7) {
         state.active_tool = EditorTool::Prefab;
     }
-    if edge.keys_just_pressed.contains(&KeyCode::Digit9) {
+    if edge.keys_just_pressed.contains(&KeyCode::Digit8) {
         state.active_tool = EditorTool::Select;
     }
-    if edge.keys_just_pressed.contains(&KeyCode::Digit0) {
+    if edge.keys_just_pressed.contains(&KeyCode::Digit9) {
         state.active_tool = EditorTool::Foliage;
     }
-    if edge.keys_just_pressed.contains(&KeyCode::Minus) {
+    if edge.keys_just_pressed.contains(&KeyCode::Digit0) {
         state.active_tool = EditorTool::Water;
     }
-    if edge.keys_just_pressed.contains(&KeyCode::Equal) {
+    if edge.keys_just_pressed.contains(&KeyCode::Minus) {
         state.active_tool = EditorTool::ColorPick;
     }
     if edge.keys_just_pressed.contains(&KeyCode::KeyB) {
