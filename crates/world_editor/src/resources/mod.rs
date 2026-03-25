@@ -23,7 +23,8 @@ pub(crate) use edit_history::{BrickChange, EditAction, EditHistory, SelectionCha
 pub(crate) use edit_task::{EditTask, EditTaskOutput, UpdatedChunk};
 pub(crate) use editable_world::{EditableChunk, EditableWorld};
 pub(crate) use editor_state::{
-    BrushShape, EditorState, EditorTool, FoliageAction, FoliageMode, WaterAction,
+    BrushMask, BrushShape, EditorState, EditorTool, FoliageAction, FoliageMode, MaskMode,
+    WaterAction,
 };
 pub(crate) use input_edge::InputEdge;
 pub(crate) use mesh_dirty::MeshDirty;

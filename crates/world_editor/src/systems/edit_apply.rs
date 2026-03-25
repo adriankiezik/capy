@@ -9,9 +9,9 @@ use capy_world::LeafBrickEdit;
 use tracing::{error, info};
 
 use crate::resources::{
-    BrickChange, BrushShape, EditAction, EditHistory, EditTask, EditTaskOutput, EditableChunk,
-    EditableWorld, EditorState, EditorTool, FoliageAction, FoliageMode, InputEdge, MeshDirty,
-    PendingEdits, PrefabLibrary, UpdatedChunk, VoxelHit, WaterAction, WorldGrid,
+    BrickChange, BrushMask, BrushShape, EditAction, EditHistory, EditTask, EditTaskOutput,
+    EditableChunk, EditableWorld, EditorState, EditorTool, FoliageAction, FoliageMode, InputEdge,
+    MeshDirty, PendingEdits, PrefabLibrary, UpdatedChunk, VoxelHit, WaterAction, WorldGrid,
 };
 
 // ---------------------------------------------------------------------------
@@ -30,6 +30,7 @@ struct BrushParams {
     sculpt_step: u32,
     smooth_kernel: u32,
     smooth_iterations: u32,
+    mask: BrushMask,
 }
 
 // ---------------------------------------------------------------------------
@@ -188,6 +189,11 @@ pub(crate) fn edit_apply(
         return;
     }
 
+    // Mask picking intercepts the click — don't apply any tool edit.
+    if state.mask_picking {
+        return;
+    }
+
     let Some(hit) = voxel_hit else {
         return;
     };
@@ -257,6 +263,7 @@ pub(crate) fn edit_apply(
         sculpt_step: state.sculpt_step,
         smooth_kernel: state.smooth_kernel,
         smooth_iterations: state.smooth_iterations,
+        mask: state.mask.clone(),
     };
 
     let place_adjacent = tool == EditorTool::Place;
@@ -688,6 +695,11 @@ fn compute_edit_output(
                                             as usize;
                                         let old = new_brick[bit];
 
+                                        // Mask check: skip voxels not allowed by the mask
+                                        if !params.mask.allows(old) {
+                                            continue;
+                                        }
+
                                         // Pick material (possibly jittered)
                                         let effective_material = if jitter_palette.len() > 1 {
                                             let idx = (position_hash(wx, wy, wz)
@@ -1080,6 +1092,21 @@ fn compute_sculpt_edit(
             let (cc, lx, lz) = world_to_chunk_local(wx, wz);
             let chunk = chunks.entry(cc).or_default();
             let current_h = iter_heights.get(&(wx, wz)).copied().flatten();
+
+            // Mask check: skip columns whose surface material isn't allowed
+            if let Some(h) = current_h {
+                let sbx = lx / BRICK;
+                let sby = h / BRICK;
+                let sbz = lz / BRICK;
+                let slx = lx % BRICK;
+                let sly = h % BRICK;
+                let slz = lz % BRICK;
+                let s_bit = (slx + sly * BRICK + slz * BRICK * BRICK) as usize;
+                let surface_mat = chunk.read_brick(sbx, sby, sbz)[s_bit];
+                if !params.mask.allows(surface_mat) {
+                    continue;
+                }
+            }
 
             let new_h: Option<u32> = match tool {
                 EditorTool::Raise => match current_h {

@@ -10,8 +10,9 @@ use tracing::info;
 
 use crate::resources::path_state::{PathMode, PathState};
 use crate::resources::{
-    BrickChange, EditAction, EditHistory, EditTask, EditTaskOutput, EditableChunk, EditableWorld,
-    EditorState, EditorTool, InputEdge, MeshDirty, PendingEdits, UpdatedChunk, VoxelHit,
+    BrickChange, BrushMask, EditAction, EditHistory, EditTask, EditTaskOutput, EditableChunk,
+    EditableWorld, EditorState, EditorTool, InputEdge, MeshDirty, PendingEdits, UpdatedChunk,
+    VoxelHit,
 };
 
 const BRICK: u32 = 4;
@@ -128,6 +129,7 @@ fn rasterize_path(
     mode: PathMode,
     material: MaterialId,
     color_jitter: f32,
+    mask: BrushMask,
     mut chunks: HashMap<[i32; 3], EditableChunk>,
 ) -> EditTaskOutput {
     let t_total = Instant::now();
@@ -167,6 +169,21 @@ fn rasterize_path(
     for (&(wx, wz), &target_y) in &column_targets {
         let (cc, lx, lz) = world_to_chunk_local(wx, wz);
         let chunk = chunks.entry(cc).or_default();
+
+        // Mask check: skip columns whose surface material isn't allowed.
+        if let Some(h) = find_surface_height(chunk, lx, lz) {
+            let sbx = lx / BRICK;
+            let sby = h / BRICK;
+            let sbz = lz / BRICK;
+            let slx = lx % BRICK;
+            let sly = h % BRICK;
+            let slz = lz % BRICK;
+            let s_bit = (slx + sly * BRICK + slz * BRICK * BRICK) as usize;
+            let surface_mat = chunk.read_brick(sbx, sby, sbz)[s_bit];
+            if !mask.allows(surface_mat) {
+                continue;
+            }
+        }
 
         // Pick a jittered material for this column.
         let mat = jitter_palette[(position_hash(wx, 0, wz) * jitter_palette.len() as f32) as usize
@@ -510,8 +527,8 @@ pub(crate) fn path_tool(
         path_state.confirmed = true;
     }
 
-    // --- Left click: place a waypoint ---
-    if edge.mouse_just_pressed.contains(&MouseButton::Left) {
+    // --- Left click: place a waypoint (unless mask picking is active) ---
+    if edge.mouse_just_pressed.contains(&MouseButton::Left) && !state.mask_picking {
         if let Some(hit) = &voxel_hit {
             if hit.hit {
                 let p = hit.position - hit.normal * 0.5;
@@ -529,6 +546,7 @@ pub(crate) fn path_tool(
         let mode = path_state.mode;
         let material = state.selected_material;
         let color_jitter = state.color_jitter;
+        let mask = state.mask.clone();
 
         // Compute AABB of all waypoints + width margin to snapshot chunks.
         let margin = half_width as f32 + 2.0;
@@ -557,7 +575,15 @@ pub(crate) fn path_tool(
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
             let samples = sample_spline(&waypoints);
-            let output = rasterize_path(&samples, half_width, mode, material, color_jitter, chunks);
+            let output = rasterize_path(
+                &samples,
+                half_width,
+                mode,
+                material,
+                color_jitter,
+                mask,
+                chunks,
+            );
             let _ = tx.send(output);
         });
 

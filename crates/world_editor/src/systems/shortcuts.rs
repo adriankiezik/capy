@@ -1,9 +1,14 @@
 use bevy_ecs::system::{Res, ResMut};
 use capy_core::KeyCode;
+use capy_shared::FlyCameraConfig;
 
 use crate::resources::{BrushShape, EditorState, EditorTool, InputEdge};
 
-pub(crate) fn shortcuts(edge: Res<InputEdge>, mut state: ResMut<EditorState>) {
+pub(crate) fn shortcuts(
+    edge: Res<InputEdge>,
+    mut state: ResMut<EditorState>,
+    mut cam_config: ResMut<FlyCameraConfig>,
+) {
     if edge.keys_just_pressed.contains(&KeyCode::Digit1) {
         state.active_tool = EditorTool::Place;
     }
@@ -56,5 +61,11 @@ pub(crate) fn shortcuts(edge: Res<InputEdge>, mut state: ResMut<EditorState>) {
     }
     if state.active_tool == EditorTool::Prefab && edge.keys_just_pressed.contains(&KeyCode::KeyR) {
         state.prefab_rotation = (state.prefab_rotation + 1) % 4;
+    }
+    if edge.keys_just_pressed.contains(&KeyCode::F1) {
+        cam_config.move_speed = (cam_config.move_speed * 0.5).max(1.0);
+    }
+    if edge.keys_just_pressed.contains(&KeyCode::F2) {
+        cam_config.move_speed = (cam_config.move_speed * 2.0).min(10000.0);
     }
 }

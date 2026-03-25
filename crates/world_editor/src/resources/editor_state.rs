@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::time::Instant;
 
 use bevy_ecs::resource::Resource;
@@ -48,6 +49,52 @@ pub enum WaterAction {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MaskMode {
+    /// Mask is disabled — all voxels are affected.
+    Disabled,
+    /// Only affect voxels whose material is in the mask set.
+    Include,
+    /// Affect all voxels except those whose material is in the mask set.
+    Exclude,
+}
+
+/// Material mask that filters which voxels a tool can affect.
+#[derive(Debug, Clone)]
+pub struct BrushMask {
+    pub mode: MaskMode,
+    pub materials: HashSet<MaterialId>,
+}
+
+impl Default for BrushMask {
+    fn default() -> Self {
+        Self {
+            mode: MaskMode::Disabled,
+            materials: HashSet::new(),
+        }
+    }
+}
+
+impl BrushMask {
+    /// Returns `true` if the mask allows operating on a voxel with the given material.
+    /// Compares using the visual material (strips foliage/water bits) so that
+    /// picked colors match regardless of surface flags.
+    #[inline]
+    pub fn allows(&self, material: MaterialId) -> bool {
+        match self.mode {
+            MaskMode::Disabled => true,
+            MaskMode::Include => {
+                let vis = capy_core::visual_material(material);
+                self.materials.contains(&vis)
+            }
+            MaskMode::Exclude => {
+                let vis = capy_core::visual_material(material);
+                !self.materials.contains(&vis)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BrushShape {
     Sphere,
     Cube,
@@ -95,6 +142,11 @@ pub struct EditorState {
     /// Foliage density (0.0–1.0). Probability of applying foliage per valid
     /// surface voxel.
     pub foliage_density: f32,
+    /// Material mask: filters which voxels tools can affect.
+    pub mask: BrushMask,
+    /// When true, the next voxel click adds its material to the mask instead
+    /// of performing the normal tool action.
+    pub mask_picking: bool,
 }
 
 impl Default for EditorState {
@@ -124,6 +176,8 @@ impl Default for EditorState {
             color_jitter: 0.0,
             noise_displacement: 0,
             foliage_density: 1.0,
+            mask: BrushMask::default(),
+            mask_picking: false,
         }
     }
 }

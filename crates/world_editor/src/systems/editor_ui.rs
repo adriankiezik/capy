@@ -5,7 +5,7 @@ use glam::{Mat4, Vec3, Vec4};
 
 use crate::resources::path_state::{PathMode, PathState};
 use crate::resources::{
-    BrushShape, EditorState, EditorTool, Face, FoliageAction, FoliageMode, PrefabLibrary,
+    BrushShape, EditorState, EditorTool, Face, FoliageAction, FoliageMode, MaskMode, PrefabLibrary,
     SaveResult, SaveState, SelectionPhase, SelectionState, WaterAction,
 };
 
@@ -62,7 +62,11 @@ pub(crate) fn editor_ui(
             });
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut state.active_tool, EditorTool::Water, "Water (0)");
-                ui.selectable_value(&mut state.active_tool, EditorTool::ColorPick, "Pick (-)");
+                ui.selectable_value(
+                    &mut state.active_tool,
+                    EditorTool::ColorPick,
+                    "Color Pick (-)",
+                );
                 ui.selectable_value(&mut state.active_tool, EditorTool::Path, "Path (P)");
             });
             ui.separator();
@@ -86,20 +90,6 @@ pub(crate) fn editor_ui(
             }
 
             if state.active_tool == EditorTool::Path {
-                ui.label("Path Width");
-                let mut pw = path_state.path_width;
-                ui.add(egui::Slider::new(&mut pw, 1..=32));
-                path_state.path_width = pw;
-
-                ui.label("Mode");
-                ui.horizontal(|ui| {
-                    ui.selectable_value(&mut path_state.mode, PathMode::Flatten, "Flatten");
-                    ui.selectable_value(&mut path_state.mode, PathMode::Paint, "Paint");
-                });
-
-                ui.label("Color Jitter");
-                ui.add(egui::Slider::new(&mut state.color_jitter, 0.0..=1.0).fixed_decimals(2));
-
                 ui.label("Color");
                 let mut color = egui::Color32::from_rgb(
                     state.picked_color[0],
@@ -133,7 +123,8 @@ pub(crate) fn editor_ui(
                     ui.painter().rect_filled(rect, 2.0, matched_color);
                     ui.label(format!("Palette #{mat}"));
                 });
-
+                ui.label("Color Jitter");
+                ui.add(egui::Slider::new(&mut state.color_jitter, 0.0..=1.0).fixed_decimals(2));
                 ui.separator();
             }
 
@@ -152,6 +143,130 @@ pub(crate) fn editor_ui(
                 EditorTool::Prefab | EditorTool::Select | EditorTool::ColorPick | EditorTool::Path
             );
             if is_brush_tool {
+                // --- Color (before brush size) ---
+                if !matches!(state.active_tool, EditorTool::Foliage | EditorTool::Water) {
+                    ui.label("Color");
+                    let mut color = egui::Color32::from_rgb(
+                        state.picked_color[0],
+                        state.picked_color[1],
+                        state.picked_color[2],
+                    );
+                    let response = egui::color_picker::color_edit_button_srgba(
+                        ui,
+                        &mut color,
+                        egui::color_picker::Alpha::Opaque,
+                    );
+                    if response.changed() {
+                        state.picked_color = [color.r(), color.g(), color.b()];
+                        let color_f32 = [
+                            color.r() as f32 / 255.0,
+                            color.g() as f32 / 255.0,
+                            color.b() as f32 / 255.0,
+                        ];
+                        state.selected_material = capy_core::closest_material(color_f32);
+                    }
+
+                    let mat = state.selected_material;
+                    let matched = MATERIAL_COLORS[mat as usize];
+                    let matched_color = egui::Color32::from_rgb(
+                        (matched[0] * 255.0) as u8,
+                        (matched[1] * 255.0) as u8,
+                        (matched[2] * 255.0) as u8,
+                    );
+                    ui.horizontal(|ui| {
+                        let (rect, _) =
+                            ui.allocate_exact_size(egui::vec2(20.0, 20.0), egui::Sense::hover());
+                        ui.painter().rect_filled(rect, 2.0, matched_color);
+                        ui.label(format!("Palette #{mat}"));
+                    });
+                    ui.separator();
+                }
+            }
+
+            // --- Mask (before brush size, after color) ---
+            let show_mask = !matches!(
+                state.active_tool,
+                EditorTool::Prefab | EditorTool::Select | EditorTool::ColorPick
+            );
+            if show_mask {
+                ui.label("Mask");
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut state.mask.mode, MaskMode::Disabled, "Off");
+                    ui.selectable_value(&mut state.mask.mode, MaskMode::Include, "Include");
+                    ui.selectable_value(&mut state.mask.mode, MaskMode::Exclude, "Exclude");
+                });
+                if state.mask.mode == MaskMode::Disabled {
+                    state.mask_picking = false;
+                }
+                if state.mask.mode != MaskMode::Disabled {
+                    ui.horizontal(|ui| {
+                        let pick_label = if state.mask_picking {
+                            "Picking..."
+                        } else {
+                            "Pick from world"
+                        };
+                        if ui
+                            .selectable_label(state.mask_picking, pick_label)
+                            .clicked()
+                        {
+                            state.mask_picking = !state.mask_picking;
+                        }
+                        if ui.button("Clear all").clicked() {
+                            state.mask.materials.clear();
+                        }
+                    });
+                    // Display masked materials as colored swatches
+                    if !state.mask.materials.is_empty() {
+                        let mut to_remove = None;
+                        ui.horizontal_wrapped(|ui| {
+                            let mut sorted: Vec<_> = state.mask.materials.iter().copied().collect();
+                            sorted.sort();
+                            for mat in sorted {
+                                let c = MATERIAL_COLORS[mat as usize];
+                                let color = egui::Color32::from_rgb(
+                                    (c[0] * 255.0) as u8,
+                                    (c[1] * 255.0) as u8,
+                                    (c[2] * 255.0) as u8,
+                                );
+                                let (rect, resp) = ui.allocate_exact_size(
+                                    egui::vec2(18.0, 18.0),
+                                    egui::Sense::click(),
+                                );
+                                ui.painter().rect_filled(rect, 2.0, color);
+                                if resp
+                                    .on_hover_text(format!("#{mat} (click to remove)"))
+                                    .clicked()
+                                {
+                                    to_remove = Some(mat);
+                                }
+                            }
+                        });
+                        if let Some(mat) = to_remove {
+                            state.mask.materials.remove(&mat);
+                        }
+                    }
+                }
+                ui.separator();
+            }
+
+            // Path-specific settings (after mask, before brush tools)
+            if state.active_tool == EditorTool::Path {
+                ui.label("Path Width");
+                let mut pw = path_state.path_width;
+                ui.add(egui::Slider::new(&mut pw, 1..=32));
+                path_state.path_width = pw;
+
+                ui.label("Mode");
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut path_state.mode, PathMode::Flatten, "Flatten");
+                    ui.selectable_value(&mut path_state.mode, PathMode::Paint, "Paint");
+                });
+
+                ui.separator();
+            }
+
+            if is_brush_tool {
+                // --- Brush size & shape ---
                 ui.label("Brush Size");
                 let mut radius = state.brush_radius;
                 ui.add(egui::Slider::new(&mut radius, 1..=128));
@@ -217,6 +332,12 @@ pub(crate) fn editor_ui(
                     ui.separator();
                 }
 
+                if matches!(state.active_tool, EditorTool::Place | EditorTool::Paint) {
+                    ui.label("Color Jitter");
+                    ui.add(egui::Slider::new(&mut state.color_jitter, 0.0..=1.0).fixed_decimals(2));
+                    ui.separator();
+                }
+
                 if state.active_tool == EditorTool::Foliage {
                     ui.label("Foliage Action");
                     ui.horizontal(|ui| {
@@ -256,50 +377,6 @@ pub(crate) fn editor_ui(
                     ui.horizontal(|ui| {
                         ui.selectable_value(&mut state.water_action, WaterAction::Place, "Place");
                         ui.selectable_value(&mut state.water_action, WaterAction::Remove, "Remove");
-                    });
-                    ui.separator();
-                }
-
-                if !matches!(state.active_tool, EditorTool::Foliage | EditorTool::Water) {
-                    if matches!(state.active_tool, EditorTool::Place | EditorTool::Paint) {
-                        ui.label("Color Jitter");
-                        ui.add(
-                            egui::Slider::new(&mut state.color_jitter, 0.0..=1.0).fixed_decimals(2),
-                        );
-                    }
-                    ui.label("Color");
-                    let mut color = egui::Color32::from_rgb(
-                        state.picked_color[0],
-                        state.picked_color[1],
-                        state.picked_color[2],
-                    );
-                    let response = egui::color_picker::color_edit_button_srgba(
-                        ui,
-                        &mut color,
-                        egui::color_picker::Alpha::Opaque,
-                    );
-                    if response.changed() {
-                        state.picked_color = [color.r(), color.g(), color.b()];
-                        let color_f32 = [
-                            color.r() as f32 / 255.0,
-                            color.g() as f32 / 255.0,
-                            color.b() as f32 / 255.0,
-                        ];
-                        state.selected_material = capy_core::closest_material(color_f32);
-                    }
-
-                    let mat = state.selected_material;
-                    let matched = MATERIAL_COLORS[mat as usize];
-                    let matched_color = egui::Color32::from_rgb(
-                        (matched[0] * 255.0) as u8,
-                        (matched[1] * 255.0) as u8,
-                        (matched[2] * 255.0) as u8,
-                    );
-                    ui.horizontal(|ui| {
-                        let (rect, _) =
-                            ui.allocate_exact_size(egui::vec2(20.0, 20.0), egui::Sense::hover());
-                        ui.painter().rect_filled(rect, 2.0, matched_color);
-                        ui.label(format!("Palette #{mat}"));
                     });
                     ui.separator();
                 }

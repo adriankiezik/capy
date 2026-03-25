@@ -8,9 +8,6 @@ pub(crate) fn color_pick(
     voxel_hit: Option<Res<VoxelHit>>,
     mut state: ResMut<EditorState>,
 ) {
-    if state.active_tool != EditorTool::ColorPick {
-        return;
-    }
     if !edge.mouse_just_pressed.contains(&MouseButton::Left) {
         return;
     }
@@ -18,6 +15,18 @@ pub(crate) fn color_pick(
         return;
     };
     if !hit.hit || hit.material == 0 {
+        return;
+    }
+
+    // Mask picking mode: add the clicked voxel's material to the mask set.
+    if state.mask_picking {
+        let mat_id = visual_material(hit.material as u16);
+        state.mask.materials.insert(mat_id);
+        state.mask_picking = false;
+        return;
+    }
+
+    if state.active_tool != EditorTool::ColorPick {
         return;
     }
 
