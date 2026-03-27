@@ -22,6 +22,14 @@ pub struct DlssSettings {
     pub supported: bool,
     /// Set by the render crate — true when the GPU/driver supports DLSS Ray Reconstruction.
     pub ray_reconstruction_supported: bool,
+    /// User toggle for DLSS Frame Generation. Default: `false`.
+    pub frame_generation_enabled: bool,
+    /// Set by the render crate — true when the GPU/driver supports DLSS Frame Generation.
+    pub frame_generation_supported: bool,
+    /// User toggle for NVIDIA Reflex low-latency mode. Default: `true`.
+    pub reflex_enabled: bool,
+    /// Set by the render crate — true when the GPU/driver supports Reflex.
+    pub reflex_supported: bool,
 }
 
 impl Default for DlssSettings {
@@ -33,6 +41,10 @@ impl Default for DlssSettings {
             reset: false,
             supported: false,
             ray_reconstruction_supported: false,
+            frame_generation_enabled: false,
+            frame_generation_supported: false,
+            reflex_enabled: true,
+            reflex_supported: false,
         }
     }
 }
@@ -75,6 +87,12 @@ pub(crate) struct DlssPipeline {
     rr_output_texture: Option<GpuTexture>,
     black_texture: Option<GpuTexture>,
     white_texture: Option<GpuTexture>,
+    /// DLSS Frame Generation context.
+    fg_context: Option<crate::dlss::frame_generation::DlssFrameGeneration>,
+    /// Texture that receives the interpolated frame from Frame Generation.
+    fg_output: Option<GpuTexture>,
+    /// Separate texture for FG OutputReal (must differ from backbuffer input).
+    fg_real_output: Option<GpuTexture>,
     /// Incremented whenever output textures are recreated (quality change, SR↔RR switch).
     generation: u32,
 }
@@ -92,6 +110,9 @@ impl DlssPipeline {
             rr_output_texture: None,
             black_texture: None,
             white_texture: None,
+            fg_context: None,
+            fg_output: None,
+            fg_real_output: None,
             generation: 0,
         }
     }
@@ -452,6 +473,151 @@ impl DlssPipeline {
         Ok(Some(command_buffer))
     }
 
+    // --- Frame Generation -------------------------------------------------
+
+    pub(crate) fn fg_output(&self) -> Option<&GpuTexture> {
+        self.fg_output.as_ref()
+    }
+
+    /// Create or destroy the Frame Generation context based on current settings.
+    ///
+    /// Returns `true` when FG is active after this call.
+    pub(crate) fn configure_frame_generation(
+        &mut self,
+        settings: &DlssSettings,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        adapter: &wgpu::Adapter,
+        output_size: [u32; 2],
+        reflex_active: bool,
+    ) -> bool {
+        // FG requires: SDK initialised, Reflex active, an upscaler producing frames,
+        // user opted in, and hardware support.
+        let upscaler_active = self.output_texture.is_some() || self.rr_output_texture.is_some();
+        let should_enable = settings.frame_generation_enabled
+            && settings.frame_generation_supported
+            && reflex_active
+            && upscaler_active
+            && self.capability == DlssCapability::Supported;
+
+        if !should_enable {
+            self.deactivate_frame_generation();
+            return false;
+        }
+
+        let sdk = match self.sdk.clone() {
+            Some(sdk) => sdk,
+            None => {
+                self.deactivate_frame_generation();
+                return false;
+            }
+        };
+
+        let recreate = self.fg_context.is_none() || self.output_size != output_size;
+
+        if recreate {
+            let context = match crate::dlss::frame_generation::DlssFrameGeneration::new(
+                UVec2::new(output_size[0], output_size[1]),
+                sdk,
+                device,
+                queue,
+                adapter,
+            ) {
+                Ok(ctx) => ctx,
+                Err(error) => {
+                    tracing::warn!(
+                        "Failed to create DLSS Frame Generation context: {error}. Falling back."
+                    );
+                    self.deactivate_frame_generation();
+                    return false;
+                }
+            };
+
+            let fg_usages = wgpu::TextureUsages::STORAGE_BINDING
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::RENDER_ATTACHMENT;
+            self.fg_output = Some(GpuTexture::new_2d(
+                device,
+                "DLSS FG Interpolated",
+                output_size[0],
+                output_size[1],
+                wgpu::TextureFormat::Rgba8Unorm,
+                fg_usages,
+            ));
+            self.fg_real_output = Some(GpuTexture::new_2d(
+                device,
+                "DLSS FG Real Output",
+                output_size[0],
+                output_size[1],
+                wgpu::TextureFormat::Rgba8Unorm,
+                fg_usages,
+            ));
+            self.fg_context = Some(context);
+            self.generation = self.generation.wrapping_add(1);
+        }
+
+        true
+    }
+
+    /// Evaluate Frame Generation using the current upscaler output as the backbuffer.
+    ///
+    /// `fallback_backbuffer` is used when no DLSS upscaler output is available
+    /// (e.g. the lighting output when only FSR is active — unlikely with FG,
+    /// but safe as a fallback).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn evaluate_frame_generation(
+        &mut self,
+        command_encoder: &mut wgpu::CommandEncoder,
+        adapter: &wgpu::Adapter,
+        fallback_backbuffer: &wgpu::TextureView,
+        depth: &wgpu::TextureView,
+        motion_vectors: &wgpu::TextureView,
+        reset: bool,
+        camera: crate::dlss::frame_generation::FgCameraParams,
+    ) -> crate::Result<Option<wgpu::CommandBuffer>> {
+        let Some(context) = &mut self.fg_context else {
+            return Ok(None);
+        };
+        let (Some(fg_output), Some(fg_real)) = (&self.fg_output, &self.fg_real_output) else {
+            return Ok(None);
+        };
+
+        // Select the best backbuffer: prefer RR output, then SR output, then fallback.
+        let backbuffer = self
+            .rr_output_texture
+            .as_ref()
+            .or(self.output_texture.as_ref())
+            .map(|t| &t.view)
+            .unwrap_or(fallback_backbuffer);
+
+        let params = crate::dlss::frame_generation::DlssFrameGenerationEvalParams {
+            backbuffer,
+            hudless: backbuffer, // No HUD separation in the engine yet.
+            depth,
+            motion_vectors,
+            output: &fg_output.view,
+            real_output: &fg_real.view,
+            reset,
+            camera,
+        };
+
+        let command_buffer = context.evaluate(params, command_encoder, adapter)?;
+        Ok(Some(command_buffer))
+    }
+
+    pub(crate) fn deactivate_frame_generation(&mut self) {
+        let was_active = self.fg_context.is_some();
+        self.fg_context = None;
+        self.fg_output = None;
+        self.fg_real_output = None;
+        if was_active {
+            self.generation = self.generation.wrapping_add(1);
+        }
+    }
+
+    // --- Ray Reconstruction ------------------------------------------------
+
     pub(crate) fn deactivate_ray_reconstruction(&mut self) {
         let was_active = self.rr_context.is_some();
         self.rr_context = None;
@@ -464,7 +630,8 @@ impl DlssPipeline {
     }
 
     pub(crate) fn deactivate(&mut self) {
-        let was_active = self.context.is_some() || self.rr_context.is_some();
+        let was_active =
+            self.context.is_some() || self.rr_context.is_some() || self.fg_context.is_some();
         self.context = None;
         self.output_texture = None;
         self.output_size = [0, 0];
@@ -472,6 +639,9 @@ impl DlssPipeline {
         self.rr_output_texture = None;
         self.black_texture = None;
         self.white_texture = None;
+        self.fg_context = None;
+        self.fg_output = None;
+        self.fg_real_output = None;
         if was_active {
             self.generation = self.generation.wrapping_add(1);
         }

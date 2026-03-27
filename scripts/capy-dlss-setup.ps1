@@ -1,10 +1,10 @@
 # capy-dlss-setup.ps1 - One-time DLSS environment setup for capy-project
 
 # 1. DLSS SDK (clone if not already present)
-$DlssSdkPath = 'C:\SDKs\DLSS-310.5.0'
+$DlssSdkPath = 'C:\SDKs\DLSS-310.5.3'
 if (-not (Test-Path $DlssSdkPath)) {
-    Write-Host 'Cloning NVIDIA DLSS SDK v310.5.0...' -ForegroundColor Cyan
-    git clone --branch v310.5.0 --depth 1 --recurse-submodules https://github.com/NVIDIA/DLSS $DlssSdkPath
+    Write-Host 'Cloning NVIDIA DLSS SDK v310.5.3...' -ForegroundColor Cyan
+    git clone --branch v310.5.3 --depth 1 --recurse-submodules https://github.com/NVIDIA/DLSS $DlssSdkPath
 } else {
     Write-Host "DLSS SDK already exists at $DlssSdkPath" -ForegroundColor Green
 }

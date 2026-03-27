@@ -49,6 +49,7 @@ pub(crate) fn update_upscaling_system(world: &mut World) {
 
         let mut dlss_supported = false;
         let mut dlss_rr_supported = false;
+        let mut dlss_fg_active = false;
         if let Some(mut dlss) = world.get_non_send_resource_mut::<DlssPipeline>() {
             let was_sr_active = dlss.output_texture().is_some();
             let was_rr_active = dlss.rr_output_texture().is_some();
@@ -73,6 +74,8 @@ pub(crate) fn update_upscaling_system(world: &mut World) {
                     } else if was_sr_active {
                         reset_temporal = true;
                     }
+
+                    // FG configuration is deferred until after the DlssPipeline borrow is released.
                 }
                 None if was_sr_active || was_rr_active => {
                     dlss.deactivate();
@@ -84,9 +87,63 @@ pub(crate) fn update_upscaling_system(world: &mut World) {
             dlss_rr_supported = rr_hw_supported && dlss_supported;
         }
 
+        // Configure Reflex — enable or disable based on user setting.
+        {
+            let mut gpu = world.non_send_resource_mut::<GpuContext>();
+            let reflex_enabled = dlss_settings.as_ref().is_some_and(|s| s.reflex_enabled);
+            let sc = crate::dlss::reflex::raw_swapchain(&gpu.surface);
+            if let (Some(reflex), Some(sc)) = (&mut gpu.reflex, sc) {
+                if reflex_enabled && !reflex.is_enabled() {
+                    reflex.enable(sc);
+                } else if !reflex_enabled && reflex.is_enabled() {
+                    reflex.disable(sc);
+                }
+            }
+        }
+
+        // Configure Frame Generation (deferred until DlssPipeline borrow is released).
+        {
+            let reflex_active = {
+                let gpu = world.non_send_resource::<GpuContext>();
+                gpu.reflex.as_ref().is_some_and(|r| r.is_enabled())
+            };
+            let dlss_settings_clone = world.get_resource::<DlssSettings>().cloned();
+            if let (Some(mut dlss), Some(settings)) = (
+                world.get_non_send_resource_mut::<DlssPipeline>(),
+                dlss_settings_clone.as_ref(),
+            ) {
+                dlss_fg_active = dlss.configure_frame_generation(
+                    settings,
+                    &device,
+                    &queue,
+                    &adapter,
+                    [output_width, output_height],
+                    reflex_active,
+                );
+            }
+        }
+
+        // Bump frame latency when FG is active (double present needs headroom).
+        {
+            let mut gpu = world.non_send_resource_mut::<GpuContext>();
+            let target_latency = if dlss_fg_active { 3 } else { 2 };
+            gpu.set_frame_latency(target_latency);
+        }
+
+        let fg_hw_supported = {
+            let gpu = world.non_send_resource::<GpuContext>();
+            gpu.dlss_fg_supported && dlss_supported
+        };
+        let reflex_hw_supported = {
+            let gpu = world.non_send_resource::<GpuContext>();
+            gpu.reflex.is_some()
+        };
+
         if let Some(mut settings) = world.get_resource_mut::<DlssSettings>() {
             settings.supported = dlss_supported;
             settings.ray_reconstruction_supported = dlss_rr_supported;
+            settings.frame_generation_supported = fg_hw_supported;
+            settings.reflex_supported = reflex_hw_supported;
             if reset_temporal {
                 settings.reset = true;
             }

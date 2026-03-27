@@ -65,6 +65,15 @@ pub fn register_instance_extensions(
         Ok((_, false)) => feature_support.ray_reconstruction_supported = false,
         Err(err) => result = Err(err),
     };
+    match required_instance_extensions(
+        project_id,
+        NVSDK_NGX_Feature_NVSDK_NGX_Feature_FrameGeneration,
+        args.entry,
+    ) {
+        Ok((extensions, true)) => args.extensions.extend(extensions),
+        Ok((_, false)) => feature_support.frame_generation_supported = false,
+        Err(err) => result = Err(err),
+    };
     result
 }
 
@@ -137,6 +146,26 @@ pub fn register_device_extensions(
         Ok((_, false)) => feature_support.ray_reconstruction_supported = false,
         Err(err) => result = Err(err),
     };
+    match required_device_extensions(
+        project_id,
+        NVSDK_NGX_Feature_NVSDK_NGX_Feature_FrameGeneration,
+        raw_adapter,
+        raw_instance.handle(),
+        raw_physical_device,
+    ) {
+        Ok((extensions, true)) => args.extensions.extend(extensions),
+        Ok((_, false)) => feature_support.frame_generation_supported = false,
+        Err(err) => result = Err(err),
+    };
+
+    // VK_NV_low_latency2 for Reflex — optional device extension, not an NGX feature.
+    feature_support.reflex_supported = raw_adapter
+        .physical_device_capabilities()
+        .supports_extension(ash::nv::low_latency2::NAME);
+    if feature_support.reflex_supported {
+        args.extensions.push(ash::nv::low_latency2::NAME);
+    }
+
     result
 }
 
@@ -213,6 +242,10 @@ pub struct FeatureSupport {
     pub super_resolution_supported: bool,
     /// DLSS Ray Reconstruction (DLSS-RR) is supported.
     pub ray_reconstruction_supported: bool,
+    /// DLSS Frame Generation (DLSS-G) is supported.
+    pub frame_generation_supported: bool,
+    /// NVIDIA Reflex (`VK_NV_low_latency2`) is supported.
+    pub reflex_supported: bool,
 }
 
 impl Default for FeatureSupport {
@@ -220,6 +253,8 @@ impl Default for FeatureSupport {
         Self {
             super_resolution_supported: true,
             ray_reconstruction_supported: true,
+            frame_generation_supported: true,
+            reflex_supported: true,
         }
     }
 }

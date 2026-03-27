@@ -152,4 +152,15 @@ impl BlitPipeline {
             .layout
             .bind(device, storage_texture, &self.blit_sampler);
     }
+
+    /// Create a one-off bind group for blitting a different source texture
+    /// (e.g. Frame Generation interpolated output).
+    #[cfg_attr(not(feature = "dlss"), allow(dead_code))]
+    pub(crate) fn create_blit_bind_group(
+        &self,
+        device: &wgpu::Device,
+        source: &GpuTexture,
+    ) -> wgpu::BindGroup {
+        self.layout.bind(device, source, &self.blit_sampler)
+    }
 }

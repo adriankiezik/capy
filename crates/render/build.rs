@@ -87,7 +87,7 @@ fn copy_dlss_runtime_dlls(dlss_sdk: &str, out_dir: &std::path::Path) {
         let _ = std::fs::create_dir_all(&lib_dir);
 
         let src_dir = std::path::PathBuf::from(format!("{dlss_sdk}/lib/Windows_x86_64/rel"));
-        let dlls = ["nvngx_dlss.dll", "nvngx_dlssd.dll"];
+        let dlls = ["nvngx_dlss.dll", "nvngx_dlssd.dll", "nvngx_dlssg.dll"];
         for dll in &dlls {
             let src = src_dir.join(dll);
             let dst = lib_dir.join(dll);

@@ -11,12 +11,13 @@ use crate::resources::{
 use crate::resources::{DlssPipeline, DlssSettings};
 
 pub(crate) fn render_passes_system(
-    gpu: NonSendMut<GpuContext>,
+    #[cfg_attr(not(feature = "dlss"), allow(unused_mut))] mut gpu: NonSendMut<GpuContext>,
     trace: Option<NonSendMut<TracePipeline>>,
     gtao: Option<NonSendMut<GtaoPipeline>>,
     lighting: Option<NonSendMut<LightingPipeline>>,
     blit: Option<NonSendMut<BlitPipeline>>,
     temporal: Res<TemporalCameraState>,
+    camera: Res<capy_core::Camera>,
     #[cfg(feature = "dlss")] dlss: Option<NonSendMut<DlssPipeline>>,
     #[cfg(feature = "dlss")] mut dlss_settings: Option<ResMut<DlssSettings>>,
     fsr: Option<NonSendMut<FsrPipeline>>,
@@ -29,7 +30,18 @@ pub(crate) fn render_passes_system(
         return Ok(());
     };
 
-    let output = match gpu.surface.get_current_texture() {
+    // --- Reflex: sleep to pace CPU, then begin a new frame -----------------
+    #[cfg(feature = "dlss")]
+    {
+        let sc = crate::dlss::reflex::raw_swapchain(&gpu.surface);
+        if let (Some(reflex), Some(sc)) = (&mut gpu.reflex, sc) {
+            reflex.begin_frame();
+            reflex.sleep(sc);
+            reflex.set_marker(sc, ash::vk::LatencyMarkerNV::RENDERSUBMIT_START);
+        }
+    }
+
+    let mut output = match gpu.surface.get_current_texture() {
         Ok(output) => output,
         Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
             gpu.surface.configure(&gpu.device, &gpu.config);
@@ -39,7 +51,7 @@ pub(crate) fn render_passes_system(
         Err(error) => return Err(error.into()),
     };
 
-    let output_view = output
+    let mut output_view = output
         .texture
         .create_view(&wgpu::TextureViewDescriptor::default());
 
@@ -105,11 +117,12 @@ pub(crate) fn render_passes_system(
     gpu_profiler.resolve(&mut encoder);
 
     // Track whether an upscaler produced a command buffer (for the encoder split).
+    #[allow(unused_mut)]
     let mut upscaler_cmd_buf: Option<wgpu::CommandBuffer> = None;
 
     #[cfg(feature = "dlss")]
-    if upscaler_cmd_buf.is_none() {
-        if let Some(mut dlss) = dlss {
+    if let Some(mut dlss) = dlss {
+        if upscaler_cmd_buf.is_none() {
             let reset = match dlss_settings.as_mut() {
                 Some(settings) if settings.enabled && settings.reset => {
                     settings.reset = false;
@@ -148,8 +161,103 @@ pub(crate) fn render_passes_system(
 
             upscaler_cmd_buf = dlss_cmd_buf;
         }
-    }
 
+        // Encoder split for upscaler output.
+        if let Some(cmd_buf) = upscaler_cmd_buf.take() {
+            gpu.queue.submit([encoder.finish(), cmd_buf]);
+            encoder = gpu
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Post-Upscaler Encoder"),
+                });
+        }
+
+        // --- Frame Generation: evaluate + present interpolated FIRST ----------
+        //
+        // Present the interpolated frame first, then the real frame (with egui
+        // applied later in submit_frame_system) is presented last and stays on
+        // screen between ticks.
+        if dlss.fg_output().is_some() {
+            let fg_reset = dlss_settings.as_ref().is_some_and(|s| s.reset);
+
+            let jitter = temporal.current_jitter();
+            let clip_from_world = crate::camera::clip_from_world(&camera);
+            let clip_from_world_arr = clip_from_world.to_cols_array();
+            let prev_clip_from_world = temporal.previous_clip_from_world(clip_from_world_arr);
+            let proj = glam::Mat4::perspective_infinite_rh(camera.fov_y, camera.aspect, 0.1);
+            let fwd = camera.forward();
+            let right = camera.right();
+            let up = right.cross(fwd);
+
+            let fg_camera = crate::dlss::frame_generation::FgCameraParams {
+                view_to_clip: proj.to_cols_array(),
+                clip_from_world: clip_from_world_arr,
+                prev_clip_from_world,
+                position: camera.position.to_array(),
+                forward: fwd.to_array(),
+                up: up.to_array(),
+                right: right.to_array(),
+                near: 0.1,
+                fov_y: camera.fov_y,
+                aspect: camera.aspect,
+                jitter,
+                mvec_scale: [-(trace.width as f32), -(trace.height as f32)],
+                depth_inverted: false,
+                camera_motion_included: true,
+            };
+
+            let fg_cmd_buf = dlss.evaluate_frame_generation(
+                &mut encoder,
+                &gpu.adapter,
+                &lighting.output_color.view,
+                &trace.dlss_depth.view,
+                &trace.motion_vectors.view,
+                fg_reset,
+                fg_camera,
+            )?;
+
+            if let Some(fg_buf) = fg_cmd_buf {
+                gpu.queue.submit([encoder.finish(), fg_buf]);
+                encoder = gpu
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("FG Interpolated Blit Encoder"),
+                    });
+
+                // Blit the interpolated frame to the CURRENT swapchain texture.
+                // Don't present yet — submit_frame_system will render the egui
+                // overlay first, then present, acquire a new texture, and blit
+                // the real frame onto it (so both presented images include UI).
+                if let Some(fg_output) = dlss.fg_output() {
+                    let fg_bind_group = blit.create_blit_bind_group(&gpu.device, fg_output);
+                    {
+                        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                            label: Some("FG Interpolated Blit Pass"),
+                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                view: &output_view,
+                                resolve_target: None,
+                                depth_slice: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                    store: wgpu::StoreOp::Store,
+                                },
+                            })],
+                            depth_stencil_attachment: None,
+                            ..Default::default()
+                        });
+                        pass.set_pipeline(&blit.blit_pipeline);
+                        pass.set_bind_group(0, &fg_bind_group, &[]);
+                        pass.draw(0..3, 0..1);
+                    }
+
+                    frame.fg_needs_real_blit = true;
+                }
+            }
+        }
+    }
+    // End of DLSS scope.
+
+    // FSR fallback — only when DLSS did not produce an upscaler buffer.
     if upscaler_cmd_buf.is_none() {
         if let Some(mut fsr) = fsr {
             if fsr.output_texture().is_some() {
@@ -172,21 +280,22 @@ pub(crate) fn render_passes_system(
                     jitter,
                     16.6, // TODO: pass actual frame delta time
                 )?;
-                upscaler_cmd_buf = fsr_cmd_buf;
+                if let Some(cmd_buf) = fsr_cmd_buf {
+                    gpu.queue.submit([encoder.finish(), cmd_buf]);
+                    encoder = gpu
+                        .device
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("Post-Upscaler Encoder"),
+                        });
+                }
             }
         }
     }
 
-    if let Some(cmd_buf) = upscaler_cmd_buf {
-        gpu.queue.submit([encoder.finish(), cmd_buf]);
-        encoder = gpu
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Post-Upscaler Encoder"),
-            });
-    }
-
-    {
+    // --- Blit real frame to swapchain --------------------------------------
+    // When FG deferred the real-frame blit to submit_frame_system, the
+    // swapchain already contains the interpolated blit — skip overwriting it.
+    if !frame.fg_needs_real_blit {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Blit Pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {

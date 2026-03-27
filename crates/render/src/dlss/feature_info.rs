@@ -6,6 +6,15 @@ use std::{
 };
 use uuid::Uuid;
 
+unsafe extern "C" fn ngx_log_callback(
+    message: *const std::os::raw::c_char,
+    _logging_level: NVSDK_NGX_Logging_Level,
+    _source_component: NVSDK_NGX_Feature,
+) {
+    let msg = unsafe { std::ffi::CStr::from_ptr(message) };
+    tracing::info!(target: "ngx", "{}", msg.to_string_lossy());
+}
+
 pub fn with_feature_info<F, T>(project_id: Uuid, feature_id: NVSDK_NGX_Feature, callback: F) -> T
 where
     F: FnOnce(&NVSDK_NGX_FeatureDiscoveryInfo) -> T,
@@ -26,10 +35,9 @@ where
             Length: shared_library_paths.len() as u32,
         },
         InternalData: ptr::null_mut(),
-        // TODO: Allow configuring logging
         LoggingInfo: NVSDK_NGX_LoggingInfo {
-            LoggingCallback: None,
-            MinimumLoggingLevel: NVSDK_NGX_Logging_Level_NVSDK_NGX_LOGGING_LEVEL_OFF,
+            LoggingCallback: Some(ngx_log_callback),
+            MinimumLoggingLevel: NVSDK_NGX_Logging_Level_NVSDK_NGX_LOGGING_LEVEL_ON,
             DisableOtherLoggingSinks: false,
         },
     };

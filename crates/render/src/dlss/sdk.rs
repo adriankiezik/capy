@@ -89,6 +89,13 @@ fn check_for_updates(project_id: Uuid) {
                 NVSDK_NGX_UpdateFeature(&feature_info.Identifier, feature_info.FeatureID);
             },
         );
+        with_feature_info(
+            project_id,
+            NVSDK_NGX_Feature_NVSDK_NGX_Feature_FrameGeneration,
+            |feature_info| unsafe {
+                NVSDK_NGX_UpdateFeature(&feature_info.Identifier, feature_info.FeatureID);
+            },
+        );
     });
 }
 

@@ -13,6 +13,10 @@ pub(crate) struct GpuContext {
     pub(crate) dlss_extensions_enabled: bool,
     #[cfg(feature = "dlss")]
     pub(crate) dlss_rr_supported: bool,
+    #[cfg(feature = "dlss")]
+    pub(crate) dlss_fg_supported: bool,
+    #[cfg(feature = "dlss")]
+    pub(crate) reflex: Option<crate::dlss::reflex::ReflexContext>,
 }
 
 impl GpuContext {
@@ -32,15 +36,41 @@ impl GpuContext {
             timestamp_supported,
             dlss_extensions_enabled,
             dlss_rr_supported,
+            dlss_fg_supported,
+            reflex_ctx,
         ) = {
             let dlss_device = dlss_project_id
                 .map(|project_id| Self::try_create_dlss_device(window.clone(), project_id))
                 .transpose()?
                 .flatten();
 
-            if let Some((surface, adapter, device, queue, rr_supported)) = dlss_device {
+            if let Some((
+                surface,
+                adapter,
+                device,
+                queue,
+                rr_supported,
+                fg_supported,
+                reflex_supported,
+            )) = dlss_device
+            {
                 let ts = adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY);
-                (surface, adapter, device, queue, ts, true, rr_supported)
+                let reflex_ctx = if reflex_supported {
+                    crate::dlss::reflex::ReflexContext::new(&device)
+                } else {
+                    None
+                };
+                (
+                    surface,
+                    adapter,
+                    device,
+                    queue,
+                    ts,
+                    true,
+                    rr_supported,
+                    fg_supported,
+                    reflex_ctx,
+                )
             } else {
                 let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
                     backends: wgpu::Backends::PRIMARY,
@@ -55,7 +85,9 @@ impl GpuContext {
                         force_fallback_adapter: false,
                     }))?;
                 let (device, queue, ts) = Self::request_device(&adapter)?;
-                (surface, adapter, device, queue, ts, false, false)
+                (
+                    surface, adapter, device, queue, ts, false, false, false, None,
+                )
             }
         };
 
@@ -113,6 +145,10 @@ impl GpuContext {
             dlss_extensions_enabled,
             #[cfg(feature = "dlss")]
             dlss_rr_supported,
+            #[cfg(feature = "dlss")]
+            dlss_fg_supported,
+            #[cfg(feature = "dlss")]
+            reflex: reflex_ctx,
         })
     }
 
@@ -124,6 +160,34 @@ impl GpuContext {
         self.config.width = width;
         self.config.height = height;
         self.surface.configure(&self.device, &self.config);
+
+        // Swapchain handle changes after reconfigure — re-enable Reflex on the new one.
+        #[cfg(feature = "dlss")]
+        self.refresh_reflex_swapchain();
+    }
+
+    /// Re-enable Reflex on the current swapchain after a surface reconfigure.
+    #[cfg(feature = "dlss")]
+    pub(crate) fn refresh_reflex_swapchain(&mut self) {
+        if let Some(reflex) = &mut self.reflex {
+            if reflex.is_enabled() {
+                if let Some(sc) = crate::dlss::reflex::raw_swapchain(&self.surface) {
+                    // Disable on old (now destroyed) handle is a no-op; enable on new handle.
+                    reflex.enable(sc);
+                }
+            }
+        }
+    }
+
+    /// Set the desired maximum frame latency. Reconfigures the surface if the
+    /// value changed.
+    #[cfg(feature = "dlss")]
+    pub(crate) fn set_frame_latency(&mut self, latency: u32) {
+        if self.config.desired_maximum_frame_latency != latency {
+            self.config.desired_maximum_frame_latency = latency;
+            self.surface.configure(&self.device, &self.config);
+            self.refresh_reflex_swapchain();
+        }
     }
 
     fn request_device(adapter: &wgpu::Adapter) -> Result<(wgpu::Device, wgpu::Queue, bool)> {
@@ -164,6 +228,8 @@ impl GpuContext {
             wgpu::Device,
             wgpu::Queue,
             bool, // ray_reconstruction_supported
+            bool, // frame_generation_supported
+            bool, // reflex_supported
         )>,
     > {
         let mut feature_support = crate::dlss::FeatureSupport::default();
@@ -247,6 +313,8 @@ impl GpuContext {
                 device,
                 queue,
                 feature_support.ray_reconstruction_supported,
+                feature_support.frame_generation_supported,
+                feature_support.reflex_supported,
             ))),
             Ok(_) => {
                 tracing::warn!(

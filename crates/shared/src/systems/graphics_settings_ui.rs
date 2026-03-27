@@ -18,11 +18,18 @@ pub fn graphics_settings_ui(world: &mut World) {
 
     let mut fsr = world.get_resource::<FsrSettings>().cloned();
 
+    #[cfg(feature = "dlss")]
+    let fg_active = dlss.as_ref().is_some_and(|s| {
+        s.enabled && s.supported && s.frame_generation_enabled && s.frame_generation_supported
+    });
+    #[cfg(not(feature = "dlss"))]
+    let fg_active = false;
+
     egui::Window::new("Graphics")
         .default_open(false)
         .resizable(false)
         .show(&ctx, |ui| {
-            fps_ui(ui, dt);
+            fps_ui(ui, dt, fg_active);
 
             #[cfg(feature = "dlss")]
             let dlss_active = dlss.as_ref().is_some_and(|s| s.enabled && s.supported);
@@ -84,7 +91,7 @@ pub fn graphics_settings_ui(world: &mut World) {
     }
 }
 
-fn fps_ui(ui: &mut egui::Ui, dt: f32) {
+fn fps_ui(ui: &mut egui::Ui, dt: f32, fg_active: bool) {
     let fps = if dt > 0.0 { 1.0 / dt } else { 0.0 };
     let smooth_fps = ui.memory_mut(|mem| {
         let id = egui::Id::new("fps_smooth");
@@ -93,7 +100,14 @@ fn fps_ui(ui: &mut egui::Ui, dt: f32) {
         mem.data.insert_temp(id, smoothed);
         smoothed
     });
-    ui.label(format!("FPS: {smooth_fps:.0}"));
+    if fg_active {
+        ui.label(format!(
+            "FPS: {:.0} ({smooth_fps:.0} base)",
+            smooth_fps * 2.0
+        ));
+    } else {
+        ui.label(format!("FPS: {smooth_fps:.0}"));
+    }
 }
 
 #[cfg(feature = "dlss")]
@@ -138,6 +152,37 @@ fn dlss_ui(ui: &mut egui::Ui, dlss: &mut Option<DlssSettings>, fsr_active: bool)
             }
         }
     });
+
+    ui.separator();
+
+    // Reflex (low-latency mode)
+    if settings.reflex_supported {
+        ui.checkbox(&mut settings.reflex_enabled, "Reflex (Low Latency)");
+    } else {
+        ui.add_enabled(
+            false,
+            egui::Checkbox::new(&mut settings.reflex_enabled, "Reflex (Low Latency)"),
+        );
+        ui.weak("(not supported on this GPU)");
+    }
+
+    // Frame Generation (requires Reflex + RTX 4000+)
+    if settings.frame_generation_supported {
+        let can_enable = settings.reflex_enabled;
+        ui.add_enabled(
+            can_enable,
+            egui::Checkbox::new(&mut settings.frame_generation_enabled, "Frame Generation"),
+        );
+        if !can_enable {
+            ui.weak("(requires Reflex)");
+        }
+    } else {
+        ui.add_enabled(
+            false,
+            egui::Checkbox::new(&mut settings.frame_generation_enabled, "Frame Generation"),
+        );
+        ui.weak("(not supported — requires RTX 4000+)");
+    }
 
     true
 }

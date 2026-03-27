@@ -9,11 +9,11 @@ pub(crate) fn render_ui_overlay(
     encoder: &mut wgpu::CommandEncoder,
     output_view: &wgpu::TextureView,
 ) -> Result<(), BevyError> {
-    let Some(output) = capy_ui::render_output(world) else {
+    let Some(mut output) = capy_ui::render_output(world) else {
         return Ok(());
     };
 
-    capy_ui::render_egui_overlay(
+    let result = capy_ui::render_egui_overlay(
         world,
         device,
         queue,
@@ -21,5 +21,14 @@ pub(crate) fn render_ui_overlay(
         encoder,
         output_view,
         &output,
-    )
+    );
+
+    // Re-insert with cleared texture deltas so a second render pass
+    // (e.g. FG double-present) can draw the same primitives without
+    // re-uploading or double-freeing textures.
+    output.textures_delta.set.clear();
+    output.textures_delta.free.clear();
+    world.insert_non_send_resource(output);
+
+    result
 }
