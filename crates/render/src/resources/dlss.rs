@@ -283,6 +283,7 @@ impl DlssPipeline {
         self.rr_output_texture.as_ref()
     }
 
+    #[allow(dead_code)]
     pub(crate) fn configure_ray_reconstruction(
         &mut self,
         settings: &DlssSettings,

@@ -3,13 +3,6 @@ use bevy_ecs::resource::Resource;
 pub const MATERIAL_PALETTE_SIZE: usize = capy_core::MATERIAL_PALETTE_SIZE;
 pub const DEFAULT_RENDER_SCALE: f32 = 1.0;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum AoMode {
-    #[default]
-    ScreenSpace,
-    RayTraced,
-}
-
 #[derive(Resource, Clone, Debug)]
 pub struct RendererSettings {
     pub sun_direction: [f32; 3],
@@ -30,8 +23,6 @@ pub struct RendererSettings {
     pub ao_intensity: f32,
     pub ao_samples: u32,
     pub ao_steps: u32,
-    pub ao_mode: AoMode,
-    pub ao_rays: u32,
 
     pub vegetation_enabled: bool,
     pub vegetation_density: f32,
@@ -82,8 +73,6 @@ impl Default for RendererSettings {
             ao_intensity: 1.0,
             ao_samples: 4,
             ao_steps: 4,
-            ao_mode: AoMode::default(),
-            ao_rays: 4,
             vegetation_enabled: true,
             vegetation_density: 1.0,
             vegetation_max_distance: 4000.0,

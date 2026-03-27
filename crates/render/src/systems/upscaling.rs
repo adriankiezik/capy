@@ -6,7 +6,7 @@ use crate::resources::{
 };
 
 #[cfg(feature = "dlss")]
-use crate::resources::{AoMode, DlssPipeline, DlssSettings};
+use crate::resources::{DlssPipeline, DlssSettings};
 
 pub(crate) fn init_upscaling(world: &mut World) {
     world.insert_resource(TemporalCameraState::default());
@@ -36,11 +36,6 @@ pub(crate) fn update_upscaling_system(world: &mut World) {
     #[cfg(feature = "dlss")]
     {
         let dlss_settings = world.get_resource::<DlssSettings>().cloned();
-        let (ao_mode, ao_enabled) = world
-            .get_resource::<RendererSettings>()
-            .map_or((AoMode::ScreenSpace, false), |s| {
-                (s.ao_mode, s.ao_intensity > 0.0)
-            });
         let (device, queue, adapter, dlss_extensions_enabled, rr_hw_supported) = {
             let gpu = world.non_send_resource::<GpuContext>();
             (
@@ -58,31 +53,8 @@ pub(crate) fn update_upscaling_system(world: &mut World) {
             let was_sr_active = dlss.output_texture().is_some();
             let was_rr_active = dlss.rr_output_texture().is_some();
             match dlss_settings.as_ref() {
-                Some(settings)
-                    if settings.enabled
-                        && ao_mode == AoMode::RayTraced
-                        && ao_enabled
-                        && rr_hw_supported =>
-                {
-                    // Deactivate SR if it was active (RR replaces SR)
-                    if was_sr_active {
-                        // SR will be deactivated inside configure_ray_reconstruction
-                    }
-                    if let Some((rr_resolution, recreated)) = dlss.configure_ray_reconstruction(
-                        settings,
-                        &device,
-                        &queue,
-                        [output_width, output_height],
-                    ) {
-                        render_resolution = (rr_resolution[0], rr_resolution[1]);
-                        reset_temporal |= recreated || settings.reset;
-                        dlss_active = true;
-                    } else if was_rr_active || was_sr_active {
-                        reset_temporal = true;
-                    }
-                }
                 Some(settings) => {
-                    // Normal SR path — deactivate RR if it was active
+                    // Use DLSS super-resolution only; RR is intentionally disabled.
                     if was_rr_active {
                         dlss.deactivate_ray_reconstruction();
                         reset_temporal = true;

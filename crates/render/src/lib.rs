@@ -18,9 +18,9 @@ pub use camera::{create_camera_buffer, write_camera_buffer};
 pub use error::{RenderError, Result};
 pub use plugins::RenderPlugin;
 pub use resources::{
-    AoMode, ComputePassCallback, ComputePassCallbacks, ComputePassEncode, ComputePassPostSubmit,
-    GpuAccess, MATERIAL_PALETTE_SIZE, PreparedVoxelSceneUpload, RenderOverlayCallback,
-    RenderOverlayCallbacks, RendererSettings, SharedVoxelBuffers,
+    ComputePassCallback, ComputePassCallbacks, ComputePassEncode, ComputePassPostSubmit, GpuAccess,
+    MATERIAL_PALETTE_SIZE, PreparedVoxelSceneUpload, RenderOverlayCallback, RenderOverlayCallbacks,
+    RendererSettings, SharedVoxelBuffers,
 };
 #[cfg(feature = "dlss")]
 pub use resources::{DlssQualityMode, DlssSettings};

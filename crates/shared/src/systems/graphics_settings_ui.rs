@@ -4,7 +4,7 @@ use capy_render::RendererSettings;
 use capy_ui::EguiContext;
 
 #[cfg(feature = "dlss")]
-use capy_render::{AoMode, DlssQualityMode, DlssSettings};
+use capy_render::{DlssQualityMode, DlssSettings};
 
 use capy_render::{FsrQualityMode, FsrSettings};
 
@@ -52,9 +52,6 @@ pub fn graphics_settings_ui(world: &mut World) {
             });
 
             ui.collapsing("Ambient Occlusion", |ui| {
-                #[cfg(feature = "dlss")]
-                ao_settings_ui(ui, &mut settings, &dlss);
-                #[cfg(not(feature = "dlss"))]
                 ao_settings_ui(ui, &mut settings);
             });
 
@@ -224,8 +221,7 @@ fn render_scale_ui(ui: &mut egui::Ui, settings: &mut RendererSettings) {
     settings.render_scale = scale;
 }
 
-#[cfg(feature = "dlss")]
-fn ao_settings_ui(ui: &mut egui::Ui, settings: &mut RendererSettings, dlss: &Option<DlssSettings>) {
+fn ao_settings_ui(ui: &mut egui::Ui, settings: &mut RendererSettings) {
     let mut enabled = settings.ao_intensity > 0.0;
     if ui.checkbox(&mut enabled, "Enabled").changed() {
         settings.ao_intensity = if enabled { 1.0 } else { 0.0 };
@@ -234,59 +230,10 @@ fn ao_settings_ui(ui: &mut egui::Ui, settings: &mut RendererSettings, dlss: &Opt
         return;
     }
 
-    // Show AO mode selector when DLSS + Ray Reconstruction are available
-    let rr_available = dlss
-        .as_ref()
-        .is_some_and(|d| d.enabled && d.supported && d.ray_reconstruction_supported);
-
-    if rr_available {
-        ui.horizontal(|ui| {
-            ui.label("Mode:");
-            if ui
-                .selectable_label(settings.ao_mode == AoMode::ScreenSpace, "Screen-Space")
-                .clicked()
-            {
-                settings.ao_mode = AoMode::ScreenSpace;
-            }
-            if ui
-                .selectable_label(
-                    settings.ao_mode == AoMode::RayTraced,
-                    "Ray-Traced (unstable)",
-                )
-                .clicked()
-            {
-                settings.ao_mode = AoMode::RayTraced;
-            }
-        });
-    } else if settings.ao_mode == AoMode::RayTraced {
-        // Force back to screen-space if hardware doesn't support RR
-        settings.ao_mode = AoMode::ScreenSpace;
-    }
-
-    if settings.ao_mode == AoMode::RayTraced {
-        settings.ao_radius = 128.0;
-        ui.add(egui::Slider::new(&mut settings.ao_intensity, 0.1..=3.0).text("intensity"));
-        ui.add(egui::Slider::new(&mut settings.ao_rays, 1..=8).text("rays"));
-    } else {
-        ui.add(egui::Slider::new(&mut settings.ao_radius, 0.5..=8.0).text("radius"));
-        ui.add(egui::Slider::new(&mut settings.ao_intensity, 0.1..=4.0).text("intensity"));
-        ui.add(egui::Slider::new(&mut settings.ao_samples, 1..=16).text("samples"));
-        ui.add(egui::Slider::new(&mut settings.ao_steps, 1..=16).text("steps"));
-    }
-}
-
-#[cfg(not(feature = "dlss"))]
-fn ao_settings_ui(ui: &mut egui::Ui, settings: &mut RendererSettings) {
-    let mut enabled = settings.ao_intensity > 0.0;
-    if ui.checkbox(&mut enabled, "Enabled").changed() {
-        settings.ao_intensity = if enabled { 1.0 } else { 0.0 };
-    }
-    if enabled {
-        ui.add(egui::Slider::new(&mut settings.ao_radius, 0.5..=8.0).text("radius"));
-        ui.add(egui::Slider::new(&mut settings.ao_intensity, 0.1..=4.0).text("intensity"));
-        ui.add(egui::Slider::new(&mut settings.ao_samples, 1..=16).text("samples"));
-        ui.add(egui::Slider::new(&mut settings.ao_steps, 1..=16).text("steps"));
-    }
+    ui.add(egui::Slider::new(&mut settings.ao_radius, 0.5..=8.0).text("radius"));
+    ui.add(egui::Slider::new(&mut settings.ao_intensity, 0.1..=4.0).text("intensity"));
+    ui.add(egui::Slider::new(&mut settings.ao_samples, 1..=16).text("samples"));
+    ui.add(egui::Slider::new(&mut settings.ao_steps, 1..=16).text("steps"));
 }
 
 fn vegetation_ui(ui: &mut egui::Ui, settings: &mut RendererSettings) {

@@ -12,8 +12,6 @@ mod lighting;
 mod render_overlay_callbacks;
 mod render_resolution;
 mod renderer_settings;
-#[cfg(feature = "dlss")]
-pub(crate) mod rtao;
 mod shared_voxel_buffers;
 mod temporal_camera;
 pub(crate) mod trace;
@@ -39,11 +37,7 @@ pub(crate) use lighting::LightingPipeline;
 pub use render_overlay_callbacks::{RenderOverlayCallback, RenderOverlayCallbacks};
 pub(crate) use render_resolution::RenderResolution;
 pub(crate) use renderer_settings::compute_scaled_resolution;
-pub use renderer_settings::{
-    AoMode, DEFAULT_RENDER_SCALE, MATERIAL_PALETTE_SIZE, RendererSettings,
-};
-#[cfg(feature = "dlss")]
-pub(crate) use rtao::RtaoPipeline;
+pub use renderer_settings::{DEFAULT_RENDER_SCALE, MATERIAL_PALETTE_SIZE, RendererSettings};
 pub use shared_voxel_buffers::SharedVoxelBuffers;
 pub(crate) use temporal_camera::TemporalCameraState;
 pub(crate) use trace_stats_reporter::TraceStatsReporter;

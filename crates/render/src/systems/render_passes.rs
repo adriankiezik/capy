@@ -3,12 +3,12 @@ use bevy_ecs::system::{NonSendMut, Res, ResMut};
 
 use crate::resources::TemporalCameraState;
 use crate::resources::trace::TracePipeline;
-#[cfg(feature = "dlss")]
-use crate::resources::{AoMode, DlssPipeline, DlssSettings, RendererSettings, RtaoPipeline};
 use crate::resources::{
     BlitPipeline, FrameInProgress, FsrPipeline, FsrSettings, GpuContext, GpuProfiler, GtaoPipeline,
     LightingPipeline,
 };
+#[cfg(feature = "dlss")]
+use crate::resources::{DlssPipeline, DlssSettings};
 
 pub(crate) fn render_passes_system(
     gpu: NonSendMut<GpuContext>,
@@ -19,8 +19,6 @@ pub(crate) fn render_passes_system(
     temporal: Res<TemporalCameraState>,
     #[cfg(feature = "dlss")] dlss: Option<NonSendMut<DlssPipeline>>,
     #[cfg(feature = "dlss")] mut dlss_settings: Option<ResMut<DlssSettings>>,
-    #[cfg(feature = "dlss")] rtao: Option<NonSendMut<RtaoPipeline>>,
-    #[cfg(feature = "dlss")] renderer_settings: Option<Res<RendererSettings>>,
     fsr: Option<NonSendMut<FsrPipeline>>,
     mut fsr_settings: Option<ResMut<FsrSettings>>,
     mut frame: NonSendMut<FrameInProgress>,
@@ -71,51 +69,6 @@ pub(crate) fn render_passes_system(
     }
     trace.copy_stats_to_readback(&mut encoder);
 
-    #[cfg(feature = "dlss")]
-    let use_rtao = renderer_settings
-        .as_ref()
-        .is_some_and(|s| s.ao_mode == AoMode::RayTraced && s.ao_intensity > 0.0)
-        && rtao.is_some();
-
-    #[cfg(feature = "dlss")]
-    if use_rtao {
-        if let Some(ref rtao) = rtao {
-            rtao.update_params(
-                &gpu.queue,
-                renderer_settings.as_deref().unwrap_or(&Default::default()),
-                temporal.frame_index(),
-            );
-            let ts = gpu_profiler.pass_indices("ao");
-            let ts_writes = ts.map(|(b, e)| wgpu::ComputePassTimestampWrites {
-                query_set: gpu_profiler.query_set(),
-                beginning_of_pass_write_index: Some(b),
-                end_of_pass_write_index: Some(e),
-            });
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("RTAO Pass"),
-                timestamp_writes: ts_writes,
-            });
-            pass.set_pipeline(&rtao.compute_pipeline);
-            pass.set_bind_group(0, &rtao.bind_group, &[]);
-            pass.dispatch_workgroups(rtao.width.div_ceil(8), rtao.height.div_ceil(8), 1);
-        }
-    } else {
-        let ts = gpu_profiler.pass_indices("ao");
-        let ts_writes = ts.map(|(b, e)| wgpu::ComputePassTimestampWrites {
-            query_set: gpu_profiler.query_set(),
-            beginning_of_pass_write_index: Some(b),
-            end_of_pass_write_index: Some(e),
-        });
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("GTAO Pass"),
-            timestamp_writes: ts_writes,
-        });
-        pass.set_pipeline(&gtao.compute_pipeline);
-        pass.set_bind_group(0, &gtao.bind_group, &[]);
-        pass.dispatch_workgroups(gtao.width.div_ceil(8), gtao.height.div_ceil(8), 1);
-    }
-
-    #[cfg(not(feature = "dlss"))]
     {
         let ts = gpu_profiler.pass_indices("ao");
         let ts_writes = ts.map(|(b, e)| wgpu::ComputePassTimestampWrites {

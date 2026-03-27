@@ -43,7 +43,7 @@ pub enum StressPattern {
     Checkerboard3D,
     /// Random 30% fill — worst-case DAG (no dedup), cache thrashing.
     RandomNoise,
-    /// Solid block with spherical cavities — stresses RTAO interior rays.
+    /// Solid block with spherical cavities — stresses interior ray traversal.
     SwissCheese,
     /// Sparse thin columns — defeats mip skip.
     ThinPillars,

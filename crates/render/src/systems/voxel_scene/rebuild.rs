@@ -5,8 +5,6 @@ use crate::RenderError;
 use crate::resources::GpuAccess;
 use crate::resources::trace::TracePipeline;
 use crate::resources::voxel_scene::{PreparedVoxelSceneUpload, VoxelSceneBuffers};
-#[cfg(feature = "dlss")]
-use crate::resources::{RtaoPipeline, SharedVoxelBuffers};
 
 pub fn prepare_voxel_scene_upload(
     gpu: &GpuAccess,
@@ -43,20 +41,6 @@ pub fn apply_prepared_voxel_scene_upload(
         }
         if let Some(trace) = trace {
             world.insert_non_send_resource(trace);
-        }
-
-        // Rebind RTAO pipeline — it holds voxel scene buffer references (bindings 0-5).
-        #[cfg(feature = "dlss")]
-        {
-            let mut rtao = world.remove_non_send_resource::<RtaoPipeline>();
-            if let Some(ref mut rtao) = rtao {
-                let trace = world.non_send_resource::<TracePipeline>();
-                let voxels = world.resource::<SharedVoxelBuffers>();
-                rtao.rebind(&device, &trace.gbuf_depth, &trace.gbuf_normal, voxels);
-            }
-            if let Some(rtao) = rtao {
-                world.insert_non_send_resource(rtao);
-            }
         }
     }
 

@@ -5,8 +5,6 @@ mod init_gpu;
 pub(crate) mod lighting;
 mod render_passes;
 mod resize;
-#[cfg(feature = "dlss")]
-pub(crate) mod rtao;
 mod submit_frame;
 pub(crate) mod trace;
 mod upscaling;

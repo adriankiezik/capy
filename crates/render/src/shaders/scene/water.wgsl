@@ -1,4 +1,5 @@
-// Water rendering utilities: noise-based animated normals, Fresnel, absorption, refraction.
+// Water rendering utilities: animated normals, Fresnel, absorption, foam.
+// Depends on: lib/noise.wgsl (hash2, noise2d, fbm2, fbm2_lod)
 
 // ---- per-thread water stats (accumulated into TraceStats via atomicAdd) ----
 var<private> trace_stats_water_pixels: u32;
@@ -13,51 +14,6 @@ var<private> trace_stats_water_normal_evals: u32;       // water_normal() calls 
 var<private> trace_stats_water_sky_evals: u32;           // sky_color() calls for reflection
 var<private> trace_stats_water_normal_lod: u32;          // water pixels using reduced-octave or flat normal
 var<private> trace_stats_water_shadow_skipped: u32;      // water pixels where shadow ray was skipped (distance)
-
-// ---- simple hash-based noise (no texture dependency) ----
-
-fn hash2(p: vec2<f32>) -> f32 {
-    var p3 = fract(vec3<f32>(p.x, p.y, p.x) * 0.1031);
-    p3 += dot(p3, p3.yzx + 33.33);
-    return fract((p3.x + p3.y) * p3.z);
-}
-
-fn noise2d(p: vec2<f32>) -> f32 {
-    let i = floor(p);
-    let f = fract(p);
-    let u = f * f * (3.0 - 2.0 * f);
-
-    let a = hash2(i + vec2<f32>(0.0, 0.0));
-    let b = hash2(i + vec2<f32>(1.0, 0.0));
-    let c = hash2(i + vec2<f32>(0.0, 1.0));
-    let d = hash2(i + vec2<f32>(1.0, 1.0));
-
-    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
-}
-
-fn fbm2(p: vec2<f32>) -> f32 {
-    var val = 0.0;
-    var amp = 0.5;
-    var pos = p;
-    for (var i = 0; i < 3; i++) {
-        val += amp * noise2d(pos);
-        amp *= 0.5;
-        pos *= 2.01;
-    }
-    return val;
-}
-
-fn fbm2_lod(p: vec2<f32>, octaves: i32) -> f32 {
-    var val = 0.0;
-    var amp = 0.5;
-    var pos = p;
-    for (var i = 0; i < octaves; i++) {
-        val += amp * noise2d(pos);
-        amp *= 0.5;
-        pos *= 2.01;
-    }
-    return val;
-}
 
 // ---- pixelation: snap world XZ to a grid so water matches voxel aesthetics ----
 
@@ -119,7 +75,7 @@ fn water_foam(world_xz: vec2<f32>, time: f32, underwater_depth: f32) -> f32 {
     let n2 = fbm2(p2);
 
     // Combine noises: foam appears where combined noise exceeds a depth-dependent threshold.
-    // Shallower water → lower threshold → more foam coverage.
+    // Shallower water -> lower threshold -> more foam coverage.
     let combined = n1 * 0.6 + n2 * 0.4;
     let threshold = mix(0.25, 0.55, 1.0 - depth_fade);
     let foam = smoothstep(threshold, threshold + 0.15, combined) * depth_fade;
@@ -141,7 +97,7 @@ const WATER_ABSORPTION: vec3<f32> = vec3<f32>(0.03, 0.006, 0.003);
 const WATER_DEEP_COLOR: vec3<f32> = vec3<f32>(0.08, 0.25, 0.38);
 
 // Max underwater distance before absorption converges to WATER_DEEP_COLOR.
-// At depth 400: red≈0, green exp(-8)≈0.03%, blue exp(-4)≈1.8%.
+// At depth 400: red~0, green exp(-8)~0.03%, blue exp(-4)~1.8%.
 // Beyond this, the seabed color contribution is truly negligible.
 const WATER_DEEP_ABSORB_DIST: f32 = 400.0;
 
@@ -150,57 +106,10 @@ const WATER_REFL_SKIP_DIST: f32 = 2000.0;
 
 // Underwater depth beyond which grass is fully absorbed and tracing can be skipped.
 // At 10 units: red exp(-1.0)=37%, green exp(-0.2)=82%, blue exp(-0.1)=90%.
-// Grass color contribution is minor and fading fast — not worth tracing.
+// Grass color contribution is minor and fading fast -- not worth tracing.
 const WATER_GRASS_SKIP_DEPTH: f32 = 30.0;
 
 fn water_absorb(underwater_color: vec3<f32>, depth: f32) -> vec3<f32> {
     let absorption = exp(-depth * WATER_ABSORPTION);
     return underwater_color * absorption + WATER_DEEP_COLOR * (1.0 - absorption);
-}
-
-// ---- Analytical sky model (shared with lighting.wgsl) ----
-// Duplicated here so the trace shader can sample sky for water reflections.
-
-const SKY_PI: f32 = 3.14159265;
-const SKY_BR: f32 = 0.0025;
-const SKY_BM: f32 = 0.0003;
-const SKY_G: f32 = 0.98;
-const NITROGEN: vec3<f32> = vec3<f32>(0.650, 0.570, 0.475);
-
-// Pixelation grid size for sun glow (must match lighting.wgsl)
-const SUN_PIXEL_SCALE: f32 = 128.0;
-
-fn pixelate_dir(dir: vec3<f32>) -> vec3<f32> {
-    return normalize(floor(dir * SUN_PIXEL_SCALE + 0.5) / SUN_PIXEL_SCALE);
-}
-
-fn sky_color(ray_dir: vec3<f32>, sun_dir: vec3<f32>) -> vec3<f32> {
-    let pos = normalize(ray_dir);
-    let fsun = normalize(sun_dir);
-
-    let Kr = vec3<f32>(SKY_BR) / pow(NITROGEN, vec3<f32>(4.0));
-    let Km = vec3<f32>(SKY_BM) / pow(NITROGEN, vec3<f32>(0.84));
-
-    // Smooth ray for gradient
-    let mu = dot(pos, fsun);
-    let rayleigh = 3.0 / (8.0 * SKY_PI) * (1.0 + mu * mu);
-
-    // Pixelated ray for sun glow only
-    let pos_px = pixelate_dir(ray_dir);
-    let mu_px = dot(pos_px, fsun);
-
-    let mie = (Kr + Km * (1.0 - SKY_G * SKY_G) / (2.0 + SKY_G * SKY_G)
-              / pow(1.0 + SKY_G * SKY_G - 2.0 * SKY_G * mu_px, 1.5))
-              / (SKY_BR + SKY_BM);
-
-    let day_extinction = exp(
-        -exp(-((pos.y + fsun.y * 4.0) * (exp(-pos.y * 16.0) + 0.1) / 80.0) / SKY_BR)
-        * (exp(-pos.y * 16.0) + 0.1) * Kr / SKY_BR
-    ) * exp(-pos.y * exp(-pos.y * 8.0) * 4.0)
-      * exp(-pos.y * 1.3) * 1.7;
-
-    let night_extinction = vec3<f32>(1.0 - exp(fsun.y)) * 0.2;
-    let extinction = mix(day_extinction, night_extinction, -fsun.y * 0.2 + 0.5);
-
-    return rayleigh * mie * extinction;
 }
