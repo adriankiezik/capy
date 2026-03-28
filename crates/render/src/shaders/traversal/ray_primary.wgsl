@@ -11,6 +11,8 @@ fn trace_ray(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> HitResult {
     if ray_origin.y < 0.0 { return result; }
     if !chunk_dda_init(ray_origin, ray_dir) { return result; }
 
+    let grass_blade_height =
+        GRASS_BLADE_HEIGHT * render_settings.vegetation_length * render_settings.vegetation_scale;
     let max_steps = u32(max(round(render_settings.max_chunk_steps), 1.0));
     for (var i = 0u; i < max_steps; i++) {
         var do_grass = !skip_grass;
@@ -84,7 +86,7 @@ fn trace_ray(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> HitResult {
                     let voxel_t = chunk_hit.t;
                     let grass_max = select(voxel_t, min(voxel_t, dda_grass_hit.t), dda_grass_hit.hit);
                     let foliage_base_y = chunk_min.y + f32(info.foliage_y_min);
-                    let foliage_top_y = chunk_min.y + f32(info.foliage_y_max) + GRASS_BLADE_HEIGHT;
+                    let foliage_top_y = chunk_min.y + f32(info.foliage_y_max) + grass_blade_height;
                     let grass = trace_grass_ray_bounded(
                         ray_origin, dda.dir, camera.time, grass_max,
                         foliage_base_y, foliage_top_y,
@@ -107,7 +109,7 @@ fn trace_ray(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> HitResult {
             } else if do_grass && info.foliage_y_min < info.foliage_y_max {
                 let grass_max = select(1e20, dda_grass_hit.t, dda_grass_hit.hit);
                 let foliage_base_y = chunk_min.y + f32(info.foliage_y_min);
-                let foliage_top_y = chunk_min.y + f32(info.foliage_y_max) + GRASS_BLADE_HEIGHT;
+                let foliage_top_y = chunk_min.y + f32(info.foliage_y_max) + grass_blade_height;
                 let grass = trace_grass_ray_bounded(
                     ray_origin, dda.dir, camera.time, grass_max,
                     foliage_base_y, foliage_top_y,

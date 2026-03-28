@@ -1,4 +1,5 @@
 use crate::gpu_texture::GpuTexture;
+use crate::settings::TonemappingUniform;
 use crate::shader_source;
 use crate::voxel_bind_group::bgl_sampler_filtering;
 
@@ -22,6 +23,22 @@ impl BlitLayout {
                     count: None,
                 },
                 bgl_sampler_filtering(1),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size:
+                            Some(
+                                std::num::NonZero::new(
+                                    std::mem::size_of::<TonemappingUniform>() as u64
+                                )
+                                .expect("non-zero"),
+                            ),
+                    },
+                    count: None,
+                },
             ],
         });
         Self { layout }
@@ -36,6 +53,7 @@ impl BlitLayout {
         device: &wgpu::Device,
         storage_texture: &GpuTexture,
         sampler: &wgpu::Sampler,
+        tonemapping_buffer: &wgpu::Buffer,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Blit Bind Group"),
@@ -49,6 +67,10 @@ impl BlitLayout {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(sampler),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: tonemapping_buffer.as_entire_binding(),
+                },
             ],
         })
     }
@@ -59,6 +81,7 @@ pub(crate) struct BlitPipeline {
     layout: BlitLayout,
     pub(crate) blit_bind_group: wgpu::BindGroup,
     blit_sampler: wgpu::Sampler,
+    pub(crate) tonemapping_buffer: wgpu::Buffer,
     pub(crate) width: u32,
     pub(crate) height: u32,
     pub(crate) source_width: u32,
@@ -126,13 +149,22 @@ impl BlitPipeline {
             ..Default::default()
         });
 
-        let blit_bind_group = layout.bind(device, storage_texture, &blit_sampler);
+        let tonemapping_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Tonemapping Uniform"),
+            size: std::mem::size_of::<TonemappingUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let blit_bind_group =
+            layout.bind(device, storage_texture, &blit_sampler, &tonemapping_buffer);
 
         Self {
             blit_pipeline,
             layout,
             blit_bind_group,
             blit_sampler,
+            tonemapping_buffer,
             width,
             height,
             source_width: width,
@@ -148,9 +180,12 @@ impl BlitPipeline {
         device: &wgpu::Device,
         storage_texture: &GpuTexture,
     ) {
-        self.blit_bind_group = self
-            .layout
-            .bind(device, storage_texture, &self.blit_sampler);
+        self.blit_bind_group = self.layout.bind(
+            device,
+            storage_texture,
+            &self.blit_sampler,
+            &self.tonemapping_buffer,
+        );
     }
 
     /// Create a one-off bind group for blitting a different source texture
@@ -161,6 +196,7 @@ impl BlitPipeline {
         device: &wgpu::Device,
         source: &GpuTexture,
     ) -> wgpu::BindGroup {
-        self.layout.bind(device, source, &self.blit_sampler)
+        self.layout
+            .bind(device, source, &self.blit_sampler, &self.tonemapping_buffer)
     }
 }

@@ -1,13 +1,17 @@
-use bevy_ecs::system::{Res, ResMut};
+use bevy_ecs::system::{Commands, Res, ResMut};
 use capy_core::KeyCode;
 use capy_shared::FlyCameraConfig;
+use capy_ui::{EguiContext, UiEnabled};
 
 use crate::resources::{BrushShape, EditorState, EditorTool, InputEdge};
 
 pub(crate) fn shortcuts(
     edge: Res<InputEdge>,
+    egui_ctx: Res<EguiContext>,
     mut state: ResMut<EditorState>,
     mut cam_config: ResMut<FlyCameraConfig>,
+    mut commands: Commands,
+    ui_enabled: Option<Res<UiEnabled>>,
 ) {
     if edge.keys_just_pressed.contains(&KeyCode::Digit1) {
         state.active_tool = EditorTool::Place;
@@ -67,5 +71,19 @@ pub(crate) fn shortcuts(
     }
     if edge.keys_just_pressed.contains(&KeyCode::F2) {
         cam_config.move_speed = (cam_config.move_speed * 2.0).min(10000.0);
+    }
+    // F10 should always toggle UI, even when egui consumes keyboard input.
+    let f10_pressed = if ui_enabled.is_some() {
+        edge.keys_just_pressed.contains(&KeyCode::F10)
+            || egui_ctx.0.input(|i| i.key_pressed(egui::Key::F10))
+    } else {
+        edge.keys_just_pressed.contains(&KeyCode::F10)
+    };
+    if f10_pressed {
+        if ui_enabled.is_some() {
+            commands.remove_resource::<UiEnabled>();
+        } else {
+            commands.insert_resource(UiEnabled);
+        }
     }
 }

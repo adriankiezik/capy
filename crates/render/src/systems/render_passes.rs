@@ -2,7 +2,6 @@ use bevy_ecs::error::BevyError;
 use bevy_ecs::system::{NonSendMut, Res, ResMut};
 
 use crate::resources::TemporalCameraState;
-use crate::resources::trace::TracePipeline;
 use crate::resources::{
     BlitPipeline, FrameInProgress, GpuContext, GpuProfiler, GtaoPipeline, LightingPipeline,
 };
@@ -10,6 +9,8 @@ use crate::resources::{
 use crate::resources::{DlssPipeline, DlssSettings};
 #[cfg(feature = "fsr")]
 use crate::resources::{FsrPipeline, FsrSettings};
+use crate::resources::{RendererSettings, trace::TracePipeline};
+use crate::settings::TonemappingUniform;
 
 pub(crate) fn render_passes_system(
     #[cfg_attr(not(feature = "dlss"), allow(unused_mut))] mut gpu: NonSendMut<GpuContext>,
@@ -23,6 +24,7 @@ pub(crate) fn render_passes_system(
     #[cfg(feature = "dlss")] mut dlss_settings: Option<ResMut<DlssSettings>>,
     #[cfg(feature = "fsr")] fsr: Option<NonSendMut<FsrPipeline>>,
     #[cfg(feature = "fsr")] mut fsr_settings: Option<ResMut<FsrSettings>>,
+    renderer_settings: Res<RendererSettings>,
     mut frame: NonSendMut<FrameInProgress>,
     mut gpu_profiler: NonSendMut<GpuProfiler>,
 ) -> Result<(), BevyError> {
@@ -44,7 +46,7 @@ pub(crate) fn render_passes_system(
         }
     }
 
-    let mut output = match gpu.surface.get_current_texture() {
+    let output = match gpu.surface.get_current_texture() {
         Ok(output) => output,
         Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
             gpu.surface.configure(&gpu.device, &gpu.config);
@@ -54,7 +56,7 @@ pub(crate) fn render_passes_system(
         Err(error) => return Err(error.into()),
     };
 
-    let mut output_view = output
+    let output_view = output
         .texture
         .create_view(&wgpu::TextureViewDescriptor::default());
 
@@ -346,6 +348,16 @@ pub(crate) fn render_passes_system(
                 }
             }
         }
+    }
+
+    // --- Upload tonemapping settings ----------------------------------------
+    {
+        let uniform = TonemappingUniform::from_settings(
+            renderer_settings.tonemapping_mode,
+            renderer_settings.exposure,
+        );
+        gpu.queue
+            .write_buffer(&blit.tonemapping_buffer, 0, bytemuck::bytes_of(&uniform));
     }
 
     // --- Blit real frame to swapchain --------------------------------------

@@ -8,4 +8,4 @@ pub use egui_context::EguiContext;
 pub(crate) use egui_platform_state::EguiPlatformState;
 pub use egui_render_output::EguiRenderOutput;
 pub(crate) use overlay_renderer::EguiOverlayRenderer;
-pub(crate) use ui_enabled::UiEnabled;
+pub use ui_enabled::UiEnabled;

@@ -13,6 +13,8 @@ struct RenderSettingsUniform {
     max_node_steps: f32,
     vegetation_enabled: f32,
     vegetation_density: f32,
+    vegetation_length: f32,
+    vegetation_scale: f32,
     vegetation_max_distance: f32,
     vegetation_far_step_scale: f32,
     vegetation_far_reduce_start: f32,
@@ -26,6 +28,4 @@ struct RenderSettingsUniform {
     water_reflection_distance: f32,
     water_shadows: f32,
     water_shadow_distance: f32,
-    _water_pad0: f32,
-    _water_pad1: f32,
 };

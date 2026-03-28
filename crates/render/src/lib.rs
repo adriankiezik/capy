@@ -56,7 +56,7 @@ pub use plugins::RenderPlugin;
 pub use resources::{
     ComputePassCallback, ComputePassCallbacks, ComputePassEncode, ComputePassPostSubmit, GpuAccess,
     MATERIAL_PALETTE_SIZE, PreparedVoxelSceneUpload, RenderOverlayCallback, RenderOverlayCallbacks,
-    RendererSettings, SharedVoxelBuffers,
+    RendererSettings, SharedVoxelBuffers, TonemappingMode,
 };
 #[cfg(feature = "dlss")]
 pub use resources::{DlssQualityMode, DlssSettings};

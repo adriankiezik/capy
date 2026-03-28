@@ -1,6 +1,6 @@
 use bevy_ecs::world::World;
 use capy_core::FrameTime;
-use capy_render::RendererSettings;
+use capy_render::{RendererSettings, TonemappingMode};
 use capy_ui::EguiContext;
 
 #[cfg(feature = "dlss")]
@@ -89,6 +89,10 @@ pub fn graphics_settings_ui(world: &mut World) {
 
             ui.collapsing("Water", |ui| {
                 water_ui(ui, &mut settings);
+            });
+
+            ui.collapsing("Post-Processing", |ui| {
+                tonemapping_ui(ui, &mut settings);
             });
         });
 
@@ -319,7 +323,21 @@ fn vegetation_ui(ui: &mut egui::Ui, settings: &mut RendererSettings) {
         return;
     }
 
-    ui.add(egui::Slider::new(&mut settings.vegetation_density, 0.05..=1.0).text("density"));
+    ui.add(
+        egui::Slider::new(&mut settings.vegetation_density, 0.0..=4.0)
+            .text("density")
+            .fixed_decimals(2),
+    );
+    ui.add(
+        egui::Slider::new(&mut settings.vegetation_length, 0.25..=3.0)
+            .text("length")
+            .fixed_decimals(2),
+    );
+    ui.add(
+        egui::Slider::new(&mut settings.vegetation_scale, 0.25..=3.0)
+            .text("blade scale")
+            .fixed_decimals(2),
+    );
     ui.add(
         egui::Slider::new(&mut settings.vegetation_max_distance, 8.0..=10_000.0).text("distance"),
     );
@@ -373,6 +391,28 @@ fn water_ui(ui: &mut egui::Ui, settings: &mut RendererSettings) {
         ui.add(
             egui::Slider::new(&mut settings.water_shadow_distance, 100.0..=4000.0)
                 .text("shadow distance"),
+        );
+    }
+}
+
+fn tonemapping_ui(ui: &mut egui::Ui, settings: &mut RendererSettings) {
+    ui.label("Tonemapping");
+    ui.horizontal(|ui| {
+        for mode in TonemappingMode::ALL {
+            if ui
+                .selectable_label(settings.tonemapping_mode == mode, mode.label())
+                .clicked()
+            {
+                settings.tonemapping_mode = mode;
+            }
+        }
+    });
+
+    if settings.tonemapping_mode != TonemappingMode::Off {
+        ui.add(
+            egui::Slider::new(&mut settings.exposure, 0.1..=5.0)
+                .text("exposure")
+                .fixed_decimals(2),
         );
     }
 }

@@ -5,7 +5,13 @@ edition.workspace = true
 build = "build.rs"
 
 [features]
-dlss = ["dep:uuid", "dep:bitflags", "dep:bindgen", "dep:cc"]
+dlss = [
+    "dep:uuid",
+    "dep:bitflags",
+    "dep:windows",
+    "dep:bindgen",
+    "dep:cc",
+]
 fsr = ["dep:windows", "dep:windows-core", "dep:bindgen", "dep:cc", "wgpu/static-dxc"]
 
 [dependencies]

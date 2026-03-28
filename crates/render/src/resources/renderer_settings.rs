@@ -3,6 +3,42 @@ use bevy_ecs::resource::Resource;
 pub const MATERIAL_PALETTE_SIZE: usize = capy_core::MATERIAL_PALETTE_SIZE;
 pub const DEFAULT_RENDER_SCALE: f32 = 1.0;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TonemappingMode {
+    #[default]
+    Off,
+    Aces,
+    Reinhard,
+    Uncharted2,
+}
+
+impl TonemappingMode {
+    pub const ALL: [TonemappingMode; 4] = [
+        TonemappingMode::Off,
+        TonemappingMode::Aces,
+        TonemappingMode::Reinhard,
+        TonemappingMode::Uncharted2,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            TonemappingMode::Off => "Off",
+            TonemappingMode::Aces => "ACES",
+            TonemappingMode::Reinhard => "Reinhard",
+            TonemappingMode::Uncharted2 => "Uncharted 2",
+        }
+    }
+
+    pub fn as_u32(self) -> u32 {
+        match self {
+            TonemappingMode::Off => 0,
+            TonemappingMode::Aces => 1,
+            TonemappingMode::Reinhard => 2,
+            TonemappingMode::Uncharted2 => 3,
+        }
+    }
+}
+
 #[derive(Resource, Clone, Debug)]
 pub struct RendererSettings {
     pub sun_direction: [f32; 3],
@@ -26,6 +62,8 @@ pub struct RendererSettings {
 
     pub vegetation_enabled: bool,
     pub vegetation_density: f32,
+    pub vegetation_length: f32,
+    pub vegetation_scale: f32,
     pub vegetation_max_distance: f32,
     pub vegetation_far_step_scale: f32,
     pub vegetation_far_reduce_start: f32,
@@ -40,6 +78,9 @@ pub struct RendererSettings {
     pub water_reflection_distance: f32,
     pub water_shadows: bool,
     pub water_shadow_distance: f32,
+
+    pub tonemapping_mode: TonemappingMode,
+    pub exposure: f32,
 
     /// Internal render resolution as a fraction of window size.
     /// 1.0 = native, 0.5 = half resolution, 0.25 = quarter resolution.
@@ -75,6 +116,8 @@ impl Default for RendererSettings {
             ao_steps: 4,
             vegetation_enabled: true,
             vegetation_density: 1.0,
+            vegetation_length: 1.0,
+            vegetation_scale: 1.0,
             vegetation_max_distance: 4000.0,
             vegetation_far_step_scale: 4.0,
             vegetation_far_reduce_start: 500.0,
@@ -88,6 +131,8 @@ impl Default for RendererSettings {
             water_reflection_distance: 300.0,
             water_shadows: true,
             water_shadow_distance: 2000.0,
+            tonemapping_mode: TonemappingMode::default(),
+            exposure: 1.0,
             render_scale: DEFAULT_RENDER_SCALE,
         }
     }

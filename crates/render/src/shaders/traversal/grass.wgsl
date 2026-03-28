@@ -6,7 +6,7 @@
 // foliage Y range, so blades correctly occlude (and are occluded by) solid voxels.
 
 const GRASS_MATERIAL_ID: u32 = 1u;
-const GRASS_BLADE_HEIGHT: f32 = 5.0;        // height in voxel units
+const GRASS_BLADE_HEIGHT: f32 = 5.0;        // base height in voxel units
 const GRASS_PIXEL_SIZE: f32 = 0.5;          // size of each pixel square on the blade
 
 // Foliage bitmap sentinel values (must match Rust FOLIAGE_BITMAP_ALL / FOLIAGE_BITMAP_NONE).
@@ -29,11 +29,19 @@ const GRASS_WIND_BASE_LEAN: f32 = 0.25;     // constant lean in wind direction
 // Darkening/lightening factors applied to the foliage material color.
 const GRASS_COLOR_DARKEN: f32  = 0.75;  // base is 75% of material color
 const GRASS_COLOR_LIGHTEN: f32 = 1.0;   // tip matches material color
+const MAX_DENSITY_INSTANCES: i32 = 4;
 
 fn grass_hash(x: i32, z: i32) -> u32 {
     var h = u32(x) * 374761393u + u32(z) * 668265263u;
     h = (h ^ (h >> 13u)) * 1274126177u;
     h = h ^ (h >> 16u);
+    return h;
+}
+
+fn grass_hash_instance(x: i32, z: i32, instance: u32) -> u32 {
+    var h = grass_hash(x, z) ^ (instance * 0x9E3779B9u + 0x85EBCA6Bu);
+    h = (h ^ (h >> 16u)) * 2246822519u;
+    h = h ^ (h >> 13u);
     return h;
 }
 
@@ -102,11 +110,19 @@ fn trace_grass_ray_bounded(
 
     let vegetation_density = render_settings.vegetation_density;
     let vegetation_max_distance = render_settings.vegetation_max_distance;
+    let vegetation_length = render_settings.vegetation_length;
+    let vegetation_scale = render_settings.vegetation_scale;
     if foliage_y_bands == 0u || vegetation_density <= 0.0 || vegetation_max_distance <= 0.0 {
         return result;
     }
 
-    let density_threshold_u = u32(vegetation_density * 65535.0);
+    let vegetation_density_clamped = clamp(vegetation_density, 0.0, f32(MAX_DENSITY_INSTANCES));
+    let density_full_instances = i32(floor(vegetation_density_clamped));
+    let density_extra = vegetation_density_clamped - f32(density_full_instances);
+    let density_extra_threshold_u = u32(density_extra * 65535.0);
+
+    let blade_height_base = GRASS_BLADE_HEIGHT * vegetation_length * vegetation_scale;
+    let blade_pixel_size = GRASS_PIXEL_SIZE * vegetation_scale;
     let far_step_scale = render_settings.vegetation_far_step_scale;
     let far_reduce_start = render_settings.vegetation_far_reduce_start;
     let near_search_radius = i32(render_settings.vegetation_near_search_radius);
@@ -143,7 +159,7 @@ fn trace_grass_ray_bounded(
     // Precompute wind time terms (constant for all blades)
     let wind_dir = GRASS_WIND_DIR_NORM;
     let time_wind = time * GRASS_WIND_SPEED;
-    let wind_bend_scale = GRASS_WIND_STRENGTH * GRASS_PIXEL_SIZE;
+    let wind_bend_scale = GRASS_WIND_STRENGTH * blade_pixel_size;
 
     // One XZ traversal for the chunk segment, clipped to the coarse foliage slab.
     let trace_t_start = max(max(t_enter_slab, chunk_t_enter), 0.0);
@@ -189,76 +205,84 @@ fn trace_grass_ray_bounded(
                     let gx = center_gx + dx;
                     let gz = center_gz + dz;
 
-                    let h = grass_hash(gx, gz);
-                    if (h & 0xFFFFu) > density_threshold_u {
-                        continue;
+                    for (var density_layer = 0; density_layer < MAX_DENSITY_INSTANCES; density_layer++) {
+                        if density_layer > density_full_instances {
+                            break;
+                        }
+
+                        let h = grass_hash_instance(gx, gz, u32(density_layer));
+                        if density_layer == density_full_instances {
+                            if density_extra <= 0.0 || (h & 0xFFFFu) > density_extra_threshold_u {
+                                continue;
+                            }
+                        }
+
+                        let jitter_x = f32((h >> 8u) & 0xFFu) / 255.0;
+                        let jitter_z = f32((h >> 16u) & 0xFFu) / 255.0;
+
+                        let blade_world_x = f32(gx) + jitter_x;
+                        let blade_world_z = f32(gz) + jitter_z;
+                        let rel_x = blade_world_x - chunk_min_x;
+                        let rel_z = blade_world_z - chunk_min_z;
+                        if rel_x < 0.0 || rel_x >= chunk_size || rel_z < 0.0 || rel_z >= chunk_size {
+                            continue;
+                        }
+
+                        let blade_xz = vec2<f32>(blade_world_x, blade_world_z);
+                        let t_plane = dot(blade_xz - ray_o_xz, blade_n_xz) * inv_denom;
+                        if t_plane < trace_t_start || t_plane >= best_t || t_plane >= trace_t_end {
+                            continue;
+                        }
+
+                        let height_var = 0.7 + 0.3 * f32((h >> 24u) & 0xFFu) / 255.0;
+                        let blade_h = blade_height_base * height_var;
+
+                        let ray_y_at_plane = ray_origin.y + ray_dir.y * t_plane;
+                        if ENABLE_TRACE_STATS { trace_stats_grass_y_checks += 1u; }
+                        let local_y = ray_y_at_plane - default_surface_y;
+                        if local_y < 0.0 || local_y >= blade_h {
+                            if ENABLE_TRACE_STATS { trace_stats_grass_y_rejects += 1u; }
+                            continue;
+                        }
+
+                        let n_pixels = i32(ceil(blade_h / blade_pixel_size));
+                        let pixel_y = i32(floor(local_y / blade_pixel_size));
+
+                        let blade_width = blade_pixel_size;
+
+                        let phase = f32(h & 0xFFu) / 255.0 * 6.2831;
+                        let height_frac = f32(pixel_y) / f32(max(n_pixels - 1, 1));
+
+                        var sq_center_xz = blade_xz;
+                        if t_plane < render_settings.vegetation_animation_distance {
+                            // Per-blade frequency variation
+                            let freq_var = 0.8 + 0.4 * f32((h >> 12u) & 0xFFu) / 255.0;
+                            let blade_time = time_wind * freq_var;
+
+                            // Spatial wind: coarse gust waves + fine turbulence
+                            let coarse_travel = dot(blade_xz, wind_dir) * 0.05;
+                            let fine_travel = dot(blade_xz, wind_dir) * 0.4;
+
+                            // Gust envelope + local flutter (asymmetric: never sways backward)
+                            let gust_envelope = max(sin(blade_time * 0.6 - coarse_travel), 0.0);
+                            let flutter = sin(blade_time * 2.3 - fine_travel + phase);
+                            let sway = GRASS_WIND_BASE_LEAN + gust_envelope * (0.5 + 0.5 * flutter);
+
+                            // Cubic bend: stiffer base, flexible tip
+                            let bend = height_frac * height_frac * height_frac;
+                            let wind_factor = sway * bend * wind_bend_scale;
+                            sq_center_xz = blade_xz + blade_t_xz * wind_factor;
+                        }
+                        let p_xz = ray_o_xz + ray_d_xz * t_plane;
+                        let local_tang = dot(p_xz - sq_center_xz, blade_t_xz);
+                        if abs(local_tang) > blade_width * 0.5 {
+                            continue;
+                        }
+
+                        best_t = t_plane;
+                        best_height_frac = height_frac;
+                        best_color_var = 0.92 + 0.08 * f32((h >> 4u) & 0xFFu) / 255.0;
                     }
-
-                    let jitter_x = f32((h >> 8u) & 0xFFu) / 255.0;
-                    let jitter_z = f32((h >> 16u) & 0xFFu) / 255.0;
-
-                    let blade_world_x = f32(gx) + jitter_x;
-                    let blade_world_z = f32(gz) + jitter_z;
-                    let rel_x = blade_world_x - chunk_min_x;
-                    let rel_z = blade_world_z - chunk_min_z;
-                    if rel_x < 0.0 || rel_x >= chunk_size || rel_z < 0.0 || rel_z >= chunk_size {
-                        continue;
-                    }
-
-                    let blade_xz = vec2<f32>(blade_world_x, blade_world_z);
-                    let t_plane = dot(blade_xz - ray_o_xz, blade_n_xz) * inv_denom;
-                    if t_plane < trace_t_start || t_plane >= best_t || t_plane >= trace_t_end {
-                        continue;
-                    }
-
-                    let height_var = 0.7 + 0.3 * f32((h >> 24u) & 0xFFu) / 255.0;
-                    let blade_h = GRASS_BLADE_HEIGHT * height_var;
-
-                    let ray_y_at_plane = ray_origin.y + ray_dir.y * t_plane;
-                    if ENABLE_TRACE_STATS { trace_stats_grass_y_checks += 1u; }
-                    let local_y = ray_y_at_plane - default_surface_y;
-                    if local_y < 0.0 || local_y >= blade_h {
-                        if ENABLE_TRACE_STATS { trace_stats_grass_y_rejects += 1u; }
-                        continue;
-                    }
-
-                    let n_pixels = i32(ceil(blade_h / GRASS_PIXEL_SIZE));
-                    let pixel_y = i32(floor(local_y / GRASS_PIXEL_SIZE));
-
-                    let blade_width = GRASS_PIXEL_SIZE;
-
-                    let phase = f32(h & 0xFFu) / 255.0 * 6.2831;
-                    let height_frac = f32(pixel_y) / f32(max(n_pixels - 1, 1));
-
-                    var sq_center_xz = blade_xz;
-                    if t_plane < render_settings.vegetation_animation_distance {
-                        // Per-blade frequency variation
-                        let freq_var = 0.8 + 0.4 * f32((h >> 12u) & 0xFFu) / 255.0;
-                        let blade_time = time_wind * freq_var;
-
-                        // Spatial wind: coarse gust waves + fine turbulence
-                        let coarse_travel = dot(blade_xz, wind_dir) * 0.05;
-                        let fine_travel = dot(blade_xz, wind_dir) * 0.4;
-
-                        // Gust envelope + local flutter (asymmetric: never sways backward)
-                        let gust_envelope = max(sin(blade_time * 0.6 - coarse_travel), 0.0);
-                        let flutter = sin(blade_time * 2.3 - fine_travel + phase);
-                        let sway = GRASS_WIND_BASE_LEAN + gust_envelope * (0.5 + 0.5 * flutter);
-
-                        // Cubic bend: stiffer base, flexible tip
-                        let bend = height_frac * height_frac * height_frac;
-                        let wind_factor = sway * bend * wind_bend_scale;
-                        sq_center_xz = blade_xz + blade_t_xz * wind_factor;
-                    }
-                    let p_xz = ray_o_xz + ray_d_xz * t_plane;
-                    let local_tang = dot(p_xz - sq_center_xz, blade_t_xz);
-                    if abs(local_tang) > blade_width * 0.5 {
-                        continue;
-                    }
-
-                    best_t = t_plane;
-                    best_height_frac = height_frac;
-                    best_color_var = 0.92 + 0.08 * f32((h >> 4u) & 0xFFu) / 255.0;
                 }
             }
         }
@@ -363,7 +387,9 @@ fn trace_grass_ray_bounded(
                     tile_skip = true;
                 } else {
                     tile_min_y = foliage_base_y + f32(tile_data & 0xFFFFu) + 1.0;
-                    tile_max_y_top = foliage_base_y + f32(tile_data >> 16u) + 1.0 + GRASS_BLADE_HEIGHT;
+                    tile_max_y_top =
+                        foliage_base_y + f32(tile_data >> 16u) + 1.0
+                        + blade_height_base;
                     let ray_y_enter = ray_origin.y + ray_dir.y * tile_t_enter;
                     let ray_y_exit  = ray_origin.y + ray_dir.y * tile_t_exit;
                     let ray_y_lo = min(ray_y_enter, ray_y_exit);
@@ -408,96 +434,104 @@ fn trace_grass_ray_bounded(
                             let gx = center_gx + dx;
                             let gz = center_gz + dz;
 
-                            let h = grass_hash(gx, gz);
-                            if (h & 0xFFFFu) > density_threshold_u {
-                                continue;
+                            for (var density_layer = 0; density_layer < MAX_DENSITY_INSTANCES; density_layer++) {
+                                if density_layer > density_full_instances {
+                                    break;
+                                }
+
+                                let h = grass_hash_instance(gx, gz, u32(density_layer));
+                                if density_layer == density_full_instances {
+                                    if density_extra <= 0.0 || (h & 0xFFFFu) > density_extra_threshold_u {
+                                        continue;
+                                    }
+                                }
+
+                                let jitter_x = f32((h >> 8u) & 0xFFu) / 255.0;
+                                let jitter_z = f32((h >> 16u) & 0xFFu) / 255.0;
+
+                                let blade_world_x = f32(gx) + jitter_x;
+                                let blade_world_z = f32(gz) + jitter_z;
+                                let rel_x = blade_world_x - chunk_min_x;
+                                let rel_z = blade_world_z - chunk_min_z;
+                                if rel_x < 0.0 || rel_x >= chunk_size || rel_z < 0.0 || rel_z >= chunk_size {
+                                    continue;
+                                }
+
+                                let blade_xz = vec2<f32>(blade_world_x, blade_world_z);
+                                let t_plane = dot(blade_xz - ray_o_xz, blade_n_xz) * inv_denom;
+                                if t_plane < tile_t_enter || t_plane >= best_t || t_plane >= tile_t_exit {
+                                    continue;
+                                }
+
+                                let ray_y_at_plane = ray_origin.y + ray_dir.y * t_plane;
+
+                                // Pre-heightmap Y bounds check using tile range (register only)
+                                if ray_y_at_plane < tile_min_y || ray_y_at_plane > tile_max_y_top {
+                                    if ENABLE_TRACE_STATS { trace_stats_grass_tile_rejects += 1u; }
+                                    continue;
+                                }
+
+                                let height_var = 0.7 + 0.3 * f32((h >> 24u) & 0xFFu) / 255.0;
+                                let blade_h = blade_height_base * height_var;
+
+                                var col_surface_y = default_surface_y;
+                                if ENABLE_TRACE_STATS { trace_stats_grass_heightmap_reads += 1u; }
+                                let local_x_u = u32(rel_x);
+                                let local_z_u = u32(rel_z);
+                                let col_idx = local_x_u + local_z_u * chunk_size_u;
+                                let word = chunk_pool[bmp_offset + col_idx / 2u];
+                                let height_off = (word >> ((col_idx % 2u) * 16u)) & 0xFFFFu;
+                                if height_off == 0xFFFFu {
+                                    if ENABLE_TRACE_STATS { trace_stats_grass_column_misses += 1u; }
+                                    continue;
+                                }
+                                col_surface_y = foliage_base_y + f32(height_off) + 1.0;
+
+                                if ENABLE_TRACE_STATS { trace_stats_grass_y_checks += 1u; }
+                                let local_y = ray_y_at_plane - col_surface_y;
+                                if local_y < 0.0 || local_y >= blade_h {
+                                    if ENABLE_TRACE_STATS { trace_stats_grass_y_rejects += 1u; }
+                                    continue;
+                                }
+
+                                let n_pixels = i32(ceil(blade_h / blade_pixel_size));
+                                let pixel_y = i32(floor(local_y / blade_pixel_size));
+
+                                let blade_width = blade_pixel_size;
+
+                                let phase = f32(h & 0xFFu) / 255.0 * 6.2831;
+                                let height_frac = f32(pixel_y) / f32(max(n_pixels - 1, 1));
+
+                                var sq_center_xz = blade_xz;
+                                if t_plane < render_settings.vegetation_animation_distance {
+                                    // Per-blade frequency variation
+                                    let freq_var = 0.8 + 0.4 * f32((h >> 12u) & 0xFFu) / 255.0;
+                                    let blade_time = time_wind * freq_var;
+
+                                    // Spatial wind: coarse gust waves + fine turbulence
+                                    let coarse_travel = dot(blade_xz, wind_dir) * 0.05;
+                                    let fine_travel = dot(blade_xz, wind_dir) * 0.4;
+
+                                    // Gust envelope + local flutter (asymmetric: never sways backward)
+                                    let gust_envelope = max(sin(blade_time * 0.6 - coarse_travel), 0.0);
+                                    let flutter = sin(blade_time * 2.3 - fine_travel + phase);
+                                    let sway = GRASS_WIND_BASE_LEAN + gust_envelope * (0.5 + 0.5 * flutter);
+
+                                    // Cubic bend: stiffer base, flexible tip
+                                    let bend = height_frac * height_frac * height_frac;
+                                    let wind_factor = sway * bend * wind_bend_scale;
+                                    sq_center_xz = blade_xz + blade_t_xz * wind_factor;
+                                }
+                                let p_xz = ray_o_xz + ray_d_xz * t_plane;
+                                let local_tang = dot(p_xz - sq_center_xz, blade_t_xz);
+                                if abs(local_tang) > blade_width * 0.5 {
+                                    continue;
+                                }
+
+                                best_t = t_plane;
+                                best_height_frac = height_frac;
+                                best_color_var = 0.92 + 0.08 * f32((h >> 4u) & 0xFFu) / 255.0;
                             }
-
-                            let jitter_x = f32((h >> 8u) & 0xFFu) / 255.0;
-                            let jitter_z = f32((h >> 16u) & 0xFFu) / 255.0;
-
-                            let blade_world_x = f32(gx) + jitter_x;
-                            let blade_world_z = f32(gz) + jitter_z;
-                            let rel_x = blade_world_x - chunk_min_x;
-                            let rel_z = blade_world_z - chunk_min_z;
-                            if rel_x < 0.0 || rel_x >= chunk_size || rel_z < 0.0 || rel_z >= chunk_size {
-                                continue;
-                            }
-
-                            let blade_xz = vec2<f32>(blade_world_x, blade_world_z);
-                            let t_plane = dot(blade_xz - ray_o_xz, blade_n_xz) * inv_denom;
-                            if t_plane < tile_t_enter || t_plane >= best_t || t_plane >= tile_t_exit {
-                                continue;
-                            }
-
-                            let ray_y_at_plane = ray_origin.y + ray_dir.y * t_plane;
-
-                            // Pre-heightmap Y bounds check using tile range (register only)
-                            if ray_y_at_plane < tile_min_y || ray_y_at_plane > tile_max_y_top {
-                                if ENABLE_TRACE_STATS { trace_stats_grass_tile_rejects += 1u; }
-                                continue;
-                            }
-
-                            let height_var = 0.7 + 0.3 * f32((h >> 24u) & 0xFFu) / 255.0;
-                            let blade_h = GRASS_BLADE_HEIGHT * height_var;
-
-                            var col_surface_y = default_surface_y;
-                            if ENABLE_TRACE_STATS { trace_stats_grass_heightmap_reads += 1u; }
-                            let local_x_u = u32(rel_x);
-                            let local_z_u = u32(rel_z);
-                            let col_idx = local_x_u + local_z_u * chunk_size_u;
-                            let word = chunk_pool[bmp_offset + col_idx / 2u];
-                            let height_off = (word >> ((col_idx % 2u) * 16u)) & 0xFFFFu;
-                            if height_off == 0xFFFFu {
-                                if ENABLE_TRACE_STATS { trace_stats_grass_column_misses += 1u; }
-                                continue;
-                            }
-                            col_surface_y = foliage_base_y + f32(height_off) + 1.0;
-
-                            if ENABLE_TRACE_STATS { trace_stats_grass_y_checks += 1u; }
-                            let local_y = ray_y_at_plane - col_surface_y;
-                            if local_y < 0.0 || local_y >= blade_h {
-                                if ENABLE_TRACE_STATS { trace_stats_grass_y_rejects += 1u; }
-                                continue;
-                            }
-
-                            let n_pixels = i32(ceil(blade_h / GRASS_PIXEL_SIZE));
-                            let pixel_y = i32(floor(local_y / GRASS_PIXEL_SIZE));
-
-                            let blade_width = GRASS_PIXEL_SIZE;
-
-                            let phase = f32(h & 0xFFu) / 255.0 * 6.2831;
-                            let height_frac = f32(pixel_y) / f32(max(n_pixels - 1, 1));
-
-                            var sq_center_xz = blade_xz;
-                            if t_plane < render_settings.vegetation_animation_distance {
-                                // Per-blade frequency variation
-                                let freq_var = 0.8 + 0.4 * f32((h >> 12u) & 0xFFu) / 255.0;
-                                let blade_time = time_wind * freq_var;
-
-                                // Spatial wind: coarse gust waves + fine turbulence
-                                let coarse_travel = dot(blade_xz, wind_dir) * 0.05;
-                                let fine_travel = dot(blade_xz, wind_dir) * 0.4;
-
-                                // Gust envelope + local flutter (asymmetric: never sways backward)
-                                let gust_envelope = max(sin(blade_time * 0.6 - coarse_travel), 0.0);
-                                let flutter = sin(blade_time * 2.3 - fine_travel + phase);
-                                let sway = GRASS_WIND_BASE_LEAN + gust_envelope * (0.5 + 0.5 * flutter);
-
-                                // Cubic bend: stiffer base, flexible tip
-                                let bend = height_frac * height_frac * height_frac;
-                                let wind_factor = sway * bend * wind_bend_scale;
-                                sq_center_xz = blade_xz + blade_t_xz * wind_factor;
-                            }
-                            let p_xz = ray_o_xz + ray_d_xz * t_plane;
-                            let local_tang = dot(p_xz - sq_center_xz, blade_t_xz);
-                            if abs(local_tang) > blade_width * 0.5 {
-                                continue;
-                            }
-
-                            best_t = t_plane;
-                            best_height_frac = height_frac;
-                            best_color_var = 0.92 + 0.08 * f32((h >> 4u) & 0xFFu) / 255.0;
                         }
                     }
                 }

@@ -18,14 +18,19 @@ pub(crate) fn game_startup(world: &mut World) -> Result<(), BevyError> {
     let canonical = capy_world::generate_flat_baked()?;
 
     let mesh = match capy_assets::load_world_chunks(world_dir, &fs) {
-        Ok(edited) if !edited.is_empty() => VoxelMeshData::with_edited_chunks(
-            &canonical,
-            &edited,
-            GRID_DIM_XZ,
-            capy_world::CHUNK_XZ,
-            capy_world::CHUNK_Y,
-            MATERIAL_COLORS,
-        ),
+        Ok(mut edited) if !edited.is_empty() => {
+            for baked in edited.values_mut() {
+                capy_world::recompute_foliage_bitmap(baked, capy_world::CHUNK_XZ);
+            }
+            VoxelMeshData::with_edited_chunks(
+                &canonical,
+                &edited,
+                GRID_DIM_XZ,
+                capy_world::CHUNK_XZ,
+                capy_world::CHUNK_Y,
+                MATERIAL_COLORS,
+            )
+        }
         _ => VoxelMeshData::from_flat_world(
             &canonical,
             GRID_DIM_XZ,

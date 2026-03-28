@@ -43,6 +43,10 @@ pub(crate) fn editor_startup(world: &mut World) -> Result<(), BevyError> {
         info!("[stress] baked {n} chunks in {:.2}s", elapsed.as_secs_f64());
     }
 
+    for baked in edited_baked.values_mut() {
+        capy_world::recompute_foliage_bitmap(baked, capy_world::CHUNK_XZ);
+    }
+
     let mesh = if edited_baked.is_empty() {
         VoxelMeshData::from_flat_world(
             &canonical,

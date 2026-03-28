@@ -1,6 +1,6 @@
 use bytemuck::{Pod, Zeroable};
 
-use crate::resources::{MATERIAL_PALETTE_SIZE, RendererSettings};
+use crate::resources::{MATERIAL_PALETTE_SIZE, RendererSettings, TonemappingMode};
 
 pub(crate) fn to_render_settings_uniform(settings: &RendererSettings) -> RenderSettingsUniform {
     let mut material_colors = [[0.0f32; 4]; MATERIAL_PALETTE_SIZE];
@@ -40,7 +40,9 @@ pub(crate) fn to_render_settings_uniform(settings: &RendererSettings) -> RenderS
         } else {
             0.0
         },
-        vegetation_density: settings.vegetation_density.clamp(0.0, 1.0),
+        vegetation_density: settings.vegetation_density.clamp(0.0, 4.0),
+        vegetation_length: settings.vegetation_length.clamp(0.25, 3.0),
+        vegetation_scale: settings.vegetation_scale.clamp(0.25, 3.0),
         vegetation_max_distance: settings.vegetation_max_distance.max(0.0),
         vegetation_far_step_scale: settings.vegetation_far_step_scale.max(1.0),
         vegetation_far_reduce_start: settings.vegetation_far_reduce_start.max(0.0),
@@ -58,8 +60,6 @@ pub(crate) fn to_render_settings_uniform(settings: &RendererSettings) -> RenderS
         water_reflection_distance: settings.water_reflection_distance.max(0.0),
         water_shadows: if settings.water_shadows { 1.0 } else { 0.0 },
         water_shadow_distance: settings.water_shadow_distance.max(0.0),
-        _water_pad0: 0.0,
-        _water_pad1: 0.0,
     }
 }
 
@@ -80,6 +80,8 @@ pub(crate) struct RenderSettingsUniform {
     max_node_steps: f32,
     vegetation_enabled: f32,
     vegetation_density: f32,
+    vegetation_length: f32,
+    vegetation_scale: f32,
     vegetation_max_distance: f32,
     vegetation_far_step_scale: f32,
     vegetation_far_reduce_start: f32,
@@ -93,11 +95,31 @@ pub(crate) struct RenderSettingsUniform {
     water_reflection_distance: f32,
     water_shadows: f32,
     water_shadow_distance: f32,
-    _water_pad0: f32,
-    _water_pad1: f32,
 }
 
 const _: () = assert!(std::mem::size_of::<RenderSettingsUniform>() == 16512);
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub(crate) struct TonemappingUniform {
+    pub(crate) mode: u32,
+    pub(crate) exposure: f32,
+    pub(crate) _pad0: u32,
+    pub(crate) _pad1: u32,
+}
+
+const _: () = assert!(std::mem::size_of::<TonemappingUniform>() == 16);
+
+impl TonemappingUniform {
+    pub(crate) fn from_settings(mode: TonemappingMode, exposure: f32) -> Self {
+        Self {
+            mode: mode.as_u32(),
+            exposure: exposure.max(0.01),
+            _pad0: 0,
+            _pad1: 0,
+        }
+    }
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]

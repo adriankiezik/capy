@@ -100,5 +100,10 @@ pub fn end_frame(world: &mut World, window: &WinitWindow) {
 }
 
 pub fn render_output(world: &mut World) -> Option<EguiRenderOutput> {
+    if world.get_resource::<UiEnabled>().is_none() {
+        // Drop stale output immediately when UI is toggled off.
+        let _ = world.remove_non_send_resource::<EguiRenderOutput>();
+        return None;
+    }
     world.remove_non_send_resource::<EguiRenderOutput>()
 }

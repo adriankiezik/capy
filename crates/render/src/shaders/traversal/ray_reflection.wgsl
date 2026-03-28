@@ -20,6 +20,8 @@ fn trace_reflection_ray(
     if !chunk_dda_init(ray_origin, ray_dir) { return refl; }
 
     let do_grass = render_settings.vegetation_enabled > 0.5;
+    let grass_blade_height =
+        GRASS_BLADE_HEIGHT * render_settings.vegetation_length * render_settings.vegetation_scale;
     var best_grass: GrassHit;
     best_grass.hit = false;
     best_grass.t = 1e20;
@@ -49,7 +51,7 @@ fn trace_reflection_ray(
                     let voxel_t = chunk_hit.t;
                     let grass_max = select(voxel_t, min(voxel_t, best_grass.t), best_grass.hit);
                     let foliage_base_y = chunk_min.y + f32(info.foliage_y_min);
-                    let foliage_top_y = chunk_min.y + f32(info.foliage_y_max) + GRASS_BLADE_HEIGHT;
+                    let foliage_top_y = chunk_min.y + f32(info.foliage_y_max) + grass_blade_height;
                     let grass = trace_grass_ray_bounded(
                         ray_origin, dda.dir, camera.time, grass_max,
                         foliage_base_y, foliage_top_y,
@@ -89,7 +91,7 @@ fn trace_reflection_ray(
             } else if do_grass && info.foliage_y_min < info.foliage_y_max {
                 let grass_max = select(1e20, best_grass.t, best_grass.hit);
                 let foliage_base_y = chunk_min.y + f32(info.foliage_y_min);
-                let foliage_top_y = chunk_min.y + f32(info.foliage_y_max) + GRASS_BLADE_HEIGHT;
+                let foliage_top_y = chunk_min.y + f32(info.foliage_y_max) + grass_blade_height;
                 let grass = trace_grass_ray_bounded(
                     ray_origin, dda.dir, camera.time, grass_max,
                     foliage_base_y, foliage_top_y,

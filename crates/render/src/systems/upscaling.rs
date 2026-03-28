@@ -34,7 +34,7 @@ pub(crate) fn update_upscaling_system(world: &mut World) {
     let mut reset_temporal = false;
 
     // Track whether DLSS is active so FSR can be skipped when DLSS takes priority.
-    #[cfg(feature = "dlss")]
+    #[cfg(all(feature = "dlss", feature = "fsr"))]
     let mut dlss_active = false;
 
     #[cfg(feature = "dlss")]
@@ -74,7 +74,10 @@ pub(crate) fn update_upscaling_system(world: &mut World) {
                     ) {
                         render_resolution = (dlss_resolution[0], dlss_resolution[1]);
                         reset_temporal |= recreated || settings.reset;
-                        dlss_active = true;
+                        #[cfg(feature = "fsr")]
+                        {
+                            dlss_active = true;
+                        }
                     } else if was_sr_active {
                         reset_temporal = true;
                     }
