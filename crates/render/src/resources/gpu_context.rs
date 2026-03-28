@@ -168,11 +168,12 @@ impl GpuContext {
 
     /// Set the desired maximum frame latency. Reconfigures the surface if the
     /// value changed.
-    #[cfg(feature = "dlss")]
+    #[cfg(any(feature = "dlss", feature = "fsr"))]
     pub(crate) fn set_frame_latency(&mut self, latency: u32) {
         if self.config.desired_maximum_frame_latency != latency {
             self.config.desired_maximum_frame_latency = latency;
             self.surface.configure(&self.device, &self.config);
+            #[cfg(feature = "dlss")]
             self.refresh_reflex_swapchain();
         }
     }

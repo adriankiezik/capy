@@ -2,6 +2,7 @@ use bevy_ecs::resource::Resource;
 use glam::UVec2;
 
 use crate::Result;
+use crate::fsr::FsrFgCameraParams;
 use crate::gpu_texture::GpuTexture;
 
 #[derive(Resource, Clone, Debug)]
@@ -91,9 +92,10 @@ pub(crate) struct FsrPipeline {
     output_size: [u32; 2],
     /// Incremented whenever the output texture is recreated.
     generation: u32,
-    // Reserved for future FSR 3 frame generation.
-    // fg_context: Option<crate::fsr::frame_generation::FsrFrameGeneration>,
-    // fg_output: Option<GpuTexture>,
+    /// FSR 3 Frame Generation context.
+    fg_context: Option<crate::fsr::FsrFrameGeneration>,
+    /// Texture that receives the interpolated frame from Frame Generation.
+    fg_output: Option<GpuTexture>,
 }
 
 impl FsrPipeline {
@@ -104,6 +106,8 @@ impl FsrPipeline {
             quality: FsrQualityMode::NativeAA,
             output_size: [0, 0],
             generation: 0,
+            fg_context: None,
+            fg_output: None,
         }
     }
 
@@ -176,6 +180,9 @@ impl FsrPipeline {
                     self.generation = self.generation.wrapping_add(1);
                     let render_resolution = context.render_resolution().to_array();
                     self.context = Some(context);
+                    // Invalidate the FG context so it gets recreated at the
+                    // new resolution in configure_frame_generation().
+                    self.deactivate_frame_generation();
                     return Some((render_resolution, true));
                 }
                 Err(error) => {
@@ -225,11 +232,140 @@ impl FsrPipeline {
         Ok(true)
     }
 
+    // --- Frame Generation ---------------------------------------------------
+
+    pub(crate) fn fg_output(&self) -> Option<&GpuTexture> {
+        self.fg_output.as_ref()
+    }
+
+    /// Create or destroy the Frame Generation context based on current settings.
+    ///
+    /// Returns `true` when FG is active after this call.
+    pub(crate) fn configure_frame_generation(
+        &mut self,
+        settings: &FsrSettings,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        adapter: &wgpu::Adapter,
+        output_size: [u32; 2],
+    ) -> bool {
+        // FG requires: the upscaler producing frames, user opted in, and hw support.
+        let upscaler_active = self.context.is_some();
+        let should_enable = settings.frame_generation_enabled
+            && settings.frame_generation_supported
+            && upscaler_active;
+
+        if !should_enable {
+            self.deactivate_frame_generation();
+            return false;
+        }
+
+        let recreate = self.fg_context.is_none() || self.output_size != output_size;
+
+        if recreate {
+            let render_res = self
+                .render_resolution()
+                .map(|r| UVec2::new(r[0], r[1]))
+                .unwrap_or(UVec2::ONE);
+            let display_size = UVec2::new(output_size[0], output_size[1]);
+            tracing::info!(
+                "FSR FG: creating context — display={display_size}, render={render_res}"
+            );
+
+            match crate::fsr::FsrFrameGeneration::new(
+                device,
+                queue,
+                adapter,
+                display_size,
+                render_res,
+            ) {
+                Ok(fg) => {
+                    let fg_usages = wgpu::TextureUsages::STORAGE_BINDING
+                        | wgpu::TextureUsages::TEXTURE_BINDING
+                        | wgpu::TextureUsages::COPY_DST
+                        | wgpu::TextureUsages::RENDER_ATTACHMENT;
+                    self.fg_output = Some(GpuTexture::new_2d(
+                        device,
+                        "FSR FG Interpolated",
+                        output_size[0],
+                        output_size[1],
+                        wgpu::TextureFormat::Rgba8Unorm,
+                        fg_usages,
+                    ));
+                    self.fg_context = Some(fg);
+                    self.generation = self.generation.wrapping_add(1);
+                }
+                Err(error) => {
+                    tracing::warn!("Failed to create FSR Frame Generation context: {error}");
+                    self.deactivate_frame_generation();
+                    return false;
+                }
+            }
+        }
+
+        true
+    }
+
+    /// Evaluate Frame Generation using the current upscaler output as input.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn evaluate_frame_generation(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        queue: &wgpu::Queue,
+        depth: &wgpu::TextureView,
+        motion_vectors: &wgpu::TextureView,
+        reset: bool,
+        jitter: [f32; 2],
+        delta_time_ms: f32,
+        camera: FsrFgCameraParams,
+    ) -> Result<bool> {
+        let (Some(fg), Some(upscaler_output), Some(fg_output)) =
+            (&mut self.fg_context, &self.output_texture, &self.fg_output)
+        else {
+            return Ok(false);
+        };
+
+        let render_size = self
+            .context
+            .as_ref()
+            .map(|ctx| ctx.render_resolution())
+            .unwrap_or(UVec2::ONE);
+
+        let produced = fg.evaluate(
+            encoder,
+            queue,
+            &upscaler_output.view,
+            depth,
+            motion_vectors,
+            &fg_output.view,
+            reset,
+            glam::Vec2::new(-jitter[0], -jitter[1]),
+            render_size,
+            delta_time_ms,
+            &camera,
+        )?;
+
+        Ok(produced)
+    }
+
+    pub(crate) fn deactivate_frame_generation(&mut self) {
+        let was_active = self.fg_context.is_some();
+        self.fg_context = None;
+        self.fg_output = None;
+        if was_active {
+            self.generation = self.generation.wrapping_add(1);
+        }
+    }
+
+    // --- Deactivation -------------------------------------------------------
+
     pub(crate) fn deactivate(&mut self) {
-        let was_active = self.context.is_some();
+        let was_active = self.context.is_some() || self.fg_context.is_some();
         self.context = None;
         self.output_texture = None;
         self.output_size = [0, 0];
+        self.fg_context = None;
+        self.fg_output = None;
         if was_active {
             self.generation = self.generation.wrapping_add(1);
         }

@@ -289,6 +289,62 @@ pub(crate) fn render_passes_system(
                     16.6, // TODO: pass actual frame delta time
                 )?;
             }
+
+            // --- FSR Frame Generation ---
+            if fsr.fg_output().is_some() {
+                let fg_reset = fsr_settings.as_ref().is_some_and(|s| s.reset);
+                let jitter = temporal.current_jitter();
+                let fwd = camera.forward();
+                let right = camera.right();
+                let up = right.cross(fwd);
+
+                let fg_camera = crate::fsr::FsrFgCameraParams {
+                    position: camera.position.to_array(),
+                    forward: fwd.to_array(),
+                    up: up.to_array(),
+                    right: right.to_array(),
+                    near: 0.1,
+                    fov_y: camera.fov_y,
+                };
+
+                let fg_ok = fsr.evaluate_frame_generation(
+                    &mut encoder,
+                    &gpu.queue,
+                    &trace.dlss_depth.view,
+                    &trace.motion_vectors.view,
+                    fg_reset,
+                    jitter,
+                    16.6, // TODO: pass actual frame delta time
+                    fg_camera,
+                )?;
+
+                if fg_ok {
+                    if let Some(fg_output) = fsr.fg_output() {
+                        let fg_bind_group = blit.create_blit_bind_group(&gpu.device, fg_output);
+                        {
+                            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                                label: Some("FSR FG Interpolated Blit Pass"),
+                                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                    view: &output_view,
+                                    resolve_target: None,
+                                    depth_slice: None,
+                                    ops: wgpu::Operations {
+                                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                        store: wgpu::StoreOp::Store,
+                                    },
+                                })],
+                                depth_stencil_attachment: None,
+                                ..Default::default()
+                            });
+                            pass.set_pipeline(&blit.blit_pipeline);
+                            pass.set_bind_group(0, &fg_bind_group, &[]);
+                            pass.draw(0..3, 0..1);
+                        }
+
+                        frame.fg_needs_real_blit = true;
+                    }
+                }
+            }
         }
     }
 

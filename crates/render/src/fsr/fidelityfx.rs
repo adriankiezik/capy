@@ -31,6 +31,22 @@ pub(crate) const FFX_API_DISPATCH_DESC_TYPE_UPSCALE: u64 = 0x0001_0001;
 pub(crate) const FFX_API_QUERY_DESC_TYPE_UPSCALE_GETJITTERPHASECOUNT: u64 = 0x0001_0004;
 pub(crate) const FFX_API_QUERY_DESC_TYPE_UPSCALE_GETJITTEROFFSET: u64 = 0x0001_0005;
 
+// Frame Generation (FFX_API_EFFECT_ID_FRAMEGENERATION = 0x0002_0000)
+pub(crate) const FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION: u64 = 0x0002_0001;
+pub(crate) const FFX_API_CONFIGURE_DESC_TYPE_FRAMEGENERATION: u64 = 0x0002_0002;
+pub(crate) const FFX_API_DISPATCH_DESC_TYPE_FRAMEGENERATION: u64 = 0x0002_0003;
+pub(crate) const FFX_API_DISPATCH_DESC_TYPE_FRAMEGENERATION_PREPARE_V2: u64 = 0x0002_000c;
+pub(crate) const FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION_VERSION: u64 = 0x0002_000e;
+
+/// FSR 3 Frame Generation version: 4.0.0 — `(4 << 22) | (0 << 12) | 0`.
+pub(crate) const FFX_FRAMEGENERATION_VERSION: u32 = 4 << 22;
+
+/// No swapchain proxy — we handle present/double-present ourselves.
+pub(crate) const FFX_FRAMEGENERATION_FLAG_NO_SWAPCHAIN_CONTEXT_NOTIFY: u32 = 1 << 3;
+
+/// Surface format constant for RGBA8 Unorm (matches `FfxApiSurfaceFormat` enum).
+pub(crate) const FFX_API_SURFACE_FORMAT_R8G8B8A8_UNORM: u32 = 10;
+
 // ---------------------------------------------------------------------------
 // DX12 backend descriptor — manually defined because bindgen cannot resolve
 // the `ID3D12Device*` field and skips the struct entirely.
@@ -84,6 +100,17 @@ pub(crate) unsafe fn dispatch(
     desc: *const ffxDispatchDescHeader,
 ) -> Result<(), FsrError> {
     FsrError::from_ffx(unsafe { ffxDispatch(context, desc) })
+}
+
+/// Configure a FidelityFX context (e.g. enable/disable frame generation).
+///
+/// # Safety
+/// `desc` must point to a valid configure descriptor matching the context type.
+pub(crate) unsafe fn configure(
+    context: *mut ffxContext,
+    desc: *const ffxConfigureDescHeader,
+) -> Result<(), FsrError> {
+    FsrError::from_ffx(unsafe { ffxConfigure(context, desc) })
 }
 
 /// Query information from a context (e.g. jitter phase count / offset).

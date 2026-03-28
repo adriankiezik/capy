@@ -378,6 +378,9 @@ impl FsrContext {
 
             let mut resource: ffx::FfxApiResource = core::mem::zeroed();
             resource.resource = raw_resource.as_raw() as *mut core::ffi::c_void;
+            resource.description.type_ =
+                ffx::FfxApiResourceType_FFX_API_RESOURCE_TYPE_TEXTURE2D as u32;
+            resource.description.format = super::wgpu_to_ffx_format(texture.format());
             resource.description.__bindgen_anon_1.width = size.x;
             resource.description.__bindgen_anon_2.height = size.y;
             resource.description.__bindgen_anon_3.depth = 1;

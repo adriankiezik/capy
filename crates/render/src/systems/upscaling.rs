@@ -207,9 +207,39 @@ pub(crate) fn update_upscaling_system(world: &mut World) {
             }
         }
 
+        // Configure FSR Frame Generation (after upscaler configuration).
+        if !skip_fsr {
+            let mut fsr_fg_active = false;
+            {
+                let fsr_settings_clone = world.get_resource::<FsrSettings>().cloned();
+                if let (Some(mut fsr), Some(settings)) = (
+                    world.get_non_send_resource_mut::<FsrPipeline>(),
+                    fsr_settings_clone.as_ref(),
+                ) {
+                    fsr_fg_active = fsr.configure_frame_generation(
+                        settings,
+                        &device,
+                        &queue,
+                        &adapter,
+                        [output_width, output_height],
+                    );
+                }
+            }
+
+            // Bump frame latency when FG is active (double present needs headroom).
+            // Only set from FSR when DLSS isn't already managing it.
+            {
+                let mut gpu = world.non_send_resource_mut::<GpuContext>();
+                let target_latency = if fsr_fg_active { 3 } else { 2 };
+                gpu.set_frame_latency(target_latency);
+            }
+        }
+
         let is_dx12 = world.non_send_resource::<GpuContext>().backend == wgpu::Backend::Dx12;
         if let Some(mut settings) = world.get_resource_mut::<FsrSettings>() {
             settings.supported = fsr_supported || is_dx12;
+            // FG is available on any DX12 GPU when the upscaler is active.
+            settings.frame_generation_supported = is_dx12;
             if reset_temporal {
                 settings.reset = true;
             }

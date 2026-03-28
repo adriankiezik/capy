@@ -21,11 +21,20 @@ pub fn graphics_settings_ui(world: &mut World) {
     let mut fsr = world.get_resource::<FsrSettings>().cloned();
 
     #[cfg(feature = "dlss")]
-    let fg_active = dlss.as_ref().is_some_and(|s| {
+    let dlss_fg_active = dlss.as_ref().is_some_and(|s| {
         s.enabled && s.supported && s.frame_generation_enabled && s.frame_generation_supported
     });
     #[cfg(not(feature = "dlss"))]
-    let fg_active = false;
+    let dlss_fg_active = false;
+
+    #[cfg(feature = "fsr")]
+    let fsr_fg_active = fsr.as_ref().is_some_and(|s| {
+        s.enabled && s.supported && s.frame_generation_enabled && s.frame_generation_supported
+    });
+    #[cfg(not(feature = "fsr"))]
+    let fsr_fg_active = false;
+
+    let fg_active = dlss_fg_active || fsr_fg_active;
 
     egui::Window::new("Graphics")
         .default_open(false)
@@ -240,6 +249,19 @@ fn fsr_ui(ui: &mut egui::Ui, fsr: &mut Option<FsrSettings>, dlss_active: bool) -
             }
         }
     });
+
+    ui.separator();
+
+    // Frame Generation
+    if settings.frame_generation_supported {
+        ui.checkbox(&mut settings.frame_generation_enabled, "Frame Generation");
+    } else {
+        ui.add_enabled(
+            false,
+            egui::Checkbox::new(&mut settings.frame_generation_enabled, "Frame Generation"),
+        );
+        ui.weak("(not supported — DX12 backend required)");
+    }
 
     true
 }

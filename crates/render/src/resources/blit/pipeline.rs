@@ -155,7 +155,7 @@ impl BlitPipeline {
 
     /// Create a one-off bind group for blitting a different source texture
     /// (e.g. Frame Generation interpolated output).
-    #[cfg_attr(not(feature = "dlss"), allow(dead_code))]
+    #[cfg_attr(not(any(feature = "dlss", feature = "fsr")), allow(dead_code))]
     pub(crate) fn create_blit_bind_group(
         &self,
         device: &wgpu::Device,
