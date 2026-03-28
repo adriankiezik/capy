@@ -1,17 +1,21 @@
 use bevy_ecs::world::World;
 
 use crate::resources::{
-    DEFAULT_RENDER_SCALE, FsrPipeline, FsrSettings, GpuContext, RenderResolution, RendererSettings,
-    TemporalCameraState, compute_scaled_resolution,
+    DEFAULT_RENDER_SCALE, GpuContext, RenderResolution, RendererSettings, TemporalCameraState,
+    compute_scaled_resolution,
 };
 
 #[cfg(feature = "dlss")]
 use crate::resources::{DlssPipeline, DlssSettings};
 
+#[cfg(feature = "fsr")]
+use crate::resources::{FsrPipeline, FsrSettings};
+
 pub(crate) fn init_upscaling(world: &mut World) {
     world.insert_resource(TemporalCameraState::default());
     #[cfg(feature = "dlss")]
     world.insert_non_send_resource(DlssPipeline::new());
+    #[cfg(feature = "fsr")]
     world.insert_non_send_resource(FsrPipeline::new());
     update_upscaling_system(world);
 }
@@ -150,6 +154,7 @@ pub(crate) fn update_upscaling_system(world: &mut World) {
         }
     }
 
+    #[cfg(feature = "fsr")]
     {
         // Skip FSR when DLSS is active (DLSS takes priority).
         #[cfg(feature = "dlss")]
@@ -158,9 +163,9 @@ pub(crate) fn update_upscaling_system(world: &mut World) {
         let skip_fsr = false;
 
         let fsr_settings = world.get_resource::<FsrSettings>().cloned();
-        let (device, adapter) = {
+        let (device, queue, adapter) = {
             let gpu = world.non_send_resource::<GpuContext>();
-            (gpu.device.clone(), gpu.adapter.clone())
+            (gpu.device.clone(), gpu.queue.clone(), gpu.adapter.clone())
         };
 
         let mut fsr_supported = false;
@@ -178,6 +183,7 @@ pub(crate) fn update_upscaling_system(world: &mut World) {
                         if let Some((fsr_resolution, recreated)) = fsr.configure(
                             settings,
                             &device,
+                            &queue,
                             &adapter,
                             [output_width, output_height],
                         ) {
@@ -201,14 +207,9 @@ pub(crate) fn update_upscaling_system(world: &mut World) {
             }
         }
 
-        let is_vulkan = world
-            .non_send_resource::<GpuContext>()
-            .adapter
-            .get_info()
-            .backend
-            == wgpu::Backend::Vulkan;
+        let is_dx12 = world.non_send_resource::<GpuContext>().backend == wgpu::Backend::Dx12;
         if let Some(mut settings) = world.get_resource_mut::<FsrSettings>() {
-            settings.supported = fsr_supported || is_vulkan;
+            settings.supported = fsr_supported || is_dx12;
             if reset_temporal {
                 settings.reset = true;
             }

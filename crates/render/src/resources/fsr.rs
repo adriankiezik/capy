@@ -11,6 +11,10 @@ pub struct FsrSettings {
     pub reset: bool,
     /// Set by the render crate after probing hardware.
     pub supported: bool,
+    /// Reserved for future FSR 3 frame generation.
+    pub frame_generation_enabled: bool,
+    /// Set by the render crate after probing hardware.
+    pub frame_generation_supported: bool,
 }
 
 impl Default for FsrSettings {
@@ -21,6 +25,8 @@ impl Default for FsrSettings {
             quality: FsrQualityMode::Auto,
             reset: false,
             supported: false,
+            frame_generation_enabled: false,
+            frame_generation_supported: false,
         }
     }
 }
@@ -85,6 +91,9 @@ pub(crate) struct FsrPipeline {
     output_size: [u32; 2],
     /// Incremented whenever the output texture is recreated.
     generation: u32,
+    // Reserved for future FSR 3 frame generation.
+    // fg_context: Option<crate::fsr::frame_generation::FsrFrameGeneration>,
+    // fg_output: Option<GpuTexture>,
 }
 
 impl FsrPipeline {
@@ -112,9 +121,9 @@ impl FsrPipeline {
             .map(|ctx| ctx.render_resolution().to_array())
     }
 
-    pub(crate) fn suggested_jitter(&self, frame_index: u32) -> Option<[f32; 2]> {
+    pub(crate) fn suggested_jitter(&mut self, frame_index: u32) -> Option<[f32; 2]> {
         self.context
-            .as_ref()
+            .as_mut()
             .map(|ctx| ctx.suggested_jitter(frame_index).to_array())
     }
 
@@ -122,6 +131,7 @@ impl FsrPipeline {
         &mut self,
         settings: &FsrSettings,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         adapter: &wgpu::Adapter,
         output_size: [u32; 2],
     ) -> Option<([u32; 2], bool)> {
@@ -130,9 +140,9 @@ impl FsrPipeline {
             return None;
         }
 
-        if adapter.get_info().backend != wgpu::Backend::Vulkan {
+        if adapter.get_info().backend != wgpu::Backend::Dx12 {
             tracing::warn!(
-                "FSR requires a Vulkan adapter; falling back to the standard blit path."
+                "FSR 3.1 requires a DX12 adapter; falling back to the standard blit path."
             );
             self.deactivate();
             return None;
@@ -145,8 +155,10 @@ impl FsrPipeline {
         if recreate {
             let output_uvec = UVec2::new(output_size[0], output_size[1]);
             let render_res = settings.quality.render_resolution(output_uvec);
+            tracing::info!("FSR: creating context — output={output_uvec}, render={render_res}");
 
-            match crate::fsr::FsrContext::new(device, adapter, output_uvec, render_res, true) {
+            match crate::fsr::FsrContext::new(device, queue, adapter, output_uvec, render_res, true)
+            {
                 Ok(context) => {
                     self.output_texture = Some(GpuTexture::new_2d(
                         device,
@@ -182,24 +194,24 @@ impl FsrPipeline {
 
     pub(crate) fn render(
         &mut self,
-        command_encoder: &mut wgpu::CommandEncoder,
-        adapter: &wgpu::Adapter,
+        encoder: &mut wgpu::CommandEncoder,
+        queue: &wgpu::Queue,
         color: &wgpu::TextureView,
         depth: &wgpu::TextureView,
         motion_vectors: &wgpu::TextureView,
         reset: bool,
         jitter: [f32; 2],
         delta_time_ms: f32,
-    ) -> Result<Option<wgpu::CommandBuffer>> {
+    ) -> Result<bool> {
         let (Some(context), Some(output_texture)) = (&mut self.context, &self.output_texture)
         else {
-            return Ok(None);
+            return Ok(false);
         };
 
         let render_resolution = context.render_resolution();
-        let cmd_buf = context.render(
-            command_encoder,
-            adapter,
+        context.render(
+            encoder,
+            queue,
             color,
             depth,
             motion_vectors,
@@ -210,7 +222,7 @@ impl FsrPipeline {
             delta_time_ms,
         )?;
 
-        Ok(Some(cmd_buf))
+        Ok(true)
     }
 
     pub(crate) fn deactivate(&mut self) {

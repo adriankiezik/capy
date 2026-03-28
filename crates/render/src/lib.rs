@@ -3,6 +3,8 @@ mod camera;
 #[allow(dead_code, unused_imports)]
 mod dlss;
 mod error;
+#[cfg(feature = "fsr")]
+#[allow(dead_code, unused_imports)]
 mod fsr;
 mod gpu_texture;
 mod pipeline_factory;
@@ -14,6 +16,40 @@ mod systems;
 mod uniform_buffer;
 mod voxel_bind_group;
 
+/// Add the `lib/` subdirectory next to the executable to the DLL search path.
+///
+/// Called automatically by `RenderPlugin::register` before any delay-loaded
+/// vendor DLL (FSR, DLSS) is touched.
+#[cfg(all(target_os = "windows", any(feature = "fsr", feature = "dlss")))]
+pub(crate) fn add_lib_dll_search_path() {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::System::LibraryLoader::{
+        AddDllDirectory, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, SetDefaultDllDirectories,
+    };
+
+    // Enable AddDllDirectory by switching to the safe search-order mode.
+    unsafe {
+        let _ = SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+    }
+
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let Some(dir) = exe.parent() else { return };
+    let lib_dir = dir.join("lib");
+    if !lib_dir.is_dir() {
+        return;
+    }
+    let wide: Vec<u16> = lib_dir
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    unsafe {
+        let _ = AddDllDirectory(windows::core::PCWSTR(wide.as_ptr()));
+    }
+}
+
 pub use camera::{create_camera_buffer, write_camera_buffer};
 pub use error::{RenderError, Result};
 pub use plugins::RenderPlugin;
@@ -24,6 +60,7 @@ pub use resources::{
 };
 #[cfg(feature = "dlss")]
 pub use resources::{DlssQualityMode, DlssSettings};
+#[cfg(feature = "fsr")]
 pub use resources::{FsrQualityMode, FsrSettings};
 pub use shader_source::create_compute_shader;
 pub use systems::voxel_scene::{

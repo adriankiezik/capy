@@ -333,7 +333,10 @@ fn trace_grass_ray_bounded(
     }
 
     var t_current = trace_t_start;
-    loop {
+    // Bounded DDA: worst case is a diagonal traversal across the full tile grid.
+    // DXC requires a provably-finite loop to avoid hanging during compilation.
+    let max_dda_steps = u32(tiles_per_axis_i * 2 + 1);
+    for (var dda_iter = 0u; dda_iter < max_dda_steps; dda_iter++) {
         if t_current >= trace_t_end || t_current >= best_t {
             break;
         }

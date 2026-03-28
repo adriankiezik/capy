@@ -20,6 +20,7 @@ impl capy_core::Plugin for EditorPlugin {
         });
         #[cfg(feature = "dlss")]
         insert_dlss_settings(world);
+        #[cfg(feature = "fsr")]
         world.insert_resource(capy_render::FsrSettings::default());
         world.insert_resource(SelectionState::default());
         world.insert_resource(Clipboard::default());

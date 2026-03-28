@@ -4,11 +4,12 @@ use bevy_ecs::system::{NonSendMut, Res, ResMut};
 use crate::resources::TemporalCameraState;
 use crate::resources::trace::TracePipeline;
 use crate::resources::{
-    BlitPipeline, FrameInProgress, FsrPipeline, FsrSettings, GpuContext, GpuProfiler, GtaoPipeline,
-    LightingPipeline,
+    BlitPipeline, FrameInProgress, GpuContext, GpuProfiler, GtaoPipeline, LightingPipeline,
 };
 #[cfg(feature = "dlss")]
 use crate::resources::{DlssPipeline, DlssSettings};
+#[cfg(feature = "fsr")]
+use crate::resources::{FsrPipeline, FsrSettings};
 
 pub(crate) fn render_passes_system(
     #[cfg_attr(not(feature = "dlss"), allow(unused_mut))] mut gpu: NonSendMut<GpuContext>,
@@ -20,13 +21,15 @@ pub(crate) fn render_passes_system(
     camera: Res<capy_core::Camera>,
     #[cfg(feature = "dlss")] dlss: Option<NonSendMut<DlssPipeline>>,
     #[cfg(feature = "dlss")] mut dlss_settings: Option<ResMut<DlssSettings>>,
-    fsr: Option<NonSendMut<FsrPipeline>>,
-    mut fsr_settings: Option<ResMut<FsrSettings>>,
+    #[cfg(feature = "fsr")] fsr: Option<NonSendMut<FsrPipeline>>,
+    #[cfg(feature = "fsr")] mut fsr_settings: Option<ResMut<FsrSettings>>,
     mut frame: NonSendMut<FrameInProgress>,
     mut gpu_profiler: NonSendMut<GpuProfiler>,
 ) -> Result<(), BevyError> {
+    tracing::debug!("render_passes_system: enter");
     let (Some(mut trace), Some(gtao), Some(lighting), Some(blit)) = (trace, gtao, lighting, blit)
     else {
+        tracing::debug!("render_passes_system: missing pipeline resources, skipping");
         return Ok(());
     };
 
@@ -258,8 +261,13 @@ pub(crate) fn render_passes_system(
     // End of DLSS scope.
 
     // FSR fallback — only when DLSS did not produce an upscaler buffer.
+    #[cfg(feature = "fsr")]
     if upscaler_cmd_buf.is_none() {
         if let Some(mut fsr) = fsr {
+            tracing::debug!(
+                "render_passes: FSR active={}",
+                fsr.output_texture().is_some()
+            );
             if fsr.output_texture().is_some() {
                 let reset = match fsr_settings.as_mut() {
                     Some(settings) if settings.enabled && settings.reset => {
@@ -270,9 +278,9 @@ pub(crate) fn render_passes_system(
                 };
                 let jitter = temporal.current_jitter();
 
-                let fsr_cmd_buf = fsr.render(
+                fsr.render(
                     &mut encoder,
-                    &gpu.adapter,
+                    &gpu.queue,
                     &lighting.output_color.view,
                     &trace.dlss_depth.view,
                     &trace.motion_vectors.view,
@@ -280,14 +288,6 @@ pub(crate) fn render_passes_system(
                     jitter,
                     16.6, // TODO: pass actual frame delta time
                 )?;
-                if let Some(cmd_buf) = fsr_cmd_buf {
-                    gpu.queue.submit([encoder.finish(), cmd_buf]);
-                    encoder = gpu
-                        .device
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("Post-Upscaler Encoder"),
-                        });
-                }
             }
         }
     }

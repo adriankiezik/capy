@@ -6,6 +6,7 @@ build = "build.rs"
 
 [features]
 dlss = ["dep:uuid", "dep:bitflags", "dep:bindgen", "dep:cc"]
+fsr = ["dep:windows", "dep:windows-core", "dep:bindgen", "dep:cc", "wgpu/static-dxc"]
 
 [dependencies]
 capy_core = { path = "../core" }
@@ -20,8 +21,14 @@ tracing.workspace = true
 uuid = { workspace = true, optional = true }
 ash = "0.38"
 bitflags = { version = "2", optional = true }
-fsr = { version = "0.1", features = ["vulkan"] }
-fsr-sys = "0.1"
+windows = { version = "0.62", optional = true, features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D12",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Threading",
+] }
+windows-core = { version = "0.62", optional = true }
 
 [build-dependencies]
 bindgen = { version = "0.72", optional = true }

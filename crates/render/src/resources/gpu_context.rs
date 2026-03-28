@@ -9,6 +9,7 @@ pub(crate) struct GpuContext {
     pub(crate) queue: wgpu::Queue,
     pub(crate) config: wgpu::SurfaceConfiguration,
     pub(crate) timestamp_supported: bool,
+    pub(crate) backend: wgpu::Backend,
     #[cfg(feature = "dlss")]
     pub(crate) dlss_extensions_enabled: bool,
     #[cfg(feature = "dlss")]
@@ -27,6 +28,21 @@ impl GpuContext {
         vsync: bool,
         #[cfg(feature = "dlss")] dlss_project_id: Option<uuid::Uuid>,
     ) -> Result<Self> {
+        #[allow(unused_variables)]
+        let force_dx12 = std::env::var("CAPY_FORCE_DX12").is_ok();
+
+        // -- Step 1: Try DLSS (Vulkan) unless force-DX12 is set ---------------
+        #[cfg(feature = "dlss")]
+        let dlss_device = if force_dx12 {
+            tracing::info!("CAPY_FORCE_DX12 set — skipping DLSS Vulkan device.");
+            None
+        } else {
+            dlss_project_id
+                .map(|project_id| Self::try_create_dlss_device(window.clone(), project_id))
+                .transpose()?
+                .flatten()
+        };
+
         #[cfg(feature = "dlss")]
         let (
             surface,
@@ -38,76 +54,44 @@ impl GpuContext {
             dlss_rr_supported,
             dlss_fg_supported,
             reflex_ctx,
-        ) = {
-            let dlss_device = dlss_project_id
-                .map(|project_id| Self::try_create_dlss_device(window.clone(), project_id))
-                .transpose()?
-                .flatten();
-
-            if let Some((
+        ) = if let Some((
+            surface,
+            adapter,
+            device,
+            queue,
+            rr_supported,
+            fg_supported,
+            reflex_supported,
+        )) = dlss_device
+        {
+            let ts = adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY);
+            let reflex_ctx = if reflex_supported {
+                crate::dlss::reflex::ReflexContext::new(&device)
+            } else {
+                None
+            };
+            (
                 surface,
                 adapter,
                 device,
                 queue,
+                ts,
+                true,
                 rr_supported,
                 fg_supported,
-                reflex_supported,
-            )) = dlss_device
-            {
-                let ts = adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY);
-                let reflex_ctx = if reflex_supported {
-                    crate::dlss::reflex::ReflexContext::new(&device)
-                } else {
-                    None
-                };
-                (
-                    surface,
-                    adapter,
-                    device,
-                    queue,
-                    ts,
-                    true,
-                    rr_supported,
-                    fg_supported,
-                    reflex_ctx,
-                )
-            } else {
-                let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-                    backends: wgpu::Backends::PRIMARY,
-                    ..Default::default()
-                });
-
-                let surface = instance.create_surface(window)?;
-                let adapter =
-                    pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-                        power_preference: wgpu::PowerPreference::HighPerformance,
-                        compatible_surface: Some(&surface),
-                        force_fallback_adapter: false,
-                    }))?;
-                let (device, queue, ts) = Self::request_device(&adapter)?;
-                (
-                    surface, adapter, device, queue, ts, false, false, false, None,
-                )
-            }
+                reflex_ctx,
+            )
+        } else {
+            let (surface, adapter, device, queue, ts) =
+                Self::create_default_device(window.clone())?;
+            (
+                surface, adapter, device, queue, ts, false, false, false, None,
+            )
         };
 
         #[cfg(not(feature = "dlss"))]
-        let (surface, adapter, device, queue, timestamp_supported) = {
-            let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-                backends: wgpu::Backends::PRIMARY,
-                ..Default::default()
-            });
-
-            let surface = instance.create_surface(window)?;
-            let adapter =
-                pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-                    power_preference: wgpu::PowerPreference::HighPerformance,
-                    compatible_surface: Some(&surface),
-                    force_fallback_adapter: false,
-                }))?;
-            let (device, queue, timestamp_supported) = Self::request_device(&adapter)?;
-            (surface, adapter, device, queue, timestamp_supported)
-        };
+        let (surface, adapter, device, queue, timestamp_supported) =
+            Self::create_default_device(window)?;
 
         let caps = surface.get_capabilities(&adapter);
         let format = caps
@@ -134,6 +118,8 @@ impl GpuContext {
         };
         surface.configure(&device, &config);
 
+        let backend = adapter.get_info().backend;
+
         Ok(Self {
             surface,
             adapter,
@@ -141,6 +127,7 @@ impl GpuContext {
             queue,
             config,
             timestamp_supported,
+            backend,
             #[cfg(feature = "dlss")]
             dlss_extensions_enabled,
             #[cfg(feature = "dlss")]
@@ -188,6 +175,49 @@ impl GpuContext {
             self.surface.configure(&self.device, &self.config);
             self.refresh_reflex_swapchain();
         }
+    }
+
+    /// Create a default (non-DLSS) wgpu device.
+    ///
+    /// When the `fsr` feature is enabled the backend is forced to DX12 so the
+    /// FidelityFX SDK can access raw DX12 handles.  Otherwise PRIMARY is used.
+    fn create_default_device(
+        window: Arc<dyn capy_core::Window>,
+    ) -> Result<(
+        wgpu::Surface<'static>,
+        wgpu::Adapter,
+        wgpu::Device,
+        wgpu::Queue,
+        bool,
+    )> {
+        #[cfg(feature = "fsr")]
+        let backends = {
+            tracing::info!("FSR feature enabled — using DX12 backend.");
+            wgpu::Backends::DX12
+        };
+        #[cfg(not(feature = "fsr"))]
+        let backends = wgpu::Backends::PRIMARY;
+
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            backends,
+            backend_options: wgpu::BackendOptions {
+                dx12: wgpu::Dx12BackendOptions {
+                    shader_compiler: wgpu::Dx12Compiler::StaticDxc,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+
+        let surface = instance.create_surface(window)?;
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            compatible_surface: Some(&surface),
+            force_fallback_adapter: false,
+        }))?;
+        let (device, queue, ts) = Self::request_device(&adapter)?;
+        Ok((surface, adapter, device, queue, ts))
     }
 
     fn request_device(adapter: &wgpu::Adapter) -> Result<(wgpu::Device, wgpu::Queue, bool)> {

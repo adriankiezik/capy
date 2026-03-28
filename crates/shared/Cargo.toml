@@ -5,6 +5,7 @@ edition.workspace = true
 
 [features]
 dlss = ["capy_render/dlss"]
+fsr = ["capy_render/fsr"]
 
 [dependencies]
 capy_core = { path = "../core" }

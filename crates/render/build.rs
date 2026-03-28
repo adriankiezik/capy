@@ -1,6 +1,8 @@
 fn main() {
     #[cfg(feature = "dlss")]
     dlss_bindings();
+    #[cfg(feature = "fsr")]
+    fsr_bindings();
 }
 
 #[cfg(feature = "dlss")]
@@ -63,6 +65,89 @@ fn dlss_bindings() {
 
     // Copy DLSS runtime DLLs next to the output binary so the SDK finds them at launch.
     copy_dlss_runtime_dlls(&dlss_sdk, &out_dir);
+}
+
+#[cfg(feature = "fsr")]
+fn fsr_bindings() {
+    use std::{env, path::PathBuf};
+
+    let fsr_sdk = env::var("FSR_SDK")
+        .expect("FSR_SDK environment variable not set. Run scripts/capy-fsr-setup.ps1 first.");
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+
+    // The FidelityFX SDK ships a single import lib; the upscaler / frame-gen
+    // backends are loaded at runtime through the loader DLL.
+    let signedbin = format!("{fsr_sdk}/Kits/FidelityFX/signedbin");
+    println!("cargo:rustc-link-search=native={signedbin}");
+    println!("cargo:rustc-link-lib=static=amd_fidelityfx_loader_dx12");
+
+    // Include paths for the unified API and feature-specific headers.
+    let api_include = format!("{fsr_sdk}/Kits/FidelityFX/api/include");
+    let upscaler_include = format!("{fsr_sdk}/Kits/FidelityFX/upscalers/include");
+    let framegen_include = format!("{fsr_sdk}/Kits/FidelityFX/framegeneration/include");
+
+    // Generate Rust bindings from the unified C API header.
+    bindgen::Builder::default()
+        .header(format!("{}/src/fsr/wrapper.h", env!("CARGO_MANIFEST_DIR")))
+        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+        .clang_args([
+            format!("-I{api_include}"),
+            format!("-I{upscaler_include}"),
+            format!("-I{framegen_include}"),
+        ])
+        .clang_arg("-fms-extensions")
+        // Only expose FFX/Ffx symbols.
+        // Note: (?i) inline flag does not work reliably in bindgen 0.72's
+        // allowlist regex, so use character classes for case-insensitivity.
+        .allowlist_type("[fF][fF][xX].*")
+        .allowlist_function("[fF][fF][xX].*")
+        .allowlist_var("[fF][fF][xX].*")
+        .allowlist_var("FFX_.*")
+        .generate()
+        .unwrap()
+        .write_to_file(out_dir.join("fsr_bindings.rs"))
+        .unwrap();
+
+    // Copy runtime DLLs next to the output binary.
+    copy_fsr_runtime_dlls(&signedbin, &out_dir);
+}
+
+#[cfg(feature = "fsr")]
+fn copy_fsr_runtime_dlls(signedbin: &str, out_dir: &std::path::Path) {
+    let Some(profile_dir) = out_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .and_then(|p| p.parent())
+    else {
+        println!(
+            "cargo:warning=Could not determine target profile directory; skipping FSR DLL copy."
+        );
+        return;
+    };
+
+    let lib_dir = profile_dir.join("lib");
+    let _ = std::fs::create_dir_all(&lib_dir);
+
+    let src_dir = std::path::PathBuf::from(signedbin);
+    let dlls = [
+        "amd_fidelityfx_loader_dx12.dll",
+        "amd_fidelityfx_upscaler_dx12.dll",
+        "amd_fidelityfx_framegeneration_dx12.dll",
+    ];
+    for dll in &dlls {
+        let src = src_dir.join(dll);
+        let dst = lib_dir.join(dll);
+        if src.exists() {
+            if let Err(e) = std::fs::copy(&src, &dst) {
+                println!(
+                    "cargo:warning=Failed to copy {dll} to {}: {e}",
+                    dst.display()
+                );
+            }
+        } else {
+            println!("cargo:warning=FSR runtime DLL not found: {}", src.display());
+        }
+    }
 }
 
 #[cfg(feature = "dlss")]

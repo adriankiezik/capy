@@ -620,14 +620,14 @@ dependencies = [
  "bytemuck",
  "capy_core",
  "cc",
- "fsr",
- "fsr-sys",
  "glam",
  "pollster",
  "thiserror 2.0.18",
  "tracing",
  "uuid",
  "wgpu",
+ "windows",
+ "windows-core",
 ]
 
 [[package]]
@@ -1319,30 +1319,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fsr"
-version = "0.1.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a022a701f59daa742dd6acad0c915968d57a75a7ab55ab842aff236369360de6"
-dependencies = [
- "ash",
- "bitflags 2.11.0",
- "fsr-sys",
- "thiserror 1.0.69",
- "widestring",
-]
-
-[[package]]
-name = "fsr-sys"
-version = "0.1.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d311e166b0409451241530ee1b653523286d97b9906f6718d3c36831316dc89"
-dependencies = [
- "cc",
- "glob",
- "widestring",
-]
-
-[[package]]
 name = "futures-channel"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2024,6 +2000,12 @@ checksum = "373f5eceeeab7925e0c1098212f2fbc4d416adec9d35051a6ab251e824c1854a"
 dependencies = [
  "twox-hash",
 ]
+
+[[package]]
+name = "mach-dxcompiler-rs"
+version = "0.1.4+2024.11.22-df583a3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0e3cd67e8ea2ba061339150970542cf1c60ba44c6d17e31279cbc133a4b018f8"
 
 [[package]]
 name = "malloc_buf"
@@ -4007,6 +3989,7 @@ dependencies = [
  "libc",
  "libloading",
  "log",
+ "mach-dxcompiler-rs",
  "metal",
  "naga",
  "ndk-sys",
@@ -4056,12 +4039,6 @@ dependencies = [
  "log",
  "web-sys",
 ]
-
-[[package]]
-name = "widestring"
-version = "1.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72069c3113ab32ab29e5584db3c6ec55d416895e60715417b5b883a357c3e471"
 
 [[package]]
 name = "winapi-util"
