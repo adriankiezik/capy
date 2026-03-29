@@ -130,11 +130,10 @@ pub(crate) fn update_upscaling_system(world: &mut World) {
             }
         }
 
-        // Bump frame latency when FG is active (double present needs headroom).
+        // Configure swapchain for FG (latency + force Fifo so both presents display).
         {
             let mut gpu = world.non_send_resource_mut::<GpuContext>();
-            let target_latency = if dlss_fg_active { 3 } else { 2 };
-            gpu.set_frame_latency(target_latency);
+            gpu.set_frame_generation_mode(dlss_fg_active);
         }
 
         let fg_hw_supported = {
@@ -229,12 +228,11 @@ pub(crate) fn update_upscaling_system(world: &mut World) {
                 }
             }
 
-            // Bump frame latency when FG is active (double present needs headroom).
+            // Configure swapchain for FG (latency + force Fifo so both presents display).
             // Only set from FSR when DLSS isn't already managing it.
             {
                 let mut gpu = world.non_send_resource_mut::<GpuContext>();
-                let target_latency = if fsr_fg_active { 3 } else { 2 };
-                gpu.set_frame_latency(target_latency);
+                gpu.set_frame_generation_mode(fsr_fg_active);
             }
         }
 

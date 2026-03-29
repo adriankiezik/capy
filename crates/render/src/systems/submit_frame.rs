@@ -51,8 +51,31 @@ pub(crate) fn submit_frame_system(world: &mut World) -> Result<(), BevyError> {
         }
         queue.submit(std::iter::once(encoder.finish()));
 
+        // Reflex: complete the interpolated frame's render submission,
+        // then bracket the present with PRESENT markers.
+        #[cfg(feature = "dlss")]
+        {
+            let gpu = world.non_send_resource::<GpuContext>();
+            if let Some(reflex) = &gpu.reflex {
+                if let Some(sc) = crate::dlss::reflex::raw_swapchain(&gpu.surface) {
+                    reflex.set_marker(sc, ash::vk::LatencyMarkerNV::RENDERSUBMIT_END);
+                    reflex.set_marker(sc, ash::vk::LatencyMarkerNV::PRESENT_START);
+                }
+            }
+        }
+
         if let Some(output) = output {
             output.present();
+        }
+
+        #[cfg(feature = "dlss")]
+        {
+            let gpu = world.non_send_resource::<GpuContext>();
+            if let Some(reflex) = &gpu.reflex {
+                if let Some(sc) = crate::dlss::reflex::raw_swapchain(&gpu.surface) {
+                    reflex.set_marker(sc, ash::vk::LatencyMarkerNV::PRESENT_END);
+                }
+            }
         }
 
         // 2. Acquire a new swapchain texture, blit the real frame, render
@@ -107,12 +130,13 @@ pub(crate) fn submit_frame_system(world: &mut World) -> Result<(), BevyError> {
 
             queue.submit(std::iter::once(enc.finish()));
 
-            // Reflex: PRESENT markers around the real frame present.
+            // Reflex: RENDERSUBMIT_END + PRESENT markers for the real frame.
             #[cfg(feature = "dlss")]
             {
                 let gpu = world.non_send_resource::<GpuContext>();
                 if let Some(reflex) = &gpu.reflex {
                     if let Some(sc) = crate::dlss::reflex::raw_swapchain(&gpu.surface) {
+                        reflex.set_marker(sc, ash::vk::LatencyMarkerNV::RENDERSUBMIT_END);
                         reflex.set_marker(sc, ash::vk::LatencyMarkerNV::PRESENT_START);
                     }
                 }
@@ -177,17 +201,6 @@ pub(crate) fn submit_frame_system(world: &mut World) -> Result<(), BevyError> {
                 if let Some(sc) = crate::dlss::reflex::raw_swapchain(&gpu.surface) {
                     reflex.set_marker(sc, ash::vk::LatencyMarkerNV::PRESENT_END);
                 }
-            }
-        }
-    }
-
-    // Reflex: RENDERSUBMIT_END after the final queue.submit.
-    #[cfg(feature = "dlss")]
-    if fg_needs_real_blit {
-        let gpu = world.non_send_resource::<GpuContext>();
-        if let Some(reflex) = &gpu.reflex {
-            if let Some(sc) = crate::dlss::reflex::raw_swapchain(&gpu.surface) {
-                reflex.set_marker(sc, ash::vk::LatencyMarkerNV::RENDERSUBMIT_END);
             }
         }
     }

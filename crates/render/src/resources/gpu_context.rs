@@ -8,6 +8,9 @@ pub(crate) struct GpuContext {
     pub(crate) device: wgpu::Device,
     pub(crate) queue: wgpu::Queue,
     pub(crate) config: wgpu::SurfaceConfiguration,
+    /// The present mode the user requested (VSync on/off).  Stored so it can
+    /// be restored when Frame Generation is deactivated.
+    pub(crate) user_present_mode: wgpu::PresentMode,
     pub(crate) timestamp_supported: bool,
     pub(crate) backend: wgpu::Backend,
     #[cfg(feature = "dlss")]
@@ -102,16 +105,17 @@ impl GpuContext {
             .copied()
             .ok_or(RenderError::InvalidAdapter)?;
 
+        let user_present_mode = if vsync {
+            wgpu::PresentMode::AutoVsync
+        } else {
+            wgpu::PresentMode::AutoNoVsync
+        };
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
             width,
             height,
-            present_mode: if vsync {
-                wgpu::PresentMode::AutoVsync
-            } else {
-                wgpu::PresentMode::AutoNoVsync
-            },
+            present_mode: user_present_mode,
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
@@ -126,6 +130,7 @@ impl GpuContext {
             device,
             queue,
             config,
+            user_present_mode,
             timestamp_supported,
             backend,
             #[cfg(feature = "dlss")]
@@ -166,12 +171,28 @@ impl GpuContext {
         }
     }
 
-    /// Set the desired maximum frame latency. Reconfigures the surface if the
-    /// value changed.
+    /// Configure the swapchain for Frame Generation.
+    ///
+    /// FG double-presents (interpolated + real) each tick.  This only works
+    /// with FIFO presentation — `Mailbox` drops the interpolated frame and
+    /// `Immediate` overwrites it before the display scans it out.  FG is
+    /// therefore always paired with `Fifo`; when deactivated the user's
+    /// original present mode is restored.
     #[cfg(any(feature = "dlss", feature = "fsr"))]
-    pub(crate) fn set_frame_latency(&mut self, latency: u32) {
-        if self.config.desired_maximum_frame_latency != latency {
-            self.config.desired_maximum_frame_latency = latency;
+    pub(crate) fn set_frame_generation_mode(&mut self, fg_active: bool) {
+        let target_latency = if fg_active { 3 } else { 2 };
+        let target_present_mode = if fg_active {
+            wgpu::PresentMode::Fifo
+        } else {
+            self.user_present_mode
+        };
+
+        let changed = self.config.desired_maximum_frame_latency != target_latency
+            || self.config.present_mode != target_present_mode;
+
+        if changed {
+            self.config.desired_maximum_frame_latency = target_latency;
+            self.config.present_mode = target_present_mode;
             self.surface.configure(&self.device, &self.config);
             #[cfg(feature = "dlss")]
             self.refresh_reflex_swapchain();
