@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::path::Path;
 
 use bevy_ecs::error::BevyError;
 use bevy_ecs::world::World;
@@ -23,8 +22,8 @@ pub(crate) fn editor_startup(world: &mut World) -> Result<(), BevyError> {
     let mut edited_baked = if stress_mode {
         HashMap::new()
     } else {
-        let world_dir = Path::new(capy_assets::DEFAULT_WORLD_DIR);
-        match capy_assets::load_world_chunks(world_dir, &capy_assets::OsFileSystem) {
+        let world_dir = capy_assets::resolve_world_dir();
+        match capy_assets::load_world_chunks(&world_dir, &capy_assets::OsFileSystem) {
             Ok(chunks) if !chunks.is_empty() => {
                 info!("[editor] loaded {} edited chunks from disk", chunks.len());
                 chunks

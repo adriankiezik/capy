@@ -15,5 +15,5 @@ pub use resources::WorldHandle;
 pub use world_format::{
     Compression, CompressionCodec, DEFAULT_WORLD_DIR, FileSystem, OsFileSystem, RegionEntry,
     WorldManifest, load_world_as_mesh_data, load_world_chunks, open_world_handle,
-    save_edited_world, save_generated_world,
+    resolve_world_dir, save_edited_world, save_generated_world,
 };

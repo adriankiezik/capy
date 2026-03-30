@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use bevy_ecs::error::BevyError;
 use bevy_ecs::world::World;
 use capy_core::{Camera, CursorMode, GameWindow, MATERIAL_COLORS, VoxelMeshData};
@@ -13,11 +11,11 @@ pub(crate) fn game_startup(world: &mut World) -> Result<(), BevyError> {
         return stress_startup(world);
     }
 
-    let world_dir = Path::new(capy_assets::DEFAULT_WORLD_DIR);
+    let world_dir = capy_assets::resolve_world_dir();
     let fs = capy_assets::OsFileSystem;
     let canonical = capy_world::generate_flat_baked()?;
 
-    let mesh = match capy_assets::load_world_chunks(world_dir, &fs) {
+    let mesh = match capy_assets::load_world_chunks(&world_dir, &fs) {
         Ok(mut edited) if !edited.is_empty() => {
             for baked in edited.values_mut() {
                 capy_world::recompute_foliage_bitmap(baked, capy_world::CHUNK_XZ);

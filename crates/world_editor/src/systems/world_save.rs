@@ -1,4 +1,3 @@
-use std::path::Path;
 use std::time::Instant;
 
 use bevy_ecs::error::BevyError;
@@ -31,6 +30,7 @@ pub(crate) fn world_save(world: &mut World) -> Result<(), BevyError> {
     }
 
     // Perform the save.
+    let world_dir = capy_assets::resolve_world_dir();
     let (result, count) = {
         let grid = world.resource::<WorldGrid>();
         let count = grid.edited_baked.len();
@@ -38,7 +38,7 @@ pub(crate) fn world_save(world: &mut World) -> Result<(), BevyError> {
             &grid.edited_baked,
             capy_world::CHUNK_XZ,
             &MATERIAL_COLORS,
-            Path::new(capy_assets::DEFAULT_WORLD_DIR),
+            &world_dir,
             &capy_assets::OsFileSystem,
         );
         (result, count)
@@ -50,7 +50,7 @@ pub(crate) fn world_save(world: &mut World) -> Result<(), BevyError> {
         Ok(()) => {
             info!(
                 "[save] saved {count} edited chunks to {}",
-                capy_assets::DEFAULT_WORLD_DIR
+                world_dir.display()
             );
             state.last_save = Some((Instant::now(), SaveResult::Success(count)));
         }
