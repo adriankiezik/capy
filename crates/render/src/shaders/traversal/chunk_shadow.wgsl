@@ -84,7 +84,7 @@ fn traverse_chunk_shadow(
             let child_flags = get_node_flags_pool(pool_base, child_node_idx);
             if node_is_uniform_water(child_flags) { break; }
 
-            stk[scale_exp >> 1u] = StackEntry(node_idx, n_ml, n_mh, n_il);
+            stk[(root_se - scale_exp) >> 1u] = StackEntry(node_idx, n_ml, n_mh, n_il);
             node_idx = child_node_idx;
             n_ml = pool_read(pool_base, node_idx);
             n_mh = pool_read(pool_base, node_idx + 1u);
@@ -150,7 +150,7 @@ fn traverse_chunk_shadow(
         if diff_exp > i32(scale_exp) {
             scale_exp = u32(diff_exp);
             if diff_exp > i32(root_se) { break; }
-            let se = stk[scale_exp >> 1u];
+            let se = stk[(root_se - scale_exp) >> 1u];
             node_idx = se.node_idx;
             n_ml = se.mask_lo;
             n_mh = se.mask_hi;

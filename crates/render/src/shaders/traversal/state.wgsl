@@ -1,4 +1,6 @@
-var<private> stk: array<StackEntry, 12>;
+// Sized for max tree depth 6 (chunk dims up to 4096). Re-indexed via
+// (root_se - scale_exp) >> 1  so entries pack from index 0.
+var<private> stk: array<StackEntry, 6>;
 // Best grass hit found during DDA traversal, read by trace.wgsl after trace_ray().
 var<private> dda_grass_hit: GrassHit;
 // When true, trace_ray() ignores grass entirely (used by pick shader for editor tools).
