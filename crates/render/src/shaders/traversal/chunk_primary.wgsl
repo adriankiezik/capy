@@ -88,63 +88,63 @@ fn traverse_chunk(
         return result;
     }
 
-    {
-        var no = tree_info_root;
-        var se = root_se;
-        var ml = pool_read(pool_base, no);
-        var mh = pool_read(pool_base, no + 1u);
-        var flags = root_flags;
-        var il = node_is_leaf(flags);
+    // ── Entry phase: descend tree at ray entry, populating DDA state + stack ──
+    var node_idx = tree_info_root;
+    var scale_exp = root_se;
+    var n_ml = pool_read(pool_base, node_idx);
+    var n_mh = pool_read(pool_base, node_idx + 1u);
+    var n_flags = root_flags;
+    var n_il = node_is_leaf(n_flags);
 
-        for (var d = 0u; d < depth; d++) {
-            let ci = get_cell_index(pos, se);
-            if il {
-                if bit_is_set_64(ml, mh, ci) {
-                    let mat = get_leaf_material_pool(pool_base, no, ci);
-                    if mat != 0u {
-                        if (mat & WATER_BIT_MASK) != 0u {
-                            // Water voxel at entry — record surface and fall through to DDA
-                            record_water_surface_hit(
-                                ray_origin_world,
-                                ray_dir_world,
-                                (pos - vec3<f32>(1.0)) * ws,
-                                entry_axis,
-                            );
-                            // Water disabled: treat as air — skip this voxel
-                        } else {
-                            result.hit = true;
-                            result.material = mat;
-                            result.hit_pos_local = (pos - vec3<f32>(1.0)) * ws;
-                            result.t = dot(result.hit_pos_local - ray_origin_world, dir);
-                            result.normal = axis_normal(entry_axis, ray_dir_world);
-                            return result;
-                        }
+    for (var d = 0u; d < depth; d++) {
+        let ci = get_cell_index(pos, scale_exp);
+        if n_il {
+            if bit_is_set_64(n_ml, n_mh, ci) {
+                let mat = get_leaf_material_pool(pool_base, node_idx, ci);
+                if mat != 0u {
+                    if (mat & WATER_BIT_MASK) != 0u {
+                        // Water voxel at entry — record surface and fall through to DDA
+                        record_water_surface_hit(
+                            ray_origin_world,
+                            ray_dir_world,
+                            (pos - vec3<f32>(1.0)) * ws,
+                            entry_axis,
+                        );
+                    } else {
+                        result.hit = true;
+                        result.material = mat;
+                        result.hit_pos_local = (pos - vec3<f32>(1.0)) * ws;
+                        result.t = dot(result.hit_pos_local - ray_origin_world, dir);
+                        result.normal = axis_normal(entry_axis, ray_dir_world);
+                        return result;
                     }
                 }
-                break;
             }
-            if !bit_is_set_64(ml, mh, ci) { break; }
-            let pi = popcount_below(ml, mh, ci);
-            let child_no = get_child_offset_pool(pool_base, no, pi);
-            let child_flags = get_node_flags_pool(pool_base, child_no);
-            if node_is_uniform_water(child_flags) {
-                record_water_surface_hit(
-                    ray_origin_world,
-                    ray_dir_world,
-                    (pos - vec3<f32>(1.0)) * ws,
-                    entry_axis,
-                );
-                break;
-            }
-            no = child_no;
-            ml = pool_read(pool_base, no);
-            mh = pool_read(pool_base, no + 1u);
-            flags = child_flags;
-            il = node_is_leaf(flags);
-            se -= 2u;
+            break;
         }
+        if !bit_is_set_64(n_ml, n_mh, ci) { break; }
+        let pi = popcount_below(n_ml, n_mh, ci);
+        let child_no = get_child_offset_pool(pool_base, node_idx, pi);
+        let child_flags = get_node_flags_pool(pool_base, child_no);
+        if node_is_uniform_water(child_flags) {
+            record_water_surface_hit(
+                ray_origin_world,
+                ray_dir_world,
+                (pos - vec3<f32>(1.0)) * ws,
+                entry_axis,
+            );
+            break;
+        }
+        stk[(root_se - scale_exp) >> 1u] = StackEntry(node_idx, n_ml, n_mh, n_il);
+        node_idx = child_no;
+        n_ml = pool_read(pool_base, node_idx);
+        n_mh = pool_read(pool_base, node_idx + 1u);
+        n_flags = child_flags;
+        n_il = node_is_leaf(n_flags);
+        scale_exp -= 2u;
     }
 
+    // ── DDA phase: step through voxels using state carried from entry phase ──
     var mirror_mask = 0u;
     if dir.x > 0.0 { mirror_mask |= 3u; }
     if dir.y > 0.0 { mirror_mask |= 3u << 2u; }
@@ -154,12 +154,6 @@ fn traverse_chunk(
     pos = mirror_pos(pos, dir, false);
     let inv_dir = 1.0 / -abs(dir);
 
-    var node_idx = tree_info_root;
-    var n_ml = pool_read(pool_base, node_idx);
-    var n_mh = pool_read(pool_base, node_idx + 1u);
-    var n_flags = root_flags;
-    var n_il = node_is_leaf(n_flags);
-    var scale_exp = root_se;
     var last_axis: i32 = -1;
     var side_dist = vec3<f32>(0.0);
 
