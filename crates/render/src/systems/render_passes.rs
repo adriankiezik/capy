@@ -1,9 +1,11 @@
 use bevy_ecs::error::BevyError;
-use bevy_ecs::system::{NonSendMut, Res, ResMut};
+use bevy_ecs::system::{NonSend, NonSendMut, Res, ResMut};
 
 use crate::resources::TemporalCameraState;
+use crate::resources::voxel_scene::VoxelSceneBuffers;
 use crate::resources::{
     BlitPipeline, FrameInProgress, GpuContext, GpuProfiler, GtaoPipeline, LightingPipeline,
+    NearMeshPipeline,
 };
 #[cfg(feature = "dlss")]
 use crate::resources::{DlssPipeline, DlssSettings};
@@ -17,6 +19,8 @@ pub(crate) fn render_passes_system(
     trace: Option<NonSendMut<TracePipeline>>,
     gtao: Option<NonSendMut<GtaoPipeline>>,
     lighting: Option<NonSendMut<LightingPipeline>>,
+    near_mesh: Option<NonSend<NearMeshPipeline>>,
+    scene: Option<NonSend<VoxelSceneBuffers>>,
     blit: Option<NonSendMut<BlitPipeline>>,
     temporal: Res<TemporalCameraState>,
     camera: Res<capy_core::Camera>,
@@ -68,6 +72,116 @@ pub(crate) fn render_passes_system(
     });
 
     trace.clear_stats(&mut encoder);
+
+    if let (Some(near_mesh), Some(scene)) = (near_mesh, scene)
+        && renderer_settings.hybrid_near_radius > 0.0
+        && (scene.near_mesh_index_count > 0 || scene.near_mesh_water_index_count > 0)
+        && (scene
+            .near_mesh_chunks
+            .iter()
+            .chain(scene.near_mesh_water_chunks.iter())
+            .any(|chunk| {
+                near_mesh_chunk_is_active(
+                    chunk.coord,
+                    scene.chunk_size_xz,
+                    camera.position,
+                    renderer_settings.hybrid_near_radius,
+                )
+            })
+            || ((scene.canonical_index_count > 0 || scene.canonical_water_index_count > 0)
+                && scene.canonical_chunks.iter().any(|&coord| {
+                    near_mesh_chunk_is_active(
+                        coord,
+                        scene.chunk_size_xz,
+                        camera.position,
+                        renderer_settings.hybrid_near_radius,
+                    )
+                })))
+    {
+        let ts = gpu_profiler.pass_indices("near-mesh");
+        let opaque_ts_writes = ts.map(|(b, _)| wgpu::RenderPassTimestampWrites {
+            query_set: gpu_profiler.query_set(),
+            beginning_of_pass_write_index: Some(b),
+            end_of_pass_write_index: None,
+        });
+        let water_ts_writes = ts.map(|(_, e)| wgpu::RenderPassTimestampWrites {
+            query_set: gpu_profiler.query_set(),
+            beginning_of_pass_write_index: None,
+            end_of_pass_write_index: Some(e),
+        });
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Near Mesh Pass"),
+            color_attachments: &[
+                Some(clear_color_attachment(&trace.near_mesh_color.view)),
+                Some(clear_color_attachment(&trace.near_mesh_normal.view)),
+                Some(clear_color_attachment(&trace.near_mesh_depth.view)),
+            ],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &trace.near_mesh_depth_buffer.view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Discard,
+                }),
+                stencil_ops: None,
+            }),
+            timestamp_writes: opaque_ts_writes,
+            ..Default::default()
+        });
+        draw_near_mesh(
+            &mut pass,
+            &near_mesh.opaque_pipeline,
+            &near_mesh.bind_group,
+            &scene,
+            &scene.near_mesh_index_buffer,
+            &scene.near_mesh_chunks,
+            scene.canonical_index_start,
+            scene.canonical_index_count,
+            camera.position,
+            renderer_settings.hybrid_near_radius,
+        );
+        drop(pass);
+
+        let mut water_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Near Water Mesh Pass"),
+            color_attachments: &[
+                Some(clear_color_attachment(&trace.near_mesh_water_normal.view)),
+                Some(clear_color_attachment(&trace.near_mesh_water_depth.view)),
+            ],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &trace.near_mesh_water_depth_buffer.view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Discard,
+                }),
+                stencil_ops: None,
+            }),
+            timestamp_writes: water_ts_writes,
+            ..Default::default()
+        });
+        if renderer_settings.water_enabled {
+            draw_near_mesh(
+                &mut water_pass,
+                &near_mesh.water_pipeline,
+                &near_mesh.bind_group,
+                &scene,
+                &scene.near_mesh_water_index_buffer,
+                &scene.near_mesh_water_chunks,
+                scene.canonical_water_index_start,
+                scene.canonical_water_index_count,
+                camera.position,
+                renderer_settings.hybrid_near_radius,
+            );
+        }
+    } else {
+        let _clear_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Near Mesh Depth Clear"),
+            color_attachments: &[
+                Some(clear_color_attachment(&trace.near_mesh_depth.view)),
+                Some(clear_color_attachment(&trace.near_mesh_water_depth.view)),
+            ],
+            ..Default::default()
+        });
+    }
 
     {
         let ts = gpu_profiler.pass_indices("trace");
@@ -388,4 +502,67 @@ pub(crate) fn render_passes_system(
     frame.output_view = Some(output_view);
 
     Ok(())
+}
+
+fn clear_color_attachment(view: &wgpu::TextureView) -> wgpu::RenderPassColorAttachment<'_> {
+    wgpu::RenderPassColorAttachment {
+        view,
+        resolve_target: None,
+        depth_slice: None,
+        ops: wgpu::Operations {
+            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+            store: wgpu::StoreOp::Store,
+        },
+    }
+}
+
+fn draw_near_mesh<'pass>(
+    pass: &mut wgpu::RenderPass<'pass>,
+    pipeline: &'pass wgpu::RenderPipeline,
+    bind_group: &'pass wgpu::BindGroup,
+    scene: &'pass VoxelSceneBuffers,
+    index_buffer: &'pass wgpu::Buffer,
+    chunks: &'pass [capy_core::NearVoxelMeshChunk],
+    canonical_index_start: u32,
+    canonical_index_count: u32,
+    camera_position: glam::Vec3,
+    radius: f32,
+) {
+    pass.set_pipeline(pipeline);
+    pass.set_bind_group(0, bind_group, &[]);
+    pass.set_vertex_buffer(0, scene.near_mesh_vertex_buffer.slice(..));
+    pass.set_vertex_buffer(1, scene.near_mesh_instance_buffer.slice(..));
+    pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+    for chunk in chunks {
+        if near_mesh_chunk_is_active(chunk.coord, scene.chunk_size_xz, camera_position, radius) {
+            pass.draw_indexed(
+                chunk.index_start..chunk.index_start + chunk.index_count,
+                0,
+                0..1,
+            );
+        }
+    }
+    if canonical_index_count > 0 {
+        let index_end = canonical_index_start + canonical_index_count;
+        for (instance_index, &coord) in scene.canonical_chunks.iter().enumerate() {
+            if near_mesh_chunk_is_active(coord, scene.chunk_size_xz, camera_position, radius) {
+                let instance = instance_index as u32 + 1;
+                pass.draw_indexed(canonical_index_start..index_end, 0, instance..instance + 1);
+            }
+        }
+    }
+}
+
+fn near_mesh_chunk_is_active(
+    coord: [i32; 3],
+    chunk_size_xz: u32,
+    camera_position: glam::Vec3,
+    radius: f32,
+) -> bool {
+    let chunk_size = chunk_size_xz as f32;
+    let center_x = (coord[0] as f32 + 0.5) * chunk_size;
+    let center_z = (coord[2] as f32 + 0.5) * chunk_size;
+    let dx = center_x - camera_position.x;
+    let dz = center_z - camera_position.z;
+    dx * dx + dz * dz <= radius * radius
 }

@@ -53,6 +53,8 @@ fn poll_prefab_job(library: &mut PrefabLibrary, task: &mut PrefabTask) {
 }
 
 fn apply_prefab_job_result(library: &mut PrefabLibrary, result: PrefabJobResult) {
+    let completed_source = result.source_path.clone();
+    let selected_before = library.selected_source.clone();
     let Some(entry) = library
         .entries
         .iter_mut()
@@ -77,8 +79,13 @@ fn apply_prefab_job_result(library: &mut PrefabLibrary, result: PrefabJobResult)
     }
 
     entry.last_attempt = Some(result.signature);
-    library.prefab_generation = library.prefab_generation.wrapping_add(1);
     library.ensure_selected_entry();
+    let affects_selected_preview = selected_before.as_ref() == Some(&completed_source)
+        || (selected_before.is_none()
+            && library.selected_source.as_ref() == Some(&completed_source));
+    if affects_selected_preview {
+        library.prefab_generation = library.prefab_generation.wrapping_add(1);
+    }
 }
 
 fn rescan_prefab_library(

@@ -54,6 +54,11 @@ pub struct RendererSettings {
     pub chunk_lod_scale: f32,
     pub node_lod_scale: f32,
     pub lod_bias: f32,
+    /// Radius around the camera where completely meshed edited chunks use the
+    /// experimental raster path. Set to zero to disable the prototype.
+    pub hybrid_near_radius: f32,
+    /// Apply a conspicuous tint to pixels selected from the near raster mesh.
+    pub hybrid_debug_tint: bool,
 
     pub ao_radius: f32,
     pub ao_intensity: f32,
@@ -110,6 +115,8 @@ impl Default for RendererSettings {
             chunk_lod_scale: 0.25,
             node_lod_scale: 1.0,
             lod_bias: 1.0,
+            hybrid_near_radius: 512.0,
+            hybrid_debug_tint: true,
             ao_radius: 2.0,
             ao_intensity: 1.0,
             ao_samples: 4,

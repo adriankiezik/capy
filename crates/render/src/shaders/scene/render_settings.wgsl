@@ -28,4 +28,8 @@ struct RenderSettingsUniform {
     water_reflection_distance: f32,
     water_shadows: f32,
     water_shadow_distance: f32,
+    hybrid_near_radius: f32,
+    hybrid_debug_tint: f32,
+    _hybrid_pad0: f32,
+    _hybrid_pad1: f32,
 };

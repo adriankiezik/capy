@@ -5,7 +5,8 @@ use bevy_ecs::resource::Resource;
 use crate::{BakedChunkData, MATERIAL_PALETTE_SIZE, MaterialId, is_water_material};
 
 /// Number of u32 words per slot in the indirection table.
-const INDIRECTION_STRIDE: usize = 9;
+const INDIRECTION_STRIDE: usize = 10;
+const SLOT_FLAG_NEAR_MESH: u32 = 1;
 
 /// Sentinel value: chunk has foliage but no bitmap (all columns are foliage).
 const FOLIAGE_BITMAP_ALL: u32 = 0xFFFFFFFE;
@@ -21,6 +22,38 @@ struct SlotTreeInfo {
     root_offset: u32,
     depth: u32,
     pool_offset: u32,
+}
+
+/// CPU-side surface vertex used by the experimental near-field mesh path.
+///
+/// The renderer uploads these vertices directly when a voxel scene is rebuilt.
+/// Keeping the prototype mesh next to the DAG data makes both representations
+/// switch atomically after an editor rebake.
+#[derive(Clone, Copy, Debug)]
+pub struct VoxelSurfaceVertex {
+    pub position: [f32; 3],
+    pub normal: [f32; 3],
+    pub material: MaterialId,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct NearVoxelMeshData {
+    pub vertices: Vec<VoxelSurfaceVertex>,
+    pub indices: Vec<u32>,
+    /// Independently drawable chunk ranges in `indices`.
+    pub chunks: Vec<NearVoxelMeshChunk>,
+    /// One local-space canonical chunk mesh, drawn through instancing.
+    pub canonical_index_start: u32,
+    pub canonical_index_count: u32,
+    /// Unedited chunk slots represented by the canonical instance mesh.
+    pub canonical_chunks: Vec<[i32; 3]>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct NearVoxelMeshChunk {
+    pub coord: [i32; 3],
+    pub index_start: u32,
+    pub index_count: u32,
 }
 
 fn bit_is_set_64(lo: u32, hi: u32, bit: u32) -> bool {
@@ -55,7 +88,8 @@ pub struct VoxelMeshData {
     pub pool_avg: Vec<u32>,
     /// Per-slot indirection: [world_size, root_offset, depth, pool_offset,
     ///                        foliage_y_min, foliage_y_max, foliage_bitmap_offset,
-    ///                        foliage_y_bands, foliage_tile_y_ranges_offset] × total_slots.
+    ///                        foliage_y_bands, foliage_tile_y_ranges_offset,
+    ///                        flags] × total_slots.
     pub indirection: Vec<u32>,
     /// Chunk-coordinate origin of the grid (min corner).
     pub grid_min: [i32; 3],
@@ -66,6 +100,8 @@ pub struct VoxelMeshData {
     /// Vertical chunk extent in voxels (Y).
     pub chunk_size_y: u32,
     pub material_palette: [[f32; 3]; MATERIAL_PALETTE_SIZE],
+    /// Optional raster representation for edited chunks near the camera.
+    pub near_mesh: NearVoxelMeshData,
 }
 
 /// Write one indirection slot at the given index.
@@ -87,6 +123,7 @@ fn write_slot(
     indirection[base + 6] = bitmap_offset;
     indirection[base + 7] = baked.foliage_y_bands;
     indirection[base + 8] = tile_y_bands_offset;
+    indirection[base + 9] = 0;
 }
 
 /// Compute the foliage bitmap pool offset for a baked chunk.
@@ -237,6 +274,7 @@ impl VoxelMeshData {
             chunk_size_xz: 1,
             chunk_size_y: 1,
             material_palette: [[0.0; 3]; MATERIAL_PALETTE_SIZE],
+            near_mesh: NearVoxelMeshData::default(),
         }
     }
 
@@ -275,6 +313,7 @@ impl VoxelMeshData {
             chunk_size_xz,
             chunk_size_y,
             material_palette,
+            near_mesh: NearVoxelMeshData::default(),
         }
     }
 
@@ -326,6 +365,7 @@ impl VoxelMeshData {
             chunk_size_xz,
             chunk_size_y,
             material_palette,
+            near_mesh: NearVoxelMeshData::default(),
         }
     }
 
@@ -425,7 +465,58 @@ impl VoxelMeshData {
             chunk_size_xz,
             chunk_size_y,
             material_palette,
+            near_mesh: NearVoxelMeshData::default(),
         }
+    }
+
+    /// Attach a complete near-field representation and flag its chunks in the
+    /// GPU indirection table. A chunk is skipped by primary voxel traversal only
+    /// when it appears in `near_mesh.chunks`.
+    pub fn set_near_mesh(&mut self, near_mesh: NearVoxelMeshData) {
+        for slot in self.indirection.chunks_exact_mut(INDIRECTION_STRIDE) {
+            slot[9] &= !SLOT_FLAG_NEAR_MESH;
+        }
+
+        for chunk in &near_mesh.chunks {
+            let coord = chunk.coord;
+            let local_x = coord[0] - self.grid_min[0];
+            let local_y = coord[1] - self.grid_min[1];
+            let local_z = coord[2] - self.grid_min[2];
+            if local_x < 0
+                || local_y < 0
+                || local_z < 0
+                || local_x >= self.grid_dim[0] as i32
+                || local_y >= self.grid_dim[1] as i32
+                || local_z >= self.grid_dim[2] as i32
+            {
+                continue;
+            }
+            let slot_index = local_x as usize
+                + local_y as usize * self.grid_dim[0] as usize
+                + local_z as usize * self.grid_dim[0] as usize * self.grid_dim[1] as usize;
+            self.indirection[slot_index * INDIRECTION_STRIDE + 9] |= SLOT_FLAG_NEAR_MESH;
+        }
+
+        for &coord in &near_mesh.canonical_chunks {
+            let local_x = coord[0] - self.grid_min[0];
+            let local_y = coord[1] - self.grid_min[1];
+            let local_z = coord[2] - self.grid_min[2];
+            if local_x < 0
+                || local_y < 0
+                || local_z < 0
+                || local_x >= self.grid_dim[0] as i32
+                || local_y >= self.grid_dim[1] as i32
+                || local_z >= self.grid_dim[2] as i32
+            {
+                continue;
+            }
+            let slot_index = local_x as usize
+                + local_y as usize * self.grid_dim[0] as usize
+                + local_z as usize * self.grid_dim[0] as usize * self.grid_dim[1] as usize;
+            self.indirection[slot_index * INDIRECTION_STRIDE + 9] |= SLOT_FLAG_NEAR_MESH;
+        }
+
+        self.near_mesh = near_mesh;
     }
 
     fn lookup_chunk_info(&self, chunk_coord: [i32; 3]) -> Option<SlotTreeInfo> {

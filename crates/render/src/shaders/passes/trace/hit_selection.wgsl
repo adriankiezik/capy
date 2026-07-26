@@ -63,3 +63,16 @@ fn resolve_visible_hit(ray_origin: vec3<f32>, ray_dir: vec3<f32>, hit: HitResult
 
     return HitSelection(use_water, use_preview, use_grass, preview_hit_result);
 }
+
+fn visible_hit_depth(selection: HitSelection, hit: HitResult) -> f32 {
+    if selection.use_water {
+        return dda_water_hit.t;
+    }
+    if selection.use_preview {
+        return selection.preview_hit.t;
+    }
+    if selection.use_grass {
+        return dda_grass_hit.t;
+    }
+    return select(1e20, hit.t, hit.hit);
+}

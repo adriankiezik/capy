@@ -19,6 +19,7 @@ struct SlotTreeInfo {
     foliage_bitmap_offset: u32,
     foliage_y_bands: u32,
     foliage_tile_y_ranges_offset: u32,
+    flags: u32,
 };
 
 struct StackEntry {

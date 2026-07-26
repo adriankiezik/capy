@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 use std::sync::mpsc::Receiver;
 
-use capy_core::{BakedChunkData, VoxelMeshData};
+use capy_core::{BakedChunkData, NearVoxelMeshData, VoxelMeshData};
 
 pub(crate) struct RebakeOutput {
     pub(crate) edited_baked: HashMap<[i32; 3], BakedChunkData>,
+    pub(crate) near_mesh_cache: HashMap<[i32; 3], NearVoxelMeshData>,
+    pub(crate) canonical_near_mesh: NearVoxelMeshData,
     pub(crate) mesh: VoxelMeshData,
     pub(crate) upload: capy_render::PreparedVoxelSceneUpload,
     pub(crate) num_chunks: usize,
@@ -12,6 +14,8 @@ pub(crate) struct RebakeOutput {
     pub(crate) total_bricks: usize,
     pub(crate) patch_ms: f64,
     pub(crate) mesh_ms: f64,
+    pub(crate) near_mesh_ms: f64,
+    pub(crate) upload_prepare_ms: f64,
     /// Pool offset of appended preview DAG, if any.
     pub(crate) preview_pool_offset: Option<u32>,
 }

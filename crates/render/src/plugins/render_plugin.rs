@@ -27,6 +27,11 @@ impl capy_core::Plugin for RenderPlugin {
                     tracing::debug!("<<< init_trace done");
                 },
                 |world: &mut World| {
+                    tracing::debug!(">>> init_near_mesh");
+                    crate::systems::init_near_mesh(world);
+                    tracing::debug!("<<< init_near_mesh done");
+                },
+                |world: &mut World| {
                     tracing::debug!(">>> init_gtao");
                     crate::systems::gtao::init_gtao(world);
                     tracing::debug!("<<< init_gtao done");

@@ -68,11 +68,13 @@ pub(crate) fn rebake(world: &mut World) -> Result<(), BevyError> {
 
     let num_chunks = chunk_snapshots.len();
     let gpu = world.resource::<GpuAccess>().clone();
-    let (canonical_baked, edited_baked, grid_dim_xz) = {
+    let (canonical_baked, edited_baked, near_mesh_cache, canonical_near_mesh, grid_dim_xz) = {
         let mut wg = world.resource_mut::<WorldGrid>();
         (
             wg.canonical_baked.clone(),
             std::mem::take(&mut wg.edited_baked),
+            std::mem::take(&mut wg.near_mesh_cache),
+            std::mem::take(&mut wg.canonical_near_mesh),
             wg.grid_dim_xz,
         )
     };
@@ -89,6 +91,8 @@ pub(crate) fn rebake(world: &mut World) -> Result<(), BevyError> {
         let result = build_rebake_output(
             canonical_baked,
             edited_baked,
+            near_mesh_cache,
+            canonical_near_mesh,
             grid_dim_xz,
             chunk_snapshots,
             num_chunks,
@@ -106,6 +110,8 @@ pub(crate) fn rebake(world: &mut World) -> Result<(), BevyError> {
 fn build_rebake_output(
     canonical_baked: BakedChunkData,
     mut edited_baked: std::collections::HashMap<[i32; 3], BakedChunkData>,
+    mut near_mesh_cache: std::collections::HashMap<[i32; 3], capy_core::NearVoxelMeshData>,
+    canonical_near_mesh: capy_core::NearVoxelMeshData,
     grid_dim_xz: u32,
     chunks_to_patch: std::collections::HashMap<[i32; 3], DirtyChunkSnapshot>,
     num_chunks: usize,
@@ -113,6 +119,7 @@ fn build_rebake_output(
     preview_baked: Option<BakedChunkData>,
 ) -> anyhow::Result<RebakeOutput> {
     let t_patch = Instant::now();
+    let dirty_coords: Vec<_> = chunks_to_patch.keys().copied().collect();
     let mut total_bricks = 0usize;
     let mut jobs = Vec::with_capacity(num_chunks);
 
@@ -170,6 +177,38 @@ fn build_rebake_output(
     }
     let patch_ms = t_patch.elapsed().as_secs_f64() * 1000.0;
 
+    let t_near_mesh = Instant::now();
+    for coord in &dirty_coords {
+        if let Some(baked) = edited_baked.get(coord) {
+            if let Some(chunk_mesh) = capy_world::build_near_voxel_chunk_mesh(
+                baked,
+                *coord,
+                capy_world::CHUNK_XZ,
+                capy_world::CHUNK_Y,
+                1_000_000,
+            ) {
+                near_mesh_cache.insert(*coord, chunk_mesh);
+            } else {
+                near_mesh_cache.remove(coord);
+            }
+        } else {
+            near_mesh_cache.remove(coord);
+        }
+    }
+    let near_mesh = capy_world::assemble_hybrid_near_mesh(
+        &near_mesh_cache,
+        &canonical_near_mesh,
+        &edited_baked,
+        grid_dim_xz,
+    );
+    let near_mesh_ms = t_near_mesh.elapsed().as_secs_f64() * 1000.0;
+    tracing::info!(
+        "[hybrid] remeshed {}/{} dirty chunks; cached {}/{} edited chunks",
+        dirty_coords.len(),
+        num_chunks,
+        near_mesh_cache.len(),
+        edited_baked.len(),
+    );
     let t_mesh = Instant::now();
     let mut mesh = VoxelMeshData::with_edited_chunks(
         &canonical_baked,
@@ -179,6 +218,7 @@ fn build_rebake_output(
         capy_world::CHUNK_Y,
         MATERIAL_COLORS,
     );
+    mesh.set_near_mesh(near_mesh);
 
     // Append preview DAG to the end of the pool buffers
     let preview_pool_offset = preview_baked.map(|baked| {
@@ -189,10 +229,14 @@ fn build_rebake_output(
     });
 
     let mesh_ms = t_mesh.elapsed().as_secs_f64() * 1000.0;
+    let t_upload = Instant::now();
     let upload = capy_render::prepare_voxel_scene_upload(&gpu, &mesh)?;
+    let upload_prepare_ms = t_upload.elapsed().as_secs_f64() * 1000.0;
 
     Ok(RebakeOutput {
         edited_baked,
+        near_mesh_cache,
+        canonical_near_mesh,
         mesh,
         upload,
         num_chunks,
@@ -200,6 +244,8 @@ fn build_rebake_output(
         total_bricks,
         patch_ms,
         mesh_ms,
+        near_mesh_ms,
+        upload_prepare_ms,
         preview_pool_offset,
     })
 }
@@ -207,6 +253,8 @@ fn build_rebake_output(
 fn apply_rebake_result(world: &mut World, result: RebakeOutput) {
     let RebakeOutput {
         edited_baked,
+        near_mesh_cache,
+        canonical_near_mesh,
         mesh,
         upload,
         num_chunks,
@@ -214,13 +262,18 @@ fn apply_rebake_result(world: &mut World, result: RebakeOutput) {
         total_bricks,
         patch_ms,
         mesh_ms,
+        near_mesh_ms,
+        upload_prepare_ms,
         preview_pool_offset,
     } = result;
 
     let t_apply = Instant::now();
     let old_edited_baked = {
         let mut wg = world.resource_mut::<WorldGrid>();
-        std::mem::replace(&mut wg.edited_baked, edited_baked)
+        let old = std::mem::replace(&mut wg.edited_baked, edited_baked);
+        wg.near_mesh_cache = near_mesh_cache;
+        wg.canonical_near_mesh = canonical_near_mesh;
+        old
     };
 
     let t_gpu = Instant::now();
@@ -260,8 +313,9 @@ fn apply_rebake_result(world: &mut World, result: RebakeOutput) {
     drop_async((old_edited_baked, old_mesh));
 
     info!(
-        "[rebake] patch={patch_ms:.1}ms, mesh_rebuild={mesh_ms:.1}ms, \
-         gpu_upload={gpu_ms:.1}ms, apply={apply_ms:.1}ms | chunks={num_chunks}, rebuilt={rebuilt_chunks}, \
+        "[rebake] patch={patch_ms:.1}ms, near_mesh={near_mesh_ms:.1}ms, \
+         scene_rebuild={mesh_ms:.1}ms, upload_prepare={upload_prepare_ms:.1}ms, \
+         gpu_apply={gpu_ms:.1}ms, apply={apply_ms:.1}ms | chunks={num_chunks}, rebuilt={rebuilt_chunks}, \
          bricks={total_bricks}"
     );
 }

@@ -5,7 +5,7 @@ use bevy_ecs::world::World;
 use capy_core::{Camera, CursorMode, GameWindow, MATERIAL_COLORS, VoxelMeshData};
 use capy_shared::FlyCameraConfig;
 use glam::Vec3;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::resources::{
     BakeTask, EditHistory, EditTask, EditableWorld, EditorState, InputEdge, MeshDirty,
@@ -13,6 +13,7 @@ use crate::resources::{
 };
 
 const GRID_DIM_XZ: u32 = 32;
+const HYBRID_MAX_QUADS_PER_CHUNK: usize = 1_000_000;
 
 pub(crate) fn editor_startup(world: &mut World) -> Result<(), BevyError> {
     let canonical = capy_world::generate_flat_baked()?;
@@ -24,11 +25,21 @@ pub(crate) fn editor_startup(world: &mut World) -> Result<(), BevyError> {
     } else {
         let world_dir = capy_assets::resolve_world_dir();
         match capy_assets::load_world_chunks(&world_dir, &capy_assets::OsFileSystem) {
-            Ok(chunks) if !chunks.is_empty() => {
-                info!("[editor] loaded {} edited chunks from disk", chunks.len());
+            Ok(chunks) => {
+                info!(
+                    "[editor] loaded {} edited chunks from {}",
+                    chunks.len(),
+                    world_dir.display(),
+                );
                 chunks
             }
-            _ => HashMap::new(),
+            Err(error) => {
+                warn!(
+                    "[editor] could not load world from {}: {error}; using canonical terrain",
+                    world_dir.display(),
+                );
+                HashMap::new()
+            }
         }
     };
 
@@ -46,7 +57,7 @@ pub(crate) fn editor_startup(world: &mut World) -> Result<(), BevyError> {
         capy_world::recompute_foliage_bitmap(baked, capy_world::CHUNK_XZ);
     }
 
-    let mesh = if edited_baked.is_empty() {
+    let mut mesh = if edited_baked.is_empty() {
         VoxelMeshData::from_flat_world(
             &canonical,
             GRID_DIM_XZ,
@@ -64,6 +75,32 @@ pub(crate) fn editor_startup(world: &mut World) -> Result<(), BevyError> {
             MATERIAL_COLORS,
         )
     };
+    let near_mesh_cache = capy_world::build_near_voxel_mesh_cache(
+        &edited_baked,
+        capy_world::CHUNK_XZ,
+        capy_world::CHUNK_Y,
+        HYBRID_MAX_QUADS_PER_CHUNK,
+    );
+    let canonical_near_mesh = capy_world::build_near_voxel_chunk_mesh(
+        &canonical,
+        [0, 0, 0],
+        capy_world::CHUNK_XZ,
+        capy_world::CHUNK_Y,
+        HYBRID_MAX_QUADS_PER_CHUNK,
+    )
+    .unwrap_or_default();
+    let near_mesh = capy_world::assemble_hybrid_near_mesh(
+        &near_mesh_cache,
+        &canonical_near_mesh,
+        &edited_baked,
+        GRID_DIM_XZ,
+    );
+    info!(
+        "[hybrid] meshed {}/{} edited chunks plus one canonical instance mesh",
+        near_mesh_cache.len(),
+        edited_baked.len(),
+    );
+    mesh.set_near_mesh(near_mesh);
 
     let window = world.resource::<GameWindow>();
     let aspect = if window.height > 0 {
@@ -106,6 +143,8 @@ pub(crate) fn editor_startup(world: &mut World) -> Result<(), BevyError> {
     world.insert_resource(WorldGrid {
         canonical_baked: canonical,
         edited_baked,
+        near_mesh_cache,
+        canonical_near_mesh,
         grid_dim_xz: GRID_DIM_XZ,
     });
     world.insert_resource(editable);

@@ -4,7 +4,9 @@ use crate::gpu_texture::GpuTexture;
 use crate::pipeline_factory;
 use crate::resources::voxel_scene::VoxelSceneBuffers;
 use crate::shader_source;
-use crate::voxel_bind_group::{bgl_storage_ro, bgl_storage_rw, bgl_storage_texture, bgl_uniform};
+use crate::voxel_bind_group::{
+    bgl_sampled_texture, bgl_storage_ro, bgl_storage_rw, bgl_storage_texture, bgl_uniform,
+};
 
 const TRACE_STATS_BUFFER_SIZE: u64 = std::mem::size_of::<TraceStatsSnapshot>() as u64;
 
@@ -113,6 +115,11 @@ impl TraceLayout {
                 bgl_storage_rw(12),
                 bgl_uniform(13),
                 bgl_uniform(14),
+                bgl_sampled_texture(15),
+                bgl_sampled_texture(16),
+                bgl_sampled_texture(17),
+                bgl_sampled_texture(18),
+                bgl_sampled_texture(19),
             ],
         });
         Self { layout }
@@ -133,6 +140,11 @@ impl TraceLayout {
         scene: &VoxelSceneBuffers,
         lod_debug_buffer: &wgpu::Buffer,
         stats_buffer: &wgpu::Buffer,
+        near_mesh_color: &GpuTexture,
+        near_mesh_normal: &GpuTexture,
+        near_mesh_depth: &GpuTexture,
+        near_mesh_water_normal: &GpuTexture,
+        near_mesh_water_depth: &GpuTexture,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Trace Bind Group"),
@@ -198,6 +210,26 @@ impl TraceLayout {
                     binding: 14,
                     resource: scene.selection_buffer.buffer().as_entire_binding(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 15,
+                    resource: wgpu::BindingResource::TextureView(&near_mesh_color.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 16,
+                    resource: wgpu::BindingResource::TextureView(&near_mesh_normal.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 17,
+                    resource: wgpu::BindingResource::TextureView(&near_mesh_depth.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 18,
+                    resource: wgpu::BindingResource::TextureView(&near_mesh_water_normal.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 19,
+                    resource: wgpu::BindingResource::TextureView(&near_mesh_water_depth.view),
+                },
             ],
         })
     }
@@ -213,6 +245,13 @@ pub(crate) struct TracePipeline {
     pub(crate) gbuf_depth: GpuTexture,
     pub(crate) dlss_depth: GpuTexture,
     pub(crate) motion_vectors: GpuTexture,
+    pub(crate) near_mesh_color: GpuTexture,
+    pub(crate) near_mesh_normal: GpuTexture,
+    pub(crate) near_mesh_depth: GpuTexture,
+    pub(crate) near_mesh_depth_buffer: GpuTexture,
+    pub(crate) near_mesh_water_normal: GpuTexture,
+    pub(crate) near_mesh_water_depth: GpuTexture,
+    pub(crate) near_mesh_water_depth_buffer: GpuTexture,
 
     lod_debug_buffer: wgpu::Buffer,
     stats_buffer: wgpu::Buffer,
@@ -269,6 +308,15 @@ impl TracePipeline {
             wgpu::TextureFormat::Rg32Float,
             wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
         );
+        let (
+            near_mesh_color,
+            near_mesh_normal,
+            near_mesh_depth,
+            near_mesh_depth_buffer,
+            near_mesh_water_normal,
+            near_mesh_water_depth,
+            near_mesh_water_depth_buffer,
+        ) = create_near_mesh_targets(device, width, height);
 
         let layout = TraceLayout::new(device);
 
@@ -290,6 +338,11 @@ impl TracePipeline {
             scene,
             &lod_debug_buffer,
             &stats_buffer,
+            &near_mesh_color,
+            &near_mesh_normal,
+            &near_mesh_depth,
+            &near_mesh_water_normal,
+            &near_mesh_water_depth,
         );
 
         Self {
@@ -301,6 +354,13 @@ impl TracePipeline {
             gbuf_depth,
             dlss_depth,
             motion_vectors,
+            near_mesh_color,
+            near_mesh_normal,
+            near_mesh_depth,
+            near_mesh_depth_buffer,
+            near_mesh_water_normal,
+            near_mesh_water_depth,
+            near_mesh_water_depth_buffer,
             lod_debug_buffer,
             stats_buffer,
             stats_frames: [TraceStatsFrame::new(device), TraceStatsFrame::new(device)],
@@ -321,6 +381,11 @@ impl TracePipeline {
             scene,
             &self.lod_debug_buffer,
             &self.stats_buffer,
+            &self.near_mesh_color,
+            &self.near_mesh_normal,
+            &self.near_mesh_depth,
+            &self.near_mesh_water_normal,
+            &self.near_mesh_water_depth,
         );
     }
 
@@ -368,6 +433,15 @@ impl TracePipeline {
             wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
         );
         self.lod_debug_buffer = create_lod_debug_buffer(device, width, height);
+        (
+            self.near_mesh_color,
+            self.near_mesh_normal,
+            self.near_mesh_depth,
+            self.near_mesh_depth_buffer,
+            self.near_mesh_water_normal,
+            self.near_mesh_water_depth,
+            self.near_mesh_water_depth_buffer,
+        ) = create_near_mesh_targets(device, width, height);
 
         self.width = width;
         self.height = height;
@@ -381,6 +455,11 @@ impl TracePipeline {
             scene,
             &self.lod_debug_buffer,
             &self.stats_buffer,
+            &self.near_mesh_color,
+            &self.near_mesh_normal,
+            &self.near_mesh_depth,
+            &self.near_mesh_water_normal,
+            &self.near_mesh_water_depth,
         );
     }
 
@@ -427,6 +506,80 @@ impl TracePipeline {
     pub(crate) fn end_frame(&mut self) {
         self.stats_frame_index = 1 - self.stats_frame_index;
     }
+}
+
+fn create_near_mesh_targets(
+    device: &wgpu::Device,
+    width: u32,
+    height: u32,
+) -> (
+    GpuTexture,
+    GpuTexture,
+    GpuTexture,
+    GpuTexture,
+    GpuTexture,
+    GpuTexture,
+    GpuTexture,
+) {
+    let usage = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;
+    (
+        GpuTexture::new_2d(
+            device,
+            "Near Mesh Color",
+            width,
+            height,
+            wgpu::TextureFormat::Rgba8Unorm,
+            usage,
+        ),
+        GpuTexture::new_2d(
+            device,
+            "Near Mesh Normal",
+            width,
+            height,
+            wgpu::TextureFormat::Rgba16Float,
+            usage,
+        ),
+        GpuTexture::new_2d(
+            device,
+            "Near Mesh Ray Depth",
+            width,
+            height,
+            wgpu::TextureFormat::R32Float,
+            usage,
+        ),
+        GpuTexture::new_2d(
+            device,
+            "Near Mesh Depth Buffer",
+            width,
+            height,
+            wgpu::TextureFormat::Depth32Float,
+            wgpu::TextureUsages::RENDER_ATTACHMENT,
+        ),
+        GpuTexture::new_2d(
+            device,
+            "Near Mesh Water Normal",
+            width,
+            height,
+            wgpu::TextureFormat::Rgba16Float,
+            usage,
+        ),
+        GpuTexture::new_2d(
+            device,
+            "Near Mesh Water Ray Depth",
+            width,
+            height,
+            wgpu::TextureFormat::R32Float,
+            usage,
+        ),
+        GpuTexture::new_2d(
+            device,
+            "Near Mesh Water Depth Buffer",
+            width,
+            height,
+            wgpu::TextureFormat::Depth32Float,
+            wgpu::TextureUsages::RENDER_ATTACHMENT,
+        ),
+    )
 }
 
 fn create_lod_debug_buffer(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Buffer {

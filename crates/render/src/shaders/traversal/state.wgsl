@@ -5,6 +5,9 @@ var<private> stk: array<StackEntry, 6>;
 var<private> dda_grass_hit: GrassHit;
 // When true, trace_ray() ignores grass entirely (used by pick shader for editor tools).
 var<private> skip_grass: bool;
+// Only the main trace pass has a raster G-buffer that can replace flagged chunks.
+// Other users of trace_ray(), such as editor picking, must still traverse them.
+var<private> use_near_mesh_handoff: bool;
 
 // Water voxel hit found during DDA traversal, read by trace.wgsl after trace_ray().
 // The traversal skips water voxels (treats them as transparent) and records the

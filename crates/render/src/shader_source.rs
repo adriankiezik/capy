@@ -35,6 +35,7 @@ const TRACE_ENTRY: &str = include_str!("shaders/passes/trace/entry.wgsl");
 // ── passes/ — other passes ──
 const PASS_LIGHTING: &str = include_str!("shaders/passes/lighting/entry.wgsl");
 const PASS_GTAO: &str = include_str!("shaders/passes/gtao/entry.wgsl");
+const PASS_NEAR_MESH: &str = include_str!("shaders/passes/near_mesh.wgsl");
 pub const SHADER_BLIT: &str = include_str!("shaders/passes/blit/entry.wgsl");
 
 const VOXEL_SCENE_BINDINGS: &str = r"
@@ -146,5 +147,15 @@ pub(crate) fn build_gtao_shader_source() -> String {
     out.push_str(LIB_CAMERA);
     out.push('\n');
     out.push_str(PASS_GTAO.trim_start_matches('\u{feff}'));
+    out
+}
+
+pub(crate) fn build_near_mesh_shader_source() -> String {
+    let mut out = String::new();
+    out.push_str(LIB_CAMERA);
+    out.push('\n');
+    out.push_str(SCENE_RENDER_SETTINGS);
+    out.push('\n');
+    out.push_str(PASS_NEAR_MESH);
     out
 }

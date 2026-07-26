@@ -1,6 +1,7 @@
 mod bake;
 mod dag;
 mod error;
+mod near_mesh;
 mod sparse64tree;
 pub mod stress;
 mod terrain;
@@ -9,6 +10,10 @@ mod voxel_grid;
 
 pub use bake::{bake_chunk, bake_chunk_fast, compact_baked_chunk, recompute_foliage_bitmap};
 pub use error::WorldError;
+pub use near_mesh::{
+    assemble_hybrid_near_mesh, build_near_voxel_chunk_mesh, build_near_voxel_mesh,
+    build_near_voxel_mesh_cache,
+};
 pub use sparse64tree::ChunkOccupancy;
 pub use stress::{StressPattern, generate_stress_baked, generate_stress_world};
 pub use terrain::{

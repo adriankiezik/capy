@@ -19,5 +19,7 @@ pub use game_window::GameWindow;
 pub use preview_gpu_data::PreviewGpuData;
 pub use raw_input::RawInput;
 pub use selection_highlight::SelectionHighlight;
-pub use voxel_mesh_data::VoxelMeshData;
+pub use voxel_mesh_data::{
+    NearVoxelMeshChunk, NearVoxelMeshData, VoxelMeshData, VoxelSurfaceVertex,
+};
 pub use window_config::WindowConfig;

@@ -1,6 +1,7 @@
 fn lookup_chunk_info(cc: vec3<i32>) -> SlotTreeInfo {
     var info: SlotTreeInfo;
     info.world_size = 0u;
+    info.flags = 0u;
 
     let lx = cc.x - streaming.grid_min_x;
     let ly = cc.y - streaming.grid_min_y;
@@ -12,7 +13,7 @@ fn lookup_chunk_info(cc: vec3<i32>) -> SlotTreeInfo {
         return info;
     }
     let idx = u32(lx) + u32(ly) * streaming.grid_dim_x + u32(lz) * streaming.grid_dim_x * streaming.grid_dim_y;
-    let base = idx * 9u;
+    let base = idx * 10u;
     info.world_size = indirection[base];
     info.root_offset = indirection[base + 1u];
     info.depth = indirection[base + 2u];
@@ -22,6 +23,7 @@ fn lookup_chunk_info(cc: vec3<i32>) -> SlotTreeInfo {
     info.foliage_bitmap_offset = indirection[base + 6u];
     info.foliage_y_bands = indirection[base + 7u];
     info.foliage_tile_y_ranges_offset = indirection[base + 8u];
+    info.flags = indirection[base + 9u];
     return info;
 }
 

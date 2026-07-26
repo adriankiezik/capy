@@ -60,6 +60,9 @@ pub(crate) fn to_render_settings_uniform(settings: &RendererSettings) -> RenderS
         water_reflection_distance: settings.water_reflection_distance.max(0.0),
         water_shadows: if settings.water_shadows { 1.0 } else { 0.0 },
         water_shadow_distance: settings.water_shadow_distance.max(0.0),
+        hybrid_near_radius: settings.hybrid_near_radius.max(0.0),
+        hybrid_debug_tint: if settings.hybrid_debug_tint { 1.0 } else { 0.0 },
+        _hybrid_pad: [0.0; 2],
     }
 }
 
@@ -95,9 +98,12 @@ pub(crate) struct RenderSettingsUniform {
     water_reflection_distance: f32,
     water_shadows: f32,
     water_shadow_distance: f32,
+    hybrid_near_radius: f32,
+    hybrid_debug_tint: f32,
+    _hybrid_pad: [f32; 2],
 }
 
-const _: () = assert!(std::mem::size_of::<RenderSettingsUniform>() == 16512);
+const _: () = assert!(std::mem::size_of::<RenderSettingsUniform>() == 16528);
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]

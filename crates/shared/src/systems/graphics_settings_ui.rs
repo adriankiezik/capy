@@ -79,6 +79,10 @@ pub fn graphics_settings_ui(world: &mut World) {
                 ao_settings_ui(ui, &mut settings);
             });
 
+            ui.collapsing("Hybrid Voxel Prototype", |ui| {
+                hybrid_voxel_ui(ui, &mut settings);
+            });
+
             ui.collapsing("Lighting", |ui| {
                 lighting_ui(ui, &mut settings);
             });
@@ -315,6 +319,26 @@ fn ao_settings_ui(ui: &mut egui::Ui, settings: &mut RendererSettings) {
     ui.add(egui::Slider::new(&mut settings.ao_intensity, 0.1..=4.0).text("intensity"));
     ui.add(egui::Slider::new(&mut settings.ao_samples, 1..=16).text("samples"));
     ui.add(egui::Slider::new(&mut settings.ao_steps, 1..=16).text("steps"));
+}
+
+fn hybrid_voxel_ui(ui: &mut egui::Ui, settings: &mut RendererSettings) {
+    let mut enabled = settings.hybrid_near_radius > 0.0;
+    if ui
+        .checkbox(&mut enabled, "Mesh edited chunks nearby")
+        .changed()
+    {
+        settings.hybrid_near_radius = if enabled { 512.0 } else { 0.0 };
+    }
+    if enabled {
+        ui.add(
+            egui::Slider::new(&mut settings.hybrid_near_radius, 64.0..=2048.0).text("near radius"),
+        );
+        ui.checkbox(
+            &mut settings.hybrid_debug_tint,
+            "Tint rasterized pixels magenta",
+        );
+        ui.weak("Prototype: primary visibility only; voxel shadows/reflections remain enabled.");
+    }
 }
 
 fn vegetation_ui(ui: &mut egui::Ui, settings: &mut RendererSettings) {

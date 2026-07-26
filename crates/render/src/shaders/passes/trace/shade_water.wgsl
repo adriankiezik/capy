@@ -34,11 +34,20 @@ fn shade_water(pixel: vec2<i32>, ray_origin: vec3<f32>, ray_dir: vec3<f32>, hit:
 
     // Underwater color shared by both top-surface and side-face paths
     var refraction = WATER_DEEP_COLOR;
-    let grass_behind = grass.hit && (!hit.hit || grass.t < hit.t);
+    let raster_solid_depth = textureLoad(near_mesh_depth, pixel, 0).r;
+    let raster_solid_behind = raster_solid_depth > water.t;
+    let grass_behind = grass.hit
+        && (!hit.hit || grass.t < hit.t)
+        && (!raster_solid_behind || grass.t < raster_solid_depth);
     if grass_behind {
         if ENABLE_TRACE_STATS { trace_stats_water_absorb_evals += 1u; }
         let uw_dist = grass.t - water.t;
         refraction = water_absorb(grass.color, uw_dist);
+    } else if raster_solid_behind && (!hit.hit || raster_solid_depth < hit.t) {
+        if ENABLE_TRACE_STATS { trace_stats_water_absorb_evals += 1u; }
+        let uw_dist = raster_solid_depth - water.t;
+        let raster_color = textureLoad(near_mesh_color, pixel, 0).rgb;
+        refraction = water_absorb(raster_color, uw_dist);
     } else if hit.hit {
         if ENABLE_TRACE_STATS { trace_stats_water_absorb_evals += 1u; }
         let uw_dist = hit.t - water.t;
@@ -53,7 +62,7 @@ fn shade_water(pixel: vec2<i32>, ray_origin: vec3<f32>, ray_dir: vec3<f32>, hit:
 
     // Track when nothing was found behind the water (deep color fallback)
     if ENABLE_TRACE_STATS {
-        let has_solid_behind = grass_behind || hit.hit;
+        let has_solid_behind = grass_behind || raster_solid_behind || hit.hit;
         if !has_solid_behind {
             trace_stats_water_deep_no_hit += 1u;
         }

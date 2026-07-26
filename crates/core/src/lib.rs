@@ -19,8 +19,9 @@ pub use material::{
 };
 pub use plugin::Plugin;
 pub use resources::{
-    AppExit, Camera, CursorMode, FrameProfiler, FrameTime, GameWindow, PreviewGpuData, RawInput,
-    SelectionHighlight, VoxelMeshData, WindowConfig,
+    AppExit, Camera, CursorMode, FrameProfiler, FrameTime, GameWindow, NearVoxelMeshChunk,
+    NearVoxelMeshData, PreviewGpuData, RawInput, SelectionHighlight, VoxelMeshData,
+    VoxelSurfaceVertex, WindowConfig,
 };
 pub use schedule::{PreStartup, Render, Startup, Update};
 pub use window::Window;

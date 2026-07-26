@@ -5,6 +5,7 @@ use capy_shared::FlyCameraConfig;
 use glam::Vec3;
 
 const GRID_DIM_XZ: u32 = 32;
+const HYBRID_MAX_QUADS_PER_CHUNK: usize = 1_000_000;
 
 pub(crate) fn game_startup(world: &mut World) -> Result<(), BevyError> {
     if std::env::var("CAPY_STRESS_TEST").is_ok() {
@@ -15,28 +16,54 @@ pub(crate) fn game_startup(world: &mut World) -> Result<(), BevyError> {
     let fs = capy_assets::OsFileSystem;
     let canonical = capy_world::generate_flat_baked()?;
 
-    let mesh = match capy_assets::load_world_chunks(&world_dir, &fs) {
-        Ok(mut edited) if !edited.is_empty() => {
-            for baked in edited.values_mut() {
-                capy_world::recompute_foliage_bitmap(baked, capy_world::CHUNK_XZ);
-            }
-            VoxelMeshData::with_edited_chunks(
-                &canonical,
-                &edited,
-                GRID_DIM_XZ,
-                capy_world::CHUNK_XZ,
-                capy_world::CHUNK_Y,
-                MATERIAL_COLORS,
-            )
-        }
-        _ => VoxelMeshData::from_flat_world(
+    let mut edited = capy_assets::load_world_chunks(&world_dir, &fs).unwrap_or_default();
+    for baked in edited.values_mut() {
+        capy_world::recompute_foliage_bitmap(baked, capy_world::CHUNK_XZ);
+    }
+    let edited_meshes = capy_world::build_near_voxel_mesh_cache(
+        &edited,
+        capy_world::CHUNK_XZ,
+        capy_world::CHUNK_Y,
+        HYBRID_MAX_QUADS_PER_CHUNK,
+    );
+    let canonical_mesh = capy_world::build_near_voxel_chunk_mesh(
+        &canonical,
+        [0, 0, 0],
+        capy_world::CHUNK_XZ,
+        capy_world::CHUNK_Y,
+        HYBRID_MAX_QUADS_PER_CHUNK,
+    )
+    .unwrap_or_default();
+    let near_mesh = capy_world::assemble_hybrid_near_mesh(
+        &edited_meshes,
+        &canonical_mesh,
+        &edited,
+        GRID_DIM_XZ,
+    );
+    let mut mesh = if edited.is_empty() {
+        VoxelMeshData::from_flat_world(
             &canonical,
             GRID_DIM_XZ,
             capy_world::CHUNK_XZ,
             capy_world::CHUNK_Y,
             MATERIAL_COLORS,
-        ),
+        )
+    } else {
+        VoxelMeshData::with_edited_chunks(
+            &canonical,
+            &edited,
+            GRID_DIM_XZ,
+            capy_world::CHUNK_XZ,
+            capy_world::CHUNK_Y,
+            MATERIAL_COLORS,
+        )
     };
+    tracing::info!(
+        "[hybrid] meshed {}/{} edited chunks plus one canonical instance mesh",
+        edited_meshes.len(),
+        edited.len(),
+    );
+    mesh.set_near_mesh(near_mesh);
 
     let window = world.resource::<GameWindow>();
     let aspect = if window.height > 0 {
@@ -69,7 +96,27 @@ fn stress_startup(world: &mut World) -> Result<(), BevyError> {
     let stress_chunks = capy_world::generate_stress_world()?;
     let n = stress_chunks.len();
 
-    let mesh = VoxelMeshData::with_edited_chunks(
+    let edited_meshes = capy_world::build_near_voxel_mesh_cache(
+        &stress_chunks,
+        capy_world::CHUNK_XZ,
+        capy_world::CHUNK_Y,
+        HYBRID_MAX_QUADS_PER_CHUNK,
+    );
+    let canonical_mesh = capy_world::build_near_voxel_chunk_mesh(
+        &canonical,
+        [0, 0, 0],
+        capy_world::CHUNK_XZ,
+        capy_world::CHUNK_Y,
+        HYBRID_MAX_QUADS_PER_CHUNK,
+    )
+    .unwrap_or_default();
+    let near_mesh = capy_world::assemble_hybrid_near_mesh(
+        &edited_meshes,
+        &canonical_mesh,
+        &stress_chunks,
+        GRID_DIM_XZ,
+    );
+    let mut mesh = VoxelMeshData::with_edited_chunks(
         &canonical,
         &stress_chunks,
         GRID_DIM_XZ,
@@ -77,6 +124,13 @@ fn stress_startup(world: &mut World) -> Result<(), BevyError> {
         capy_world::CHUNK_Y,
         MATERIAL_COLORS,
     );
+    tracing::info!(
+        "[hybrid] meshed {n_mesh}/{n} stress chunks: {} vertices, {} triangles",
+        near_mesh.vertices.len(),
+        near_mesh.indices.len() / 3,
+        n_mesh = edited_meshes.len(),
+    );
+    mesh.set_near_mesh(near_mesh);
 
     let elapsed = t0.elapsed();
     tracing::info!("[stress] baked {n} chunks in {:.2}s", elapsed.as_secs_f64());

@@ -78,6 +78,11 @@ struct SelectionParams {
     _pad0: u32,
 };
 @group(0) @binding(14) var<uniform> selection: SelectionParams;
+@group(0) @binding(15) var near_mesh_color: texture_2d<f32>;
+@group(0) @binding(16) var near_mesh_normal: texture_2d<f32>;
+@group(0) @binding(17) var near_mesh_depth: texture_2d<f32>;
+@group(0) @binding(18) var near_mesh_water_normal: texture_2d<f32>;
+@group(0) @binding(19) var near_mesh_water_depth: texture_2d<f32>;
 
 fn apply_selection_tint(base: vec3<f32>, pos: vec3<f32>) -> vec3<f32> {
     if selection.is_active == 0u {
