@@ -48,9 +48,10 @@ fn trace_ray_bounded(
             }
         }
         let info = lookup_chunk_info(dda.cc);
+        let chunk_size_xz = f32(streaming.chunk_size_xz);
         let chunk_center_xz = vec2<f32>(
-            (f32(dda.cc.x) + 0.5) * dda.cs_xz,
-            (f32(dda.cc.z) + 0.5) * dda.cs_xz,
+            (f32(dda.cc.x) + 0.5) * chunk_size_xz,
+            (f32(dda.cc.z) + 0.5) * chunk_size_xz,
         );
         let chunk_delta = camera.camera_pos.xz - chunk_center_xz;
         let use_near_mesh = use_near_mesh_handoff
@@ -85,7 +86,7 @@ fn trace_ray_bounded(
                 ray_origin, dda.dir, camera.time, grass_max,
                 foliage_base_y, foliage_top_y,
                 chunk_dda_t_enter(), chunk_dda_t_exit(),
-                info.foliage_bitmap_offset, chunk_min.x, chunk_min.z, dda.cs_xz,
+                info.foliage_bitmap_offset, chunk_min.x, chunk_min.z, chunk_size_xz,
                 chunk_min.y, info.foliage_y_bands,
                 info.foliage_tile_y_ranges_offset,
             );

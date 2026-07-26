@@ -94,8 +94,6 @@ fn main(
                 md,
             );
             hit.hit = true;
-            hit.is_lod_hit = false;
-            hit.lod_scale_exp = 0u;
             counts = ShadowCounts(shadow_ray_count, shadow_blocked_count);
         } else {
             if sel.use_water {

@@ -57,6 +57,7 @@ pub(crate) struct TraceShaderFeatures {
     pub(crate) minimal_outputs: bool,
     pub(crate) trace_stats: bool,
     pub(crate) beam: bool,
+    pub(crate) hybrid: bool,
 }
 
 impl TraceShaderFeatures {
@@ -72,11 +73,12 @@ impl TraceShaderFeatures {
             minimal_outputs: settings.trace_minimal_outputs,
             trace_stats: settings.trace_stats_enabled,
             beam: settings.beam_enabled,
+            hybrid: settings.hybrid_near_radius > 0.0,
         }
     }
 
     pub(crate) fn is_primary_only(self) -> bool {
-        !self.grass && !self.water && !self.shadows
+        !self.grass && !self.water && !self.shadows && !self.hybrid
     }
 
     pub(crate) fn variant_label(self) -> &'static str {
@@ -99,6 +101,7 @@ impl TraceShaderFeatures {
             minimal_outputs: false,
             trace_stats: false,
             beam: false,
+            hybrid: true,
         }
     }
 
@@ -327,4 +330,89 @@ pub(crate) fn build_near_mesh_shader_source() -> String {
     out.push('\n');
     out.push_str(PASS_NEAR_MESH);
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn validate(label: &str, source: &str) {
+        let module = wgpu::naga::front::wgsl::parse_str(source)
+            .unwrap_or_else(|error| panic!("{label}: {}", error.emit_to_string(source)));
+        wgpu::naga::valid::Validator::new(
+            wgpu::naga::valid::ValidationFlags::all(),
+            wgpu::naga::valid::Capabilities::all(),
+        )
+        .validate(&module)
+        .unwrap_or_else(|error| panic!("{label}: WGSL validation error: {error:?}"));
+    }
+
+    fn primary_only() -> TraceShaderFeatures {
+        TraceShaderFeatures {
+            grass: false,
+            grass_shadows: false,
+            water: false,
+            water_reflections: false,
+            water_shadows: false,
+            shadows: false,
+            depth_output: true,
+            minimal_outputs: false,
+            trace_stats: false,
+            beam: true,
+            hybrid: false,
+        }
+    }
+
+    #[test]
+    fn trace_shader_variants_are_valid_wgsl() {
+        for (label, features) in [
+            ("all-features", TraceShaderFeatures::all()),
+            (
+                "all-features-with-beam-and-stats",
+                TraceShaderFeatures {
+                    beam: true,
+                    trace_stats: true,
+                    ..TraceShaderFeatures::all()
+                },
+            ),
+            ("primary-only", primary_only()),
+            (
+                "hybrid-primary-only-settings",
+                TraceShaderFeatures {
+                    hybrid: true,
+                    ..primary_only()
+                },
+            ),
+        ] {
+            validate(label, &build_trace_shader_source(features));
+        }
+    }
+
+    #[test]
+    fn beam_shader_variants_are_valid_wgsl() {
+        validate(
+            "beam-all-features",
+            &build_beam_shader_source(TraceShaderFeatures::all()),
+        );
+        validate(
+            "beam-primary-only",
+            &build_beam_shader_source(primary_only()),
+        );
+    }
+
+    #[test]
+    fn supporting_shader_variants_are_valid_wgsl() {
+        validate("lighting", &build_lighting_shader_source());
+        validate("gtao", &build_gtao_shader_source());
+        validate("near-mesh", &build_near_mesh_shader_source());
+    }
+
+    #[test]
+    fn hybrid_mode_uses_feature_trace_variant() {
+        let features = TraceShaderFeatures {
+            hybrid: true,
+            ..primary_only()
+        };
+        assert!(!features.is_primary_only());
+    }
 }
