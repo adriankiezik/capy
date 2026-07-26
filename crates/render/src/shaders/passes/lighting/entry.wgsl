@@ -126,7 +126,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let shadow = color_sample.a;
     let normal = normal_sample.xyz;
 
-    let ao = textureLoad(ao_texture, sample_pixel, 0).r;
+    var ao = 1.0;
+    if render_settings.ao_intensity > 0.0 {
+        ao = textureLoad(ao_texture, sample_pixel, 0).r;
+    }
 
     // Water pixels (normal.w ~= 0.5) are pre-lit in trace pass —
     // only apply shadow darkening, skip AO and diffuse lighting.

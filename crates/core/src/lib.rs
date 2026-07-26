@@ -20,8 +20,9 @@ pub use material::{
 pub use plugin::Plugin;
 pub use resources::{
     AppExit, Camera, CursorMode, FrameProfiler, FrameTime, GameWindow, NearVoxelMeshChunk,
-    NearVoxelMeshData, PreviewGpuData, RawInput, SelectionHighlight, VoxelMeshData,
-    VoxelSurfaceVertex, WindowConfig,
+    NearVoxelMeshData, POOL_CHILD_FLAG_LEAF, POOL_CHILD_FLAG_UNIFORM_WATER, POOL_CHILD_OFFSET_MASK,
+    PreviewGpuData, RawInput, SelectionHighlight, VoxelMeshData, VoxelSurfaceVertex, WindowConfig,
+    tag_pool_child_pointers,
 };
 pub use schedule::{PreStartup, Render, Startup, Update};
 pub use window::Window;

@@ -3,16 +3,16 @@ use bytemuck::{Pod, Zeroable};
 use crate::gpu_texture::GpuTexture;
 use crate::pipeline_factory;
 use crate::resources::voxel_scene::VoxelSceneBuffers;
-use crate::shader_source;
+use crate::shader_source::{self, TraceShaderFeatures};
 use crate::voxel_bind_group::{
     bgl_sampled_texture, bgl_storage_ro, bgl_storage_rw, bgl_storage_texture, bgl_uniform,
 };
 
 const TRACE_STATS_BUFFER_SIZE: u64 = std::mem::size_of::<TraceStatsSnapshot>() as u64;
-
 struct TraceStatsFrame {
     readback_buffer: wgpu::Buffer,
     ready: bool,
+    submission: Option<wgpu::SubmissionIndex>,
 }
 
 impl TraceStatsFrame {
@@ -26,6 +26,7 @@ impl TraceStatsFrame {
         Self {
             readback_buffer,
             ready: false,
+            submission: None,
         }
     }
 }
@@ -36,6 +37,8 @@ pub(crate) struct TraceStatsSnapshot {
     pub(crate) primary_chunk_steps: u32,
     pub(crate) primary_node_steps: u32,
     pub(crate) primary_descents: u32,
+    pub(crate) primary_occupied_chunks: u32,
+    pub(crate) primary_empty_chunks: u32,
     pub(crate) shadow_chunk_steps: u32,
     pub(crate) shadow_node_steps: u32,
     pub(crate) shadow_descents: u32,
@@ -120,6 +123,7 @@ impl TraceLayout {
                 bgl_sampled_texture(17),
                 bgl_sampled_texture(18),
                 bgl_sampled_texture(19),
+                bgl_sampled_texture(20),
             ],
         });
         Self { layout }
@@ -145,6 +149,7 @@ impl TraceLayout {
         near_mesh_depth: &GpuTexture,
         near_mesh_water_normal: &GpuTexture,
         near_mesh_water_depth: &GpuTexture,
+        beam_t: &GpuTexture,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Trace Bind Group"),
@@ -230,15 +235,147 @@ impl TraceLayout {
                     binding: 19,
                     resource: wgpu::BindingResource::TextureView(&near_mesh_water_depth.view),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 20,
+                    resource: wgpu::BindingResource::TextureView(&beam_t.view),
+                },
             ],
         })
     }
 }
 
+/// Beam pre-pass: traces one conservative coarse ray per 8x8 pixel tile and
+/// writes a start distance the full-resolution primary rays can skip to.
+pub(crate) struct BeamPrepass {
+    layout: wgpu::BindGroupLayout,
+    pub(crate) pipeline: wgpu::ComputePipeline,
+    pub(crate) bind_group: wgpu::BindGroup,
+    pub(crate) beam_t: GpuTexture,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+}
+
+impl BeamPrepass {
+    fn create_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Beam BGL"),
+            entries: &[
+                bgl_uniform(0),
+                bgl_uniform(1),
+                bgl_storage_ro(2),
+                bgl_storage_ro(3),
+                bgl_storage_ro(4),
+                bgl_uniform(5),
+                bgl_storage_texture(
+                    6,
+                    wgpu::TextureFormat::R32Float,
+                    wgpu::StorageTextureAccess::WriteOnly,
+                ),
+            ],
+        })
+    }
+
+    fn create_texture(device: &wgpu::Device, width: u32, height: u32) -> GpuTexture {
+        GpuTexture::new_storage_sampled(
+            device,
+            "Beam Start T",
+            width.div_ceil(8).max(1),
+            height.div_ceil(8).max(1),
+            wgpu::TextureFormat::R32Float,
+        )
+    }
+
+    fn bind(
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        beam_t: &GpuTexture,
+        scene: &VoxelSceneBuffers,
+    ) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Beam Bind Group"),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: scene.camera_buffer.buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: scene.streaming_info_buffer.buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: scene.pool_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: scene.avg_pool_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: scene.indirection_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: scene.render_settings_buffer.buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::TextureView(&beam_t.view),
+                },
+            ],
+        })
+    }
+
+    fn new(
+        device: &wgpu::Device,
+        width: u32,
+        height: u32,
+        scene: &VoxelSceneBuffers,
+        features: TraceShaderFeatures,
+    ) -> Self {
+        let layout = Self::create_layout(device);
+        let pipeline = create_beam_compute_pipeline(device, &layout, features);
+        let beam_t = Self::create_texture(device, width, height);
+        let bind_group = Self::bind(device, &layout, &beam_t, scene);
+        Self {
+            layout,
+            pipeline,
+            bind_group,
+            beam_t,
+            width: width.div_ceil(8).max(1),
+            height: height.div_ceil(8).max(1),
+        }
+    }
+
+    fn resize(
+        &mut self,
+        device: &wgpu::Device,
+        width: u32,
+        height: u32,
+        scene: &VoxelSceneBuffers,
+    ) {
+        self.beam_t = Self::create_texture(device, width, height);
+        self.width = width.div_ceil(8).max(1);
+        self.height = height.div_ceil(8).max(1);
+        self.bind_group = Self::bind(device, &self.layout, &self.beam_t, scene);
+    }
+
+    fn rebind(&mut self, device: &wgpu::Device, scene: &VoxelSceneBuffers) {
+        self.bind_group = Self::bind(device, &self.layout, &self.beam_t, scene);
+    }
+
+    fn update_features(&mut self, device: &wgpu::Device, features: TraceShaderFeatures) {
+        self.pipeline = create_beam_compute_pipeline(device, &self.layout, features);
+    }
+}
+
 pub(crate) struct TracePipeline {
     pub(crate) compute_pipeline: wgpu::ComputePipeline,
+    pub(crate) features: TraceShaderFeatures,
     layout: TraceLayout,
     pub(crate) compute_bind_group: wgpu::BindGroup,
+    pub(crate) beam: BeamPrepass,
 
     pub(crate) gbuf_color: GpuTexture,
     pub(crate) gbuf_normal: GpuTexture,
@@ -268,6 +405,7 @@ impl TracePipeline {
         width: u32,
         height: u32,
         scene: &VoxelSceneBuffers,
+        features: TraceShaderFeatures,
     ) -> Self {
         let lod_debug_buffer = create_lod_debug_buffer(device, width, height);
         let stats_buffer = create_trace_stats_buffer(device);
@@ -320,13 +458,13 @@ impl TracePipeline {
 
         let layout = TraceLayout::new(device);
 
-        let shader_source = shader_source::build_trace_shader_source();
-        let compute_pipeline = pipeline_factory::create_compute_pipeline_with_layout(
-            device,
-            "Trace",
-            &shader_source,
-            layout.bgl(),
+        let compute_pipeline = create_trace_compute_pipeline(device, layout.bgl(), features);
+        tracing::info!(
+            "Created trace shader variant: {} {features:?}",
+            features.variant_label()
         );
+
+        let beam = BeamPrepass::new(device, width, height, scene, features);
 
         let compute_bind_group = layout.bind(
             device,
@@ -343,12 +481,15 @@ impl TracePipeline {
             &near_mesh_depth,
             &near_mesh_water_normal,
             &near_mesh_water_depth,
+            &beam.beam_t,
         );
 
         Self {
             compute_pipeline,
+            features,
             layout,
             compute_bind_group,
+            beam,
             gbuf_color,
             gbuf_normal,
             gbuf_depth,
@@ -371,6 +512,7 @@ impl TracePipeline {
     }
 
     pub(crate) fn rebind(&mut self, device: &wgpu::Device, scene: &VoxelSceneBuffers) {
+        self.beam.rebind(device, scene);
         self.compute_bind_group = self.layout.bind(
             device,
             &self.gbuf_color,
@@ -386,6 +528,21 @@ impl TracePipeline {
             &self.near_mesh_depth,
             &self.near_mesh_water_normal,
             &self.near_mesh_water_depth,
+            &self.beam.beam_t,
+        );
+    }
+
+    pub(crate) fn update_features(&mut self, device: &wgpu::Device, features: TraceShaderFeatures) {
+        if self.features == features {
+            return;
+        }
+
+        self.compute_pipeline = create_trace_compute_pipeline(device, self.layout.bgl(), features);
+        self.beam.update_features(device, features);
+        self.features = features;
+        tracing::info!(
+            "Rebuilt trace shader variant: {} {features:?}",
+            features.variant_label()
         );
     }
 
@@ -445,6 +602,7 @@ impl TracePipeline {
 
         self.width = width;
         self.height = height;
+        self.beam.resize(device, width, height, scene);
         self.compute_bind_group = self.layout.bind(
             device,
             &self.gbuf_color,
@@ -460,14 +618,21 @@ impl TracePipeline {
             &self.near_mesh_depth,
             &self.near_mesh_water_normal,
             &self.near_mesh_water_depth,
+            &self.beam.beam_t,
         );
     }
 
     pub(crate) fn clear_stats(&self, encoder: &mut wgpu::CommandEncoder) {
+        if !self.features.trace_stats {
+            return;
+        }
         encoder.clear_buffer(&self.stats_buffer, 0, Some(TRACE_STATS_BUFFER_SIZE));
     }
 
     pub(crate) fn copy_stats_to_readback(&mut self, encoder: &mut wgpu::CommandEncoder) {
+        if !self.features.trace_stats {
+            return;
+        }
         let frame = &mut self.stats_frames[self.stats_frame_index];
         encoder.copy_buffer_to_buffer(
             &self.stats_buffer,
@@ -480,6 +645,9 @@ impl TracePipeline {
     }
 
     pub(crate) fn read_back_stats(&self, device: &wgpu::Device) -> Option<TraceStatsSnapshot> {
+        if !self.features.trace_stats {
+            return None;
+        }
         let prev = 1 - self.stats_frame_index;
         let frame = &self.stats_frames[prev];
         if !frame.ready {
@@ -488,9 +656,11 @@ impl TracePipeline {
 
         let slice = frame.readback_buffer.slice(..);
         slice.map_async(wgpu::MapMode::Read, |_| {});
+        // Wait only for the previous frame's submission (already complete) —
+        // waiting on the latest would serialize CPU and GPU.
         device
             .poll(wgpu::PollType::Wait {
-                submission_index: None,
+                submission_index: frame.submission.clone(),
                 timeout: None,
             })
             .ok();
@@ -501,6 +671,14 @@ impl TracePipeline {
         };
         frame.readback_buffer.unmap();
         Some(snapshot)
+    }
+
+    /// Record the submission that contains this frame's stats readback copy.
+    pub(crate) fn set_stats_submission(&mut self, submission: wgpu::SubmissionIndex) {
+        if !self.features.trace_stats {
+            return;
+        }
+        self.stats_frames[self.stats_frame_index].submission = Some(submission);
     }
 
     pub(crate) fn end_frame(&mut self) {
@@ -579,6 +757,34 @@ fn create_near_mesh_targets(
             wgpu::TextureFormat::Depth32Float,
             wgpu::TextureUsages::RENDER_ATTACHMENT,
         ),
+    )
+}
+
+fn create_trace_compute_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    features: TraceShaderFeatures,
+) -> wgpu::ComputePipeline {
+    let shader_source = shader_source::build_trace_shader_source(features);
+    let label = if features.is_primary_only() {
+        "Trace PrimaryOnly"
+    } else {
+        "Trace"
+    };
+    pipeline_factory::create_compute_pipeline_with_layout(device, label, &shader_source, layout)
+}
+
+fn create_beam_compute_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    features: TraceShaderFeatures,
+) -> wgpu::ComputePipeline {
+    let shader_source = shader_source::build_beam_shader_source(features);
+    pipeline_factory::create_compute_pipeline_with_layout(
+        device,
+        "Beam Prepass",
+        &shader_source,
+        layout,
     )
 }
 

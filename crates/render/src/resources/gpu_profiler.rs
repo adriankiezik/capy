@@ -8,6 +8,7 @@ struct ProfilerFrame {
     readback_buffer: wgpu::Buffer,
     next_query: u32,
     labels: Vec<(String, u32, u32)>, // (name, begin_idx, end_idx)
+    submission: Option<wgpu::SubmissionIndex>,
 }
 
 impl ProfilerFrame {
@@ -35,12 +36,14 @@ impl ProfilerFrame {
             readback_buffer,
             next_query: 0,
             labels: Vec::new(),
+            submission: None,
         }
     }
 
     fn reset(&mut self) {
         self.next_query = 0;
         self.labels.clear();
+        self.submission = None;
     }
 }
 
@@ -128,9 +131,12 @@ impl GpuProfiler {
 
         let slice = frame.readback_buffer.slice(..);
         slice.map_async(wgpu::MapMode::Read, |_| {});
+        // Wait only for the previous frame's submission (already complete by
+        // now) — waiting on the latest submission would block on the frame
+        // just submitted and serialize CPU and GPU.
         device
             .poll(wgpu::PollType::Wait {
-                submission_index: None,
+                submission_index: frame.submission.clone(),
                 timeout: None,
             })
             .ok();
@@ -151,6 +157,11 @@ impl GpuProfiler {
         }
 
         frame.readback_buffer.unmap();
+    }
+
+    /// Record the submission that contains this frame's resolve/readback copy.
+    pub(crate) fn set_submission(&mut self, submission: wgpu::SubmissionIndex) {
+        self.frames[self.current_frame].submission = Some(submission);
     }
 
     /// Swap double buffer and reset the new current frame.

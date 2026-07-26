@@ -25,8 +25,7 @@ fn traverse_chunk_shadow(
         var se = root_se;
         var ml = pool_read(pool_base, no);
         var mh = pool_read(pool_base, no + 1u);
-        var flags = root_flags;
-        var il = node_is_leaf(flags);
+        var il = node_is_leaf(root_flags);
 
         for (var d = 0u; d < depth; d++) {
             let ci = get_cell_index(pos, se);
@@ -41,16 +40,14 @@ fn traverse_chunk_shadow(
             }
             if !bit_is_set_64(ml, mh, ci) { break; }
             let pi = popcount_below(ml, mh, ci);
-            let child_no = get_child_offset_pool(pool_base, no, pi);
-            let child_flags = get_node_flags_pool(pool_base, child_no);
-            if node_is_uniform_water(child_flags) {
+            let child_ptr = get_child_offset_pool(pool_base, no, pi);
+            if child_ptr_is_uniform_water(child_ptr) {
                 break;
             }
-            no = child_no;
+            no = child_ptr_offset(child_ptr);
             ml = pool_read(pool_base, no);
             mh = pool_read(pool_base, no + 1u);
-            flags = child_flags;
-            il = node_is_leaf(flags);
+            il = child_ptr_is_leaf(child_ptr);
             se -= 2u;
         }
     }
@@ -67,8 +64,7 @@ fn traverse_chunk_shadow(
     var node_idx = tree_info_root;
     var n_ml = pool_read(pool_base, node_idx);
     var n_mh = pool_read(pool_base, node_idx + 1u);
-    var n_flags = root_flags;
-    var n_il = node_is_leaf(n_flags);
+    var n_il = node_is_leaf(root_flags);
     var scale_exp = root_se;
     var side_dist = vec3<f32>(0.0);
 
@@ -80,16 +76,14 @@ fn traverse_chunk_shadow(
             if n_il || !bit_is_set_64(n_ml, n_mh, child_idx) { break; }
 
             let pi = popcount_below(n_ml, n_mh, child_idx);
-            let child_node_idx = get_child_offset_pool(pool_base, node_idx, pi);
-            let child_flags = get_node_flags_pool(pool_base, child_node_idx);
-            if node_is_uniform_water(child_flags) { break; }
+            let child_ptr = get_child_offset_pool(pool_base, node_idx, pi);
+            if child_ptr_is_uniform_water(child_ptr) { break; }
 
-            stk[(root_se - scale_exp) >> 1u] = StackEntry(node_idx, n_ml, n_mh, n_il);
-            node_idx = child_node_idx;
+            stk[(root_se - scale_exp) >> 1u] = node_idx;
+            node_idx = child_ptr_offset(child_ptr);
             n_ml = pool_read(pool_base, node_idx);
             n_mh = pool_read(pool_base, node_idx + 1u);
-            n_flags = child_flags;
-            n_il = node_is_leaf(n_flags);
+            n_il = child_ptr_is_leaf(child_ptr);
             scale_exp -= 2u;
             if ENABLE_TRACE_STATS { trace_stats_shadow_descents += 1u; }
         }
@@ -150,11 +144,10 @@ fn traverse_chunk_shadow(
         if diff_exp > i32(scale_exp) {
             scale_exp = u32(diff_exp);
             if diff_exp > i32(root_se) { break; }
-            let se = stk[(root_se - scale_exp) >> 1u];
-            node_idx = se.node_idx;
-            n_ml = se.mask_lo;
-            n_mh = se.mask_hi;
-            n_il = se.is_leaf;
+            node_idx = stk[(root_se - scale_exp) >> 1u];
+            n_ml = pool_read(pool_base, node_idx);
+            n_mh = pool_read(pool_base, node_idx + 1u);
+            n_il = false; // pushed nodes are never leaves
         }
     }
 

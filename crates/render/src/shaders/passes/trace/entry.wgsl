@@ -1,4 +1,4 @@
-@compute @workgroup_size(8, 8)
+@compute @workgroup_size(8, 4)
 fn main(
     @builtin(global_invocation_id) gid: vec3<u32>,
     @builtin(local_invocation_index) lid: u32,
@@ -9,7 +9,7 @@ fn main(
     let in_bounds = actual_x < dims.x && actual_y < dims.y;
 
     reset_trace_private_stats();
-    skip_grass = render_settings.vegetation_enabled < 0.5;
+    skip_grass = !FEATURE_GRASS;
     use_near_mesh_handoff = true;
 
     var hit: HitResult;
@@ -26,13 +26,13 @@ fn main(
         );
         let ray_origin = camera.camera_pos;
 
-        let pixel_idx = actual_y * u32(camera.resolution.x) + actual_x;
         let pixel = vec2<i32>(i32(actual_x), i32(actual_y));
         let mesh_depth = textureLoad(near_mesh_depth, pixel, 0).r;
         let trace_limit = select(1e20, mesh_depth, mesh_depth > 0.0);
-        hit = trace_ray_bounded(ray_origin, ray_dir, trace_limit);
+        let t_start = beam_start_t(actual_x, actual_y);
+        hit = trace_ray_bounded(ray_origin, ray_dir, t_start, trace_limit);
         let mesh_water_depth = textureLoad(near_mesh_water_depth, pixel, 0).r;
-        if render_settings.water_enabled > 0.5
+        if FEATURE_WATER
             && mesh_water_depth > 0.0
             && (!hit.hit || mesh_water_depth < hit.t)
             && (!dda_water_hit.hit || mesh_water_depth < dda_water_hit.t)
@@ -96,15 +96,8 @@ fn main(
             hit.hit = true;
             hit.is_lod_hit = false;
             hit.lod_scale_exp = 0u;
-            if pixel_idx < arrayLength(&lod_debug_buf) {
-                lod_debug_buf[pixel_idx] = 0u;
-            }
             counts = ShadowCounts(shadow_ray_count, shadow_blocked_count);
         } else {
-            if pixel_idx < arrayLength(&lod_debug_buf) {
-                lod_debug_buf[pixel_idx] = hit.lod_scale_exp;
-            }
-
             if sel.use_water {
                 counts = shade_water(pixel, ray_origin, ray_dir, hit);
             } else if sel.use_preview {

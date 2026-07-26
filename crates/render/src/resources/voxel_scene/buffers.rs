@@ -245,6 +245,7 @@ impl VoxelSceneBuffers {
             settings.lod_bias,
             settings.water_enabled && mesh.is_water_at(camera.position.to_array()),
             [0.0, 0.0],
+            false,
             clip_from_world(camera).to_cols_array(),
             0.0,
         );
@@ -348,6 +349,7 @@ impl VoxelSceneBuffers {
         lod_bias: f32,
         camera_underwater: bool,
         jitter: [f32; 2],
+        temporal_outputs_enabled: bool,
         prev_clip_from_world: [f32; 16],
         time: f32,
     ) {
@@ -358,6 +360,7 @@ impl VoxelSceneBuffers {
             lod_bias,
             camera_underwater,
             jitter,
+            temporal_outputs_enabled,
             prev_clip_from_world,
             time,
         );

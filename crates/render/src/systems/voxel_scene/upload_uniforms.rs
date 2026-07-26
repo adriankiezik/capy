@@ -50,7 +50,10 @@ pub(crate) fn upload_uniforms_system(
         }
 
         // Get jitter from the active upscaler. DLSS takes priority over FSR.
+        #[allow(unused_mut)]
         let mut jitter = [0.0, 0.0];
+        #[allow(unused_mut)]
+        let mut temporal_outputs_enabled = false;
         #[cfg(feature = "dlss")]
         {
             if let Some(dlss_jitter) = dlss
@@ -58,6 +61,7 @@ pub(crate) fn upload_uniforms_system(
                 .and_then(|dlss| dlss.suggested_jitter(temporal.frame_index()))
             {
                 jitter = dlss_jitter;
+                temporal_outputs_enabled = true;
             }
         }
         #[cfg(feature = "fsr")]
@@ -67,6 +71,7 @@ pub(crate) fn upload_uniforms_system(
                 .and_then(|fsr| fsr.suggested_jitter(temporal.frame_index()))
             {
                 jitter = fsr_jitter;
+                temporal_outputs_enabled = true;
             }
         }
 
@@ -86,6 +91,7 @@ pub(crate) fn upload_uniforms_system(
             lod_bias,
             camera_underwater,
             jitter,
+            temporal_outputs_enabled,
             previous_clip_from_world,
             temporal.elapsed_secs(),
         );

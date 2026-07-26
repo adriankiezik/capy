@@ -31,6 +31,9 @@ pub(crate) fn submit_frame_system(world: &mut World) -> Result<(), BevyError> {
     let surface_format = gpu.config.format;
 
     let mut first_error: Option<BevyError> = None;
+    // Last queue submission of this frame; recorded so next frame's readbacks
+    // can wait on it instead of on the just-submitted frame.
+    let mut last_submission: Option<wgpu::SubmissionIndex> = None;
 
     let overlay_callbacks = world
         .get_resource::<RenderOverlayCallbacks>()
@@ -49,7 +52,7 @@ pub(crate) fn submit_frame_system(world: &mut World) -> Result<(), BevyError> {
                 }
             }
         }
-        queue.submit(std::iter::once(encoder.finish()));
+        last_submission = Some(queue.submit(std::iter::once(encoder.finish())));
 
         // Reflex: complete the interpolated frame's render submission,
         // then bracket the present with PRESENT markers.
@@ -128,7 +131,7 @@ pub(crate) fn submit_frame_system(world: &mut World) -> Result<(), BevyError> {
                 }
             }
 
-            queue.submit(std::iter::once(enc.finish()));
+            last_submission = Some(queue.submit(std::iter::once(enc.finish())));
 
             // Reflex: RENDERSUBMIT_END + PRESENT markers for the real frame.
             #[cfg(feature = "dlss")]
@@ -166,7 +169,7 @@ pub(crate) fn submit_frame_system(world: &mut World) -> Result<(), BevyError> {
             }
         }
 
-        queue.submit(std::iter::once(encoder.finish()));
+        last_submission = Some(queue.submit(std::iter::once(encoder.finish())));
 
         // Reflex: RENDERSUBMIT_END after the final queue.submit.
         #[cfg(feature = "dlss")]
@@ -202,6 +205,17 @@ pub(crate) fn submit_frame_system(world: &mut World) -> Result<(), BevyError> {
                     reflex.set_marker(sc, ash::vk::LatencyMarkerNV::PRESENT_END);
                 }
             }
+        }
+    }
+
+    // Record this frame's last submission for next frame's readback waits.
+    if let Some(submission) = last_submission {
+        {
+            let mut gpu_profiler = world.non_send_resource_mut::<GpuProfiler>();
+            gpu_profiler.set_submission(submission.clone());
+        }
+        if let Some(mut trace) = world.get_non_send_resource_mut::<TracePipeline>() {
+            trace.set_stats_submission(submission);
         }
     }
 

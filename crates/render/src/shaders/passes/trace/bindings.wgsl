@@ -7,6 +7,8 @@ struct TraceStats {
     primary_chunk_steps: atomic<u32>,
     primary_node_steps: atomic<u32>,
     primary_descents: atomic<u32>,
+    primary_occupied_chunks: atomic<u32>,
+    primary_empty_chunks: atomic<u32>,
     shadow_chunk_steps: atomic<u32>,
     shadow_node_steps: atomic<u32>,
     shadow_descents: atomic<u32>,
@@ -83,6 +85,26 @@ struct SelectionParams {
 @group(0) @binding(17) var near_mesh_depth: texture_2d<f32>;
 @group(0) @binding(18) var near_mesh_water_normal: texture_2d<f32>;
 @group(0) @binding(19) var near_mesh_water_depth: texture_2d<f32>;
+
+// Conservative per-8x8-tile start distance from the beam pre-pass.
+@group(0) @binding(20) var beam_t_in: texture_2d<f32>;
+
+// Min of the four beam texels surrounding the pixel — conservative even for
+// pixels at tile borders where the neighboring beam ray dips closer.
+fn beam_start_t(pixel_x: u32, pixel_y: u32) -> f32 {
+    if !FEATURE_BEAM {
+        return 0.0;
+    }
+    let bdims = vec2<i32>(textureDimensions(beam_t_in));
+    let cf = (vec2<f32>(f32(pixel_x), f32(pixel_y)) + vec2<f32>(0.5)) / 8.0 - vec2<f32>(0.5);
+    let c0 = clamp(vec2<i32>(floor(cf)), vec2<i32>(0), bdims - vec2<i32>(1));
+    let c1 = clamp(c0 + vec2<i32>(1), vec2<i32>(0), bdims - vec2<i32>(1));
+    let t00 = textureLoad(beam_t_in, c0, 0).x;
+    let t10 = textureLoad(beam_t_in, vec2<i32>(c1.x, c0.y), 0).x;
+    let t01 = textureLoad(beam_t_in, vec2<i32>(c0.x, c1.y), 0).x;
+    let t11 = textureLoad(beam_t_in, c1, 0).x;
+    return min(min(t00, t10), min(t01, t11));
+}
 
 fn apply_selection_tint(base: vec3<f32>, pos: vec3<f32>) -> vec3<f32> {
     if selection.is_active == 0u {

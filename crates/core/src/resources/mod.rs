@@ -20,6 +20,7 @@ pub use preview_gpu_data::PreviewGpuData;
 pub use raw_input::RawInput;
 pub use selection_highlight::SelectionHighlight;
 pub use voxel_mesh_data::{
-    NearVoxelMeshChunk, NearVoxelMeshData, VoxelMeshData, VoxelSurfaceVertex,
+    NearVoxelMeshChunk, NearVoxelMeshData, POOL_CHILD_FLAG_LEAF, POOL_CHILD_FLAG_UNIFORM_WATER,
+    POOL_CHILD_OFFSET_MASK, VoxelMeshData, VoxelSurfaceVertex, tag_pool_child_pointers,
 };
 pub use window_config::WindowConfig;

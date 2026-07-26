@@ -9,6 +9,8 @@ struct TraceStatsAccum {
     primary_chunk_steps: u64,
     primary_node_steps: u64,
     primary_descents: u64,
+    primary_occupied_chunks: u64,
+    primary_empty_chunks: u64,
     shadow_chunk_steps: u64,
     shadow_node_steps: u64,
     shadow_descents: u64,
@@ -76,6 +78,8 @@ impl TraceStatsReporter {
         self.accum.primary_chunk_steps += u64::from(snapshot.primary_chunk_steps);
         self.accum.primary_node_steps += u64::from(snapshot.primary_node_steps);
         self.accum.primary_descents += u64::from(snapshot.primary_descents);
+        self.accum.primary_occupied_chunks += u64::from(snapshot.primary_occupied_chunks);
+        self.accum.primary_empty_chunks += u64::from(snapshot.primary_empty_chunks);
         self.accum.shadow_chunk_steps += u64::from(snapshot.shadow_chunk_steps);
         self.accum.shadow_node_steps += u64::from(snapshot.shadow_node_steps);
         self.accum.shadow_descents += u64::from(snapshot.shadow_descents);
@@ -123,6 +127,7 @@ impl TraceStatsReporter {
         }
 
         let total_pixels = (self.accum.hit_pixels + self.accum.miss_pixels).max(1);
+        let total_chunk_steps = self.accum.primary_chunk_steps.max(1);
         let total_hits = self.accum.hit_pixels.max(1);
         let total_shadow_rays = self.accum.shadow_rays.max(1);
         let grass_calls = self.accum.grass_trace_calls.max(1);
@@ -132,6 +137,10 @@ impl TraceStatsReporter {
         let grass_y_checks = self.accum.grass_y_checks.max(1);
         let grass_visible_pixels = self.accum.grass_visible_pixels.max(1);
         let hit_ratio = self.accum.hit_pixels as f64 / total_pixels as f64 * 100.0;
+        let occupied_chunk_ratio =
+            self.accum.primary_occupied_chunks as f64 / total_chunk_steps as f64 * 100.0;
+        let empty_chunk_ratio =
+            self.accum.primary_empty_chunks as f64 / total_chunk_steps as f64 * 100.0;
         let lod_ratio = self.accum.lod_hits as f64 / total_hits as f64 * 100.0;
         let shadow_blocked_ratio =
             self.accum.shadow_blocked as f64 / total_shadow_rays as f64 * 100.0;
@@ -168,12 +177,15 @@ impl TraceStatsReporter {
         tracing::info!(
             "[trace-stats] hit={hit_ratio:.0}% lod={lod_ratio:.0}% \
              | primary: chunks/pix={:.1} nodes/pix={:.1} desc/pix={:.1} \
+             occ-chunks/pix={:.1} empty-chunks/pix={:.1} occ={occupied_chunk_ratio:.0}% empty={empty_chunk_ratio:.0}% \
              | grass: vis={grass_visible_ratio:.0}% calls/pix={:.2} tiles/call={:.1} steps/call={:.1} cand/step={:.1} tile-rej={grass_tile_reject_ratio:.0}% hm/cand={:.0}% col-miss/read={grass_column_miss_ratio:.0}% y-rej/check={grass_y_reject_ratio:.0}% hit/call={grass_hit_ratio:.0}% shadow/vis={:.1} \
              | water: vis={water_visible_ratio:.0}% top={water_top_ratio:.0}% shadow={water_shadow_ratio:.0}% absorb={water_absorb_ratio:.0}% uw-sky={water_uw_sky_ratio:.0}% deep-miss={water_deep_no_hit_ratio:.0}% chunks-behind/pix={water_chunks_behind_per_pix:.1} normals={water_normal_ratio:.0}% sky={water_sky_ratio:.0}% n-lod={water_normal_lod_ratio:.0}% shad-skip={water_shadow_skip_ratio:.0}% \
              | shadow: rays/hit={:.1} blocked={shadow_blocked_ratio:.0}% chunks/ray={:.1} nodes/ray={:.1} desc/ray={:.1}",
             self.accum.primary_chunk_steps as f64 / total_pixels as f64,
             self.accum.primary_node_steps as f64 / total_pixels as f64,
             self.accum.primary_descents as f64 / total_pixels as f64,
+            self.accum.primary_occupied_chunks as f64 / total_pixels as f64,
+            self.accum.primary_empty_chunks as f64 / total_pixels as f64,
             self.accum.grass_trace_calls as f64 / total_pixels as f64,
             self.accum.grass_run_visits as f64 / grass_calls as f64,
             self.accum.grass_steps as f64 / grass_calls as f64,

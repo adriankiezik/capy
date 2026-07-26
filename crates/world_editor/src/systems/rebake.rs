@@ -224,6 +224,10 @@ fn build_rebake_output(
     let preview_pool_offset = preview_baked.map(|baked| {
         let offset = mesh.pool_dag.len() as u32;
         mesh.pool_dag.extend_from_slice(&baked.dag_buffer);
+        capy_core::tag_pool_child_pointers(
+            &mut mesh.pool_dag[offset as usize..],
+            baked.root_offset,
+        );
         mesh.pool_avg.extend_from_slice(&baked.avg_color_buffer);
         offset
     });

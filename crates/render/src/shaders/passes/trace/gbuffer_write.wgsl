@@ -9,6 +9,10 @@ struct MotionDepth {
 };
 
 fn compute_motion_depth(world_pos: vec3<f32>) -> MotionDepth {
+    if camera.temporal_outputs_enabled <= 0.0 {
+        return MotionDepth(vec2<f32>(0.0), 0.0);
+    }
+
     let clip_pos = camera.clip_from_world * vec4<f32>(world_pos, 1.0);
     let prev_clip_pos = camera.prev_clip_from_world * vec4<f32>(world_pos, 1.0);
     let curr_ndc = clip_pos.xy / clip_pos.w;
@@ -28,8 +32,15 @@ fn write_gbuffer(
     md: MotionDepth,
 ) {
     textureStore(gbuf_color_out, pixel, vec4<f32>(color, shadow));
+    if FEATURE_MINIMAL_OUTPUTS {
+        return;
+    }
     textureStore(gbuf_normal_out, pixel, vec4<f32>(normal, normal_w));
-    textureStore(gbuf_depth_out, pixel, vec4<f32>(ray_depth, 0.0, 0.0, 0.0));
-    textureStore(dlss_depth_out, pixel, vec4<f32>(md.hardware_depth, 0.0, 0.0, 0.0));
-    textureStore(motion_vectors_out, pixel, vec4<f32>(md.motion, 0.0, 0.0));
+    if FEATURE_DEPTH_OUTPUT {
+        textureStore(gbuf_depth_out, pixel, vec4<f32>(ray_depth, 0.0, 0.0, 0.0));
+    }
+    if camera.temporal_outputs_enabled > 0.0 {
+        textureStore(dlss_depth_out, pixel, vec4<f32>(md.hardware_depth, 0.0, 0.0, 0.0));
+        textureStore(motion_vectors_out, pixel, vec4<f32>(md.motion, 0.0, 0.0));
+    }
 }

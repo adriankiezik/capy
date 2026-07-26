@@ -2,14 +2,10 @@
 // Shared by all ray modes (primary, shadow, AO, reflection).
 
 struct ChunkDDA {
-    origin: vec3<f32>,
     dir: vec3<f32>,
-    cs_xz: f32,
-    cs_y: f32,
     t_current: f32,
     t_world_exit: f32,
     cc: vec3<i32>,
-    step: vec3<i32>,
     t_delta: vec3<f32>,
     t_max: vec3<f32>,
     entry_axis: i32,
@@ -18,13 +14,11 @@ struct ChunkDDA {
 var<private> dda: ChunkDDA;
 
 // Initialize the DDA for a ray. Returns false if the ray misses the world AABB.
-fn chunk_dda_init(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> bool {
-    dda.origin = ray_origin;
-
+// `t_min` skips the march to a known-safe start distance (0.0 = from the origin);
+// the beam pre-pass supplies a conservative lower bound on the hit distance.
+fn chunk_dda_init(ray_origin: vec3<f32>, ray_dir: vec3<f32>, t_min: f32) -> bool {
     let cs_xz = f32(streaming.chunk_size_xz);
     let cs_y = f32(streaming.chunk_size_y);
-    dda.cs_xz = cs_xz;
-    dda.cs_y = cs_y;
 
     var dir = ray_dir;
     let eps_d = 1e-10;
@@ -52,8 +46,11 @@ fn chunk_dda_init(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> bool {
         return false;
     }
 
-    dda.t_current = max(t_world.x, 0.0);
+    dda.t_current = max(max(t_world.x, 0.0), t_min);
     dda.t_world_exit = t_world.y;
+    if dda.t_current >= dda.t_world_exit {
+        return false;
+    }
 
     let ray_eps = max(render_settings.ray_epsilon, 0.0);
     let first_entry = ray_origin + dir * (dda.t_current + ray_eps);
@@ -62,11 +59,6 @@ fn chunk_dda_init(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> bool {
         cs_xz, cs_y,
     );
 
-    dda.step = vec3<i32>(
-        select(-1, 1, dir.x > 0.0),
-        select(-1, 1, dir.y > 0.0),
-        select(-1, 1, dir.z > 0.0),
-    );
     dda.t_delta = abs(cs * inv_dir);
 
     dda.t_max = vec3<f32>(
@@ -85,17 +77,17 @@ fn chunk_dda_step() -> bool {
     if dda.t_max.x < dda.t_max.y && dda.t_max.x < dda.t_max.z {
         dda.entry_axis = 0;
         dda.t_current = dda.t_max.x;
-        dda.cc.x += dda.step.x;
+        dda.cc.x += select(-1, 1, dda.dir.x > 0.0);
         dda.t_max.x += dda.t_delta.x;
     } else if dda.t_max.y < dda.t_max.z {
         dda.entry_axis = 1;
         dda.t_current = dda.t_max.y;
-        dda.cc.y += dda.step.y;
+        dda.cc.y += select(-1, 1, dda.dir.y > 0.0);
         dda.t_max.y += dda.t_delta.y;
     } else {
         dda.entry_axis = 2;
         dda.t_current = dda.t_max.z;
-        dda.cc.z += dda.step.z;
+        dda.cc.z += select(-1, 1, dda.dir.z > 0.0);
         dda.t_max.z += dda.t_delta.z;
     }
 
@@ -117,8 +109,8 @@ fn chunk_dda_t_exit() -> f32 {
 // World-space origin of the current chunk.
 fn chunk_dda_chunk_min() -> vec3<f32> {
     return vec3<f32>(
-        f32(dda.cc.x) * dda.cs_xz,
-        f32(dda.cc.y) * dda.cs_y,
-        f32(dda.cc.z) * dda.cs_xz,
+        f32(dda.cc.x) * f32(streaming.chunk_size_xz),
+        f32(dda.cc.y) * f32(streaming.chunk_size_y),
+        f32(dda.cc.z) * f32(streaming.chunk_size_xz),
     );
 }

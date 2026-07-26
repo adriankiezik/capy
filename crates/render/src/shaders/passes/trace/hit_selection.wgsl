@@ -7,7 +7,7 @@ struct HitSelection {
 
 fn resolve_visible_hit(ray_origin: vec3<f32>, ray_dir: vec3<f32>, hit: HitResult) -> HitSelection {
     let grass = dda_grass_hit;
-    var use_grass = grass.hit && (!hit.hit || grass.t < hit.t);
+    var use_grass = FEATURE_GRASS && grass.hit && (!hit.hit || grass.t < hit.t);
 
     // Preview overlay: trace the prefab preview DAG if active
     var preview_hit_result: HitResult;
@@ -47,7 +47,7 @@ fn resolve_visible_hit(ray_origin: vec3<f32>, ray_dir: vec3<f32>, hit: HitResult
     // When the camera starts underwater, the first recorded water hit belongs to
     // the surrounding water volume, so it should not suppress grass/voxel hits.
     let water = dda_water_hit;
-    var use_water = water.hit && camera.camera_underwater <= 0.5;
+    var use_water = FEATURE_WATER && water.hit && camera.camera_underwater <= 0.5;
     // Grass above water beats water
     if use_water && use_grass && grass.t < water.t {
         use_water = false;

@@ -17,9 +17,9 @@ fn trace_reflection_ray(
     refl.normal = vec3<f32>(0.0, 1.0, 0.0);
     refl.world_pos = vec3<f32>(0.0);
 
-    if !chunk_dda_init(ray_origin, ray_dir) { return refl; }
+    if !chunk_dda_init(ray_origin, ray_dir, 0.0) { return refl; }
 
-    let do_grass = render_settings.vegetation_enabled > 0.5;
+    let do_grass = FEATURE_GRASS;
     let grass_blade_height =
         GRASS_BLADE_HEIGHT * render_settings.vegetation_length * render_settings.vegetation_scale;
     var best_grass: GrassHit;
@@ -56,7 +56,7 @@ fn trace_reflection_ray(
                         ray_origin, dda.dir, camera.time, grass_max,
                         foliage_base_y, foliage_top_y,
                         t_enter, chunk_t_exit,
-                        info.foliage_bitmap_offset, chunk_min.x, chunk_min.z, dda.cs_xz,
+                        info.foliage_bitmap_offset, chunk_min.x, chunk_min.z, f32(streaming.chunk_size_xz),
                         chunk_min.y, info.foliage_y_bands,
                         info.foliage_tile_y_ranges_offset,
                     );
@@ -80,11 +80,7 @@ fn trace_reflection_ray(
                     refl.hit = true;
                     refl.normal = chunk_hit.normal;
                     refl.world_pos = hit_world_pos;
-                    if chunk_hit.is_lod_hit {
-                        refl.color = chunk_hit.color_override;
-                    } else {
-                        refl.color = render_settings.material_colors[min(chunk_hit.material & 0x3FFFu, 1023u)].rgb;
-                    }
+                    refl.color = render_settings.material_colors[min(chunk_hit.material & 0x3FFFu, 1023u)].rgb;
                     return refl;
                 }
                 return refl;
@@ -96,7 +92,7 @@ fn trace_reflection_ray(
                     ray_origin, dda.dir, camera.time, grass_max,
                     foliage_base_y, foliage_top_y,
                     t_enter, chunk_t_exit,
-                    info.foliage_bitmap_offset, chunk_min.x, chunk_min.z, dda.cs_xz,
+                    info.foliage_bitmap_offset, chunk_min.x, chunk_min.z, f32(streaming.chunk_size_xz),
                     chunk_min.y, info.foliage_y_bands,
                     info.foliage_tile_y_ranges_offset,
                 );

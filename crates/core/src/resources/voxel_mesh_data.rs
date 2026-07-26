@@ -5,8 +5,79 @@ use bevy_ecs::resource::Resource;
 use crate::{BakedChunkData, MATERIAL_PALETTE_SIZE, MaterialId, is_water_material};
 
 /// Number of u32 words per slot in the indirection table.
-const INDIRECTION_STRIDE: usize = 10;
+/// 16 words = 64 bytes, so each slot occupies exactly one GPU cache line
+/// (word 15 stores the near-mesh flags).
+const INDIRECTION_STRIDE: usize = 16;
+const SLOT_WORLD_SIZE: usize = 0;
+const SLOT_ROOT_OFFSET: usize = 1;
+const SLOT_DEPTH: usize = 2;
+const SLOT_POOL_OFFSET: usize = 3;
+const SLOT_FOLIAGE_Y_MIN: usize = 4;
+const SLOT_FOLIAGE_Y_MAX: usize = 5;
+const SLOT_FOLIAGE_BITMAP_OFFSET: usize = 6;
+const SLOT_FOLIAGE_Y_BANDS: usize = 7;
+const SLOT_FOLIAGE_TILE_Y_RANGES_OFFSET: usize = 8;
+const SLOT_SOLID_MIN_X: usize = 9;
+const SLOT_SOLID_MIN_Y: usize = 10;
+const SLOT_SOLID_MIN_Z: usize = 11;
+const SLOT_SOLID_MAX_X: usize = 12;
+const SLOT_SOLID_MAX_Y: usize = 13;
+const SLOT_SOLID_MAX_Z: usize = 14;
+const SLOT_FLAGS: usize = 15;
 const SLOT_FLAG_NEAR_MESH: u32 = 1;
+const TREE_BRANCH: u32 = 4;
+const NODE_FLAG_LEAF: u32 = 1;
+const NODE_FLAG_UNIFORM_WATER: u32 = 1 << 1;
+
+/// Tag bits embedded in the high bits of child-pointer words in the GPU pool.
+/// They mirror the child node's header flags so GPU traversal can decide
+/// leaf / uniform-water without a dependent read of the child header.
+/// Tags exist only in the assembled GPU pool (`pool_dag`); the per-chunk
+/// `BakedChunkData::dag_buffer` format on disk stays untagged.
+pub const POOL_CHILD_FLAG_LEAF: u32 = 1 << 31;
+pub const POOL_CHILD_FLAG_UNIFORM_WATER: u32 = 1 << 30;
+pub const POOL_CHILD_OFFSET_MASK: u32 = 0x3FFF_FFFF;
+
+/// OR each child pointer in a chunk's DAG region with the child's header
+/// flags (leaf / uniform-water) in the top two bits. `region` is the
+/// chunk-local DAG slice; child offsets are relative to its start.
+/// Idempotent: already-tagged pointers are masked before following.
+pub fn tag_pool_child_pointers(region: &mut [u32], root_offset: u32) {
+    let root = root_offset as usize;
+    if root + 3 > region.len() {
+        return;
+    }
+    let mut visited = std::collections::HashSet::new();
+    let mut stack = vec![root];
+    while let Some(o) = stack.pop() {
+        if !visited.insert(o) || o + 3 > region.len() {
+            continue;
+        }
+        let flags = region[o + 2];
+        if (flags & NODE_FLAG_LEAF) != 0 {
+            continue;
+        }
+        let child_count = (region[o].count_ones() + region[o + 1].count_ones()) as usize;
+        for i in 0..child_count {
+            let Some(&ptr) = region.get(o + 3 + i) else {
+                break;
+            };
+            let child = (ptr & POOL_CHILD_OFFSET_MASK) as usize;
+            let child_flags = region.get(child + 2).copied().unwrap_or(0);
+            let mut tagged = child as u32;
+            if (child_flags & NODE_FLAG_LEAF) != 0 {
+                tagged |= POOL_CHILD_FLAG_LEAF;
+            }
+            if (child_flags & NODE_FLAG_UNIFORM_WATER) != 0 {
+                tagged |= POOL_CHILD_FLAG_UNIFORM_WATER;
+            }
+            region[o + 3 + i] = tagged;
+            if (child_flags & NODE_FLAG_LEAF) == 0 {
+                stack.push(child);
+            }
+        }
+    }
+}
 
 /// Sentinel value: chunk has foliage but no bitmap (all columns are foliage).
 const FOLIAGE_BITMAP_ALL: u32 = 0xFFFFFFFE;
@@ -89,7 +160,7 @@ pub struct VoxelMeshData {
     /// Per-slot indirection: [world_size, root_offset, depth, pool_offset,
     ///                        foliage_y_min, foliage_y_max, foliage_bitmap_offset,
     ///                        foliage_y_bands, foliage_tile_y_ranges_offset,
-    ///                        flags] × total_slots.
+    ///                        solid_min_xyz, solid_max_xyz, flags] × total_slots.
     pub indirection: Vec<u32>,
     /// Chunk-coordinate origin of the grid (min corner).
     pub grid_min: [i32; 3],
@@ -105,25 +176,196 @@ pub struct VoxelMeshData {
 }
 
 /// Write one indirection slot at the given index.
-fn write_slot(
+fn write_baked_slot_with_bounds(
     indirection: &mut [u32],
     idx: usize,
     baked: &BakedChunkData,
     pool_offset: u32,
     bitmap_offset: u32,
     tile_y_bands_offset: u32,
+    solid_bounds: [u32; 6],
+) {
+    write_slot_fields(
+        indirection,
+        idx,
+        baked.world_size,
+        baked.root_offset,
+        baked.depth,
+        pool_offset,
+        baked.foliage_y_min,
+        baked.foliage_y_max,
+        bitmap_offset,
+        baked.foliage_y_bands,
+        tile_y_bands_offset,
+        solid_bounds,
+    );
+}
+
+fn write_slot_fields(
+    indirection: &mut [u32],
+    idx: usize,
+    world_size: u32,
+    root_offset: u32,
+    depth: u32,
+    pool_offset: u32,
+    foliage_y_min: u32,
+    foliage_y_max: u32,
+    bitmap_offset: u32,
+    foliage_y_bands: u32,
+    tile_y_bands_offset: u32,
+    solid_bounds: [u32; 6],
 ) {
     let base = idx * INDIRECTION_STRIDE;
-    indirection[base] = baked.world_size;
-    indirection[base + 1] = baked.root_offset;
-    indirection[base + 2] = baked.depth;
-    indirection[base + 3] = pool_offset;
-    indirection[base + 4] = baked.foliage_y_min;
-    indirection[base + 5] = baked.foliage_y_max;
-    indirection[base + 6] = bitmap_offset;
-    indirection[base + 7] = baked.foliage_y_bands;
-    indirection[base + 8] = tile_y_bands_offset;
-    indirection[base + 9] = 0;
+    indirection[base + SLOT_WORLD_SIZE] = world_size;
+    indirection[base + SLOT_ROOT_OFFSET] = root_offset;
+    indirection[base + SLOT_DEPTH] = depth;
+    indirection[base + SLOT_POOL_OFFSET] = pool_offset;
+    indirection[base + SLOT_FOLIAGE_Y_MIN] = foliage_y_min;
+    indirection[base + SLOT_FOLIAGE_Y_MAX] = foliage_y_max;
+    indirection[base + SLOT_FOLIAGE_BITMAP_OFFSET] = bitmap_offset;
+    indirection[base + SLOT_FOLIAGE_Y_BANDS] = foliage_y_bands;
+    indirection[base + SLOT_FOLIAGE_TILE_Y_RANGES_OFFSET] = tile_y_bands_offset;
+    indirection[base + SLOT_SOLID_MIN_X] = solid_bounds[0];
+    indirection[base + SLOT_SOLID_MIN_Y] = solid_bounds[1];
+    indirection[base + SLOT_SOLID_MIN_Z] = solid_bounds[2];
+    indirection[base + SLOT_SOLID_MAX_X] = solid_bounds[3];
+    indirection[base + SLOT_SOLID_MAX_Y] = solid_bounds[4];
+    indirection[base + SLOT_SOLID_MAX_Z] = solid_bounds[5];
+    indirection[base + SLOT_FLAGS] = 0;
+}
+
+#[derive(Clone, Copy)]
+struct SolidAabb {
+    min: [u32; 3],
+    max: [u32; 3],
+}
+
+impl SolidAabb {
+    fn empty() -> Self {
+        Self {
+            min: [u32::MAX; 3],
+            max: [0; 3],
+        }
+    }
+
+    fn include(&mut self, min: [u32; 3], max: [u32; 3]) {
+        self.min[0] = self.min[0].min(min[0]);
+        self.min[1] = self.min[1].min(min[1]);
+        self.min[2] = self.min[2].min(min[2]);
+        self.max[0] = self.max[0].max(max[0]);
+        self.max[1] = self.max[1].max(max[1]);
+        self.max[2] = self.max[2].max(max[2]);
+    }
+
+    fn into_slot_bounds(self, world_size: u32) -> [u32; 6] {
+        if self.min[0] == u32::MAX {
+            return [0; 6];
+        }
+        [
+            self.min[0].min(world_size),
+            self.min[1].min(world_size),
+            self.min[2].min(world_size),
+            self.max[0].min(world_size),
+            self.max[1].min(world_size),
+            self.max[2].min(world_size),
+        ]
+    }
+}
+
+fn solid_aabb_for_baked(baked: &BakedChunkData) -> [u32; 6] {
+    if baked.world_size == 0 || baked.depth == 0 {
+        return [0; 6];
+    }
+
+    let mut aabb = SolidAabb::empty();
+    collect_solid_aabb(
+        &baked.dag_buffer,
+        baked.root_offset as usize,
+        [0; 3],
+        baked.world_size,
+        baked.depth,
+        &mut aabb,
+    );
+    aabb.into_slot_bounds(baked.world_size)
+}
+
+fn collect_solid_aabb(
+    buffer: &[u32],
+    node_offset: usize,
+    origin: [u32; 3],
+    size: u32,
+    remaining_depth: u32,
+    aabb: &mut SolidAabb,
+) {
+    let Some((&mask_lo, rest)) = buffer.get(node_offset).zip(buffer.get(node_offset + 1..)) else {
+        return;
+    };
+    let Some((&mask_hi, rest)) = rest.split_first() else {
+        return;
+    };
+    let Some((&flags, _)) = rest.split_first() else {
+        return;
+    };
+
+    if (flags & NODE_FLAG_UNIFORM_WATER) != 0 {
+        return;
+    }
+
+    let child_size = (size / TREE_BRANCH).max(1);
+    let is_leaf = (flags & NODE_FLAG_LEAF) != 0 || remaining_depth <= 1;
+
+    for bit in 0..64 {
+        if !bit_is_set_64(mask_lo, mask_hi, bit) {
+            continue;
+        }
+
+        let lx = bit % TREE_BRANCH;
+        let ly = (bit / TREE_BRANCH) % TREE_BRANCH;
+        let lz = bit / (TREE_BRANCH * TREE_BRANCH);
+        let child_min = [
+            origin[0] + lx * child_size,
+            origin[1] + ly * child_size,
+            origin[2] + lz * child_size,
+        ];
+        let child_max = [
+            child_min[0] + child_size,
+            child_min[1] + child_size,
+            child_min[2] + child_size,
+        ];
+
+        if is_leaf {
+            let mat = leaf_material_from_buffer(buffer, node_offset, bit);
+            if mat != 0 && !is_water_material(mat) {
+                aabb.include(child_min, child_max);
+            }
+            continue;
+        }
+
+        let packed_index = popcount_below(mask_lo, mask_hi, bit) as usize;
+        let Some(&child_offset) = buffer.get(node_offset + 3 + packed_index) else {
+            // Bad tree data should not make the GPU cull a potentially visible chunk.
+            aabb.include(child_min, child_max);
+            continue;
+        };
+        collect_solid_aabb(
+            buffer,
+            child_offset as usize,
+            child_min,
+            child_size,
+            remaining_depth - 1,
+            aabb,
+        );
+    }
+}
+
+fn leaf_material_from_buffer(buffer: &[u32], node_offset: usize, bit: u32) -> MaterialId {
+    let word_index = bit as usize / 2;
+    let half_offset = bit % 2;
+    let word = buffer
+        .get(node_offset + 3 + word_index)
+        .copied()
+        .unwrap_or(0);
+    ((word >> (half_offset * 16)) & 0xFFFF) as MaterialId
 }
 
 /// Compute the foliage bitmap pool offset for a baked chunk.
@@ -227,11 +469,13 @@ impl VoxelMeshData {
             }
 
             let packed_index = popcount_below(mask_lo, mask_hi, cell_index) as usize;
-            node_offset = self
+            // Pool child pointers carry tag bits in the top bits — mask them off.
+            node_offset = (self
                 .pool_dag
                 .get(pool_base + node_offset + 3 + packed_index)
                 .copied()
-                .unwrap_or(0) as usize;
+                .unwrap_or(0)
+                & POOL_CHILD_OFFSET_MASK) as usize;
             mask_lo = self
                 .pool_dag
                 .get(pool_base + node_offset)
@@ -285,7 +529,9 @@ impl VoxelMeshData {
         chunk_size_y: u32,
         material_palette: [[f32; 3]; MATERIAL_PALETTE_SIZE],
     ) -> Self {
+        let solid_bounds = solid_aabb_for_baked(&baked);
         let mut pool_dag = baked.dag_buffer;
+        tag_pool_child_pointers(&mut pool_dag, baked.root_offset);
         let bitmap_offset = pool_foliage_bitmap(
             &mut pool_dag,
             baked.foliage_y_min,
@@ -294,16 +540,20 @@ impl VoxelMeshData {
         );
         let tile_offset = pool_foliage_tile_y_ranges(&mut pool_dag, &baked.foliage_tile_y_ranges);
         let mut indirection = vec![0u32; INDIRECTION_STRIDE];
-        let base = 0;
-        indirection[base] = baked.world_size;
-        indirection[base + 1] = baked.root_offset;
-        indirection[base + 2] = baked.depth;
-        indirection[base + 3] = 0;
-        indirection[base + 4] = baked.foliage_y_min;
-        indirection[base + 5] = baked.foliage_y_max;
-        indirection[base + 6] = bitmap_offset;
-        indirection[base + 7] = baked.foliage_y_bands;
-        indirection[base + 8] = tile_offset;
+        write_slot_fields(
+            &mut indirection,
+            0,
+            baked.world_size,
+            baked.root_offset,
+            baked.depth,
+            0,
+            baked.foliage_y_min,
+            baked.foliage_y_max,
+            bitmap_offset,
+            baked.foliage_y_bands,
+            tile_offset,
+            solid_bounds,
+        );
         Self {
             pool_dag,
             pool_avg: baked.avg_color_buffer,
@@ -331,6 +581,7 @@ impl VoxelMeshData {
         let total_slots = (grid_dim[0] * grid_dim[1] * grid_dim[2]) as usize;
 
         let mut pool_dag = canonical.dag_buffer.clone();
+        tag_pool_child_pointers(&mut pool_dag, canonical.root_offset);
         // Canonical chunk: pool bitmap once, all slots share it.
         let bitmap_offset = pool_foliage_bitmap(
             &mut pool_dag,
@@ -340,18 +591,20 @@ impl VoxelMeshData {
         );
         let tile_offset =
             pool_foliage_tile_y_ranges(&mut pool_dag, &canonical.foliage_tile_y_ranges);
+        let canonical_solid_bounds = solid_aabb_for_baked(canonical);
 
         let mut indirection = vec![0u32; total_slots * INDIRECTION_STRIDE];
         for z in 0..grid_dim_xz {
             for x in 0..grid_dim_xz {
                 let idx = (x + z * grid_dim_xz) as usize;
-                write_slot(
+                write_baked_slot_with_bounds(
                     &mut indirection,
                     idx,
                     canonical,
                     0,
                     bitmap_offset,
                     tile_offset,
+                    canonical_solid_bounds,
                 );
             }
         }
@@ -397,16 +650,21 @@ impl VoxelMeshData {
         // Pool: canonical DAG at offset 0, edited DAGs appended after.
         let mut pool_dag = Vec::with_capacity(total_dag_words);
         pool_dag.extend_from_slice(&canonical.dag_buffer);
+        tag_pool_child_pointers(&mut pool_dag, canonical.root_offset);
 
         let mut pool_avg = Vec::with_capacity(total_avg_words);
         pool_avg.extend_from_slice(&canonical.avg_color_buffer);
 
         let mut edited_offsets: HashMap<[i32; 3], u32> = HashMap::with_capacity(edited.len());
+        let mut edited_solid_bounds: HashMap<[i32; 3], [u32; 6]> =
+            HashMap::with_capacity(edited.len());
         for (coord, baked) in edited {
             let offset = pool_dag.len() as u32;
             pool_dag.extend_from_slice(&baked.dag_buffer);
+            tag_pool_child_pointers(&mut pool_dag[offset as usize..], baked.root_offset);
             pool_avg.extend_from_slice(&baked.avg_color_buffer);
             edited_offsets.insert(*coord, offset);
+            edited_solid_bounds.insert(*coord, solid_aabb_for_baked(baked));
         }
 
         // Pool foliage bitmaps and tile Y-range data after all DAG data.
@@ -418,6 +676,7 @@ impl VoxelMeshData {
         );
         let canonical_tile =
             pool_foliage_tile_y_ranges(&mut pool_dag, &canonical.foliage_tile_y_ranges);
+        let canonical_solid_bounds = solid_aabb_for_baked(canonical);
         let mut edited_bmp_offsets: HashMap<[i32; 3], (u32, u32)> =
             HashMap::with_capacity(edited.len());
         for (coord, baked) in edited {
@@ -442,15 +701,24 @@ impl VoxelMeshData {
                 if let Some(&pool_offset) = edited_offsets.get(&chunk_coord) {
                     let baked = &edited[&chunk_coord];
                     let (bmp, tile) = edited_bmp_offsets[&chunk_coord];
-                    write_slot(&mut indirection, idx, baked, pool_offset, bmp, tile);
+                    write_baked_slot_with_bounds(
+                        &mut indirection,
+                        idx,
+                        baked,
+                        pool_offset,
+                        bmp,
+                        tile,
+                        edited_solid_bounds[&chunk_coord],
+                    );
                 } else {
-                    write_slot(
+                    write_baked_slot_with_bounds(
                         &mut indirection,
                         idx,
                         canonical,
                         0,
                         canonical_bmp,
                         canonical_tile,
+                        canonical_solid_bounds,
                     );
                 }
             }
@@ -474,7 +742,7 @@ impl VoxelMeshData {
     /// when it appears in `near_mesh.chunks`.
     pub fn set_near_mesh(&mut self, near_mesh: NearVoxelMeshData) {
         for slot in self.indirection.chunks_exact_mut(INDIRECTION_STRIDE) {
-            slot[9] &= !SLOT_FLAG_NEAR_MESH;
+            slot[SLOT_FLAGS] &= !SLOT_FLAG_NEAR_MESH;
         }
 
         for chunk in &near_mesh.chunks {
@@ -494,7 +762,7 @@ impl VoxelMeshData {
             let slot_index = local_x as usize
                 + local_y as usize * self.grid_dim[0] as usize
                 + local_z as usize * self.grid_dim[0] as usize * self.grid_dim[1] as usize;
-            self.indirection[slot_index * INDIRECTION_STRIDE + 9] |= SLOT_FLAG_NEAR_MESH;
+            self.indirection[slot_index * INDIRECTION_STRIDE + SLOT_FLAGS] |= SLOT_FLAG_NEAR_MESH;
         }
 
         for &coord in &near_mesh.canonical_chunks {
@@ -513,7 +781,7 @@ impl VoxelMeshData {
             let slot_index = local_x as usize
                 + local_y as usize * self.grid_dim[0] as usize
                 + local_z as usize * self.grid_dim[0] as usize * self.grid_dim[1] as usize;
-            self.indirection[slot_index * INDIRECTION_STRIDE + 9] |= SLOT_FLAG_NEAR_MESH;
+            self.indirection[slot_index * INDIRECTION_STRIDE + SLOT_FLAGS] |= SLOT_FLAG_NEAR_MESH;
         }
 
         self.near_mesh = near_mesh;
@@ -537,16 +805,16 @@ impl VoxelMeshData {
             + local_y as usize * self.grid_dim[0] as usize
             + local_z as usize * self.grid_dim[0] as usize * self.grid_dim[1] as usize;
         let base = slot_index * INDIRECTION_STRIDE;
-        let world_size = *self.indirection.get(base)?;
+        let world_size = *self.indirection.get(base + SLOT_WORLD_SIZE)?;
         if world_size == 0 {
             return None;
         }
 
         Some(SlotTreeInfo {
             world_size,
-            root_offset: *self.indirection.get(base + 1)?,
-            depth: *self.indirection.get(base + 2)?,
-            pool_offset: *self.indirection.get(base + 3)?,
+            root_offset: *self.indirection.get(base + SLOT_ROOT_OFFSET)?,
+            depth: *self.indirection.get(base + SLOT_DEPTH)?,
+            pool_offset: *self.indirection.get(base + SLOT_POOL_OFFSET)?,
         })
     }
 
@@ -559,5 +827,70 @@ impl VoxelMeshData {
             .copied()
             .unwrap_or(0);
         ((word >> (half_offset * 16)) & 0xFFFF) as MaterialId
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::BakedChunkData;
+
+    /// Two-level tree (world_size 16, depth 2): a leaf brick with material 7
+    /// at voxel (0,0,0), referenced by the root's first child slot.
+    fn tiny_baked_chunk() -> BakedChunkData {
+        let mut buf = Vec::new();
+        // Leaf node at offset 0: header + 32 material words.
+        buf.push(1); // mask_lo: voxel bit 0 set
+        buf.push(0); // mask_hi
+        buf.push(NODE_FLAG_LEAF);
+        let mut materials = [0u32; 32];
+        materials[0] = 7; // low halfword of word 0 = material at bit 0
+        buf.extend_from_slice(&materials);
+        // Root inner node at offset 35: child cell 0 -> leaf.
+        let root = buf.len() as u32;
+        buf.push(1); // mask_lo: child bit 0 set
+        buf.push(0); // mask_hi
+        buf.push(0); // flags: inner
+        buf.push(0); // child pointer -> leaf at offset 0
+
+        BakedChunkData {
+            avg_color_buffer: vec![0; buf.len()],
+            dag_buffer: buf,
+            root_offset: root,
+            world_size: 16,
+            depth: 2,
+            foliage_y_min: 0,
+            foliage_y_max: 0,
+            foliage_bitmap: None,
+            foliage_y_bands: 0,
+            foliage_tile_y_ranges: None,
+        }
+    }
+
+    #[test]
+    fn pool_child_pointers_are_tagged_and_masked() {
+        let baked = tiny_baked_chunk();
+        let root = baked.root_offset as usize;
+        let mesh = VoxelMeshData::from_single_chunk(baked, 16, 16, [[0.0; 3]; 1024]);
+
+        // The root's child pointer should carry the leaf tag bit.
+        let child_ptr = mesh.pool_dag[root + 3];
+        assert_eq!(child_ptr & POOL_CHILD_OFFSET_MASK, 0);
+        assert_ne!(child_ptr & POOL_CHILD_FLAG_LEAF, 0);
+        assert_eq!(child_ptr & POOL_CHILD_FLAG_UNIFORM_WATER, 0);
+
+        // material_at must mask the tag bits when following the pointer.
+        assert_eq!(mesh.material_at([0.5, 0.5, 0.5]), 7);
+        assert_eq!(mesh.material_at([5.0, 5.0, 5.0]), 0);
+    }
+
+    #[test]
+    fn tagging_is_idempotent() {
+        let baked = tiny_baked_chunk();
+        let mut once = baked.dag_buffer.clone();
+        tag_pool_child_pointers(&mut once, baked.root_offset);
+        let mut twice = once.clone();
+        tag_pool_child_pointers(&mut twice, baked.root_offset);
+        assert_eq!(once, twice);
     }
 }

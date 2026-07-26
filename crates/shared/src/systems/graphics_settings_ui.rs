@@ -83,6 +83,10 @@ pub fn graphics_settings_ui(world: &mut World) {
                 hybrid_voxel_ui(ui, &mut settings);
             });
 
+            ui.collapsing("Trace", |ui| {
+                trace_settings_ui(ui, &mut settings);
+            });
+
             ui.collapsing("Lighting", |ui| {
                 lighting_ui(ui, &mut settings);
             });
@@ -341,6 +345,32 @@ fn hybrid_voxel_ui(ui: &mut egui::Ui, settings: &mut RendererSettings) {
     }
 }
 
+fn trace_settings_ui(ui: &mut egui::Ui, settings: &mut RendererSettings) {
+    ui.checkbox(&mut settings.beam_enabled, "Beam pre-pass");
+    ui.checkbox(
+        &mut settings.trace_minimal_outputs,
+        "Minimal outputs (debug, breaks lighting)",
+    );
+    ui.checkbox(&mut settings.trace_stats_enabled, "Stats logging (debug)");
+    ui.add(egui::Slider::new(&mut settings.max_chunk_steps, 8..=128).text("max chunk steps"));
+    ui.add(egui::Slider::new(&mut settings.max_node_steps, 32..=1024).text("max node steps"));
+    ui.add(
+        egui::Slider::new(&mut settings.chunk_lod_scale, 0.0..=4.0)
+            .text("chunk LOD scale")
+            .fixed_decimals(2),
+    );
+    ui.add(
+        egui::Slider::new(&mut settings.node_lod_scale, 0.0..=4.0)
+            .text("node LOD scale")
+            .fixed_decimals(2),
+    );
+    ui.add(
+        egui::Slider::new(&mut settings.lod_bias, 0.0..=8.0)
+            .text("LOD bias")
+            .fixed_decimals(2),
+    );
+}
+
 fn vegetation_ui(ui: &mut egui::Ui, settings: &mut RendererSettings) {
     ui.checkbox(&mut settings.vegetation_enabled, "Enabled");
     if !settings.vegetation_enabled {
@@ -449,5 +479,6 @@ fn lighting_ui(ui: &mut egui::Ui, settings: &mut RendererSettings) {
     }
     if sun_enabled {
         ui.add(egui::Slider::new(&mut settings.sun_contribution, 0.01..=1.0).text("sun"));
+        ui.checkbox(&mut settings.shadows_enabled, "Shadows");
     }
 }

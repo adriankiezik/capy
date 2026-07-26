@@ -51,12 +51,7 @@ fn shade_water(pixel: vec2<i32>, ray_origin: vec3<f32>, ray_dir: vec3<f32>, hit:
     } else if hit.hit {
         if ENABLE_TRACE_STATS { trace_stats_water_absorb_evals += 1u; }
         let uw_dist = hit.t - water.t;
-        var uw_color: vec3<f32>;
-        if hit.is_lod_hit {
-            uw_color = hit.color_override;
-        } else {
-            uw_color = render_settings.material_colors[min(hit.material & 0x3FFFu, 1023u)].rgb;
-        }
+        let uw_color = render_settings.material_colors[min(hit.material & 0x3FFFu, 1023u)].rgb;
         refraction = water_absorb(uw_color, uw_dist);
     }
 
@@ -114,7 +109,7 @@ fn shade_water(pixel: vec2<i32>, ray_origin: vec3<f32>, ray_dir: vec3<f32>, hit:
         if water.t > WATER_NORMAL_FLAT_DIST {
             // Extreme distance — cheap constant
             refl_color = WATER_DEEP_COLOR;
-        } else if render_settings.water_reflections > 0.5 && water.t < WATER_REFL_SKIP_DIST {
+        } else if FEATURE_WATER_REFLECTIONS && water.t < WATER_REFL_SKIP_DIST {
             // Ray-traced reflection: trace into the scene from the water surface
             let refl_origin = surface_pos + smooth_n * render_settings.ray_epsilon;
             let refl_hit = trace_reflection_ray(refl_origin, reflect_dir, render_settings.water_reflection_distance, surface_pos.y);
@@ -157,7 +152,7 @@ fn shade_water(pixel: vec2<i32>, ray_origin: vec3<f32>, ray_dir: vec3<f32>, hit:
     // Shadow ray from water surface (skip if disabled or distant water)
     var shadow_ray_count = 0u;
     var shadow_blocked_count = 0u;
-    if render_settings.water_shadows > 0.5 && render_settings.sun_contribution > 0.0 && water.t < render_settings.water_shadow_distance {
+    if FEATURE_WATER_SHADOWS && render_settings.sun_contribution > 0.0 && water.t < render_settings.water_shadow_distance {
         if ENABLE_TRACE_STATS { trace_stats_water_shadow_rays += 1u; }
         let shadow_origin = surface_pos + water.entry_normal * render_settings.ray_epsilon;
         let in_shadow = trace_shadow_ray(shadow_origin, sun_dir);

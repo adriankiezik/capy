@@ -1,5 +1,5 @@
 fn trace_shadow_ray(ray_origin: vec3<f32>, ray_dir: vec3<f32>) -> bool {
-    if !chunk_dda_init(ray_origin, ray_dir) { return false; }
+    if !chunk_dda_init(ray_origin, ray_dir, 0.0) { return false; }
 
     let max_steps = u32(max(round(render_settings.max_chunk_steps), 1.0));
     for (var i = 0u; i < max_steps; i++) {

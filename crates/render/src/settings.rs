@@ -35,11 +35,6 @@ pub(crate) fn to_render_settings_uniform(settings: &RendererSettings) -> RenderS
         ray_epsilon: settings.ray_epsilon.max(0.0),
         max_chunk_steps: settings.max_chunk_steps.max(1) as f32,
         max_node_steps: settings.max_node_steps.max(1) as f32,
-        vegetation_enabled: if settings.vegetation_enabled {
-            1.0
-        } else {
-            0.0
-        },
         vegetation_density: settings.vegetation_density.clamp(0.0, 4.0),
         vegetation_length: settings.vegetation_length.clamp(0.25, 3.0),
         vegetation_scale: settings.vegetation_scale.clamp(0.25, 3.0),
@@ -49,17 +44,10 @@ pub(crate) fn to_render_settings_uniform(settings: &RendererSettings) -> RenderS
         vegetation_near_search_radius: settings.vegetation_near_search_radius.min(4) as f32,
         vegetation_far_search_radius: settings.vegetation_far_search_radius.min(4) as f32,
         vegetation_shadow_distance: settings.vegetation_shadow_distance.max(0.0),
-        vegetation_shadow_enabled: if settings.vegetation_shadow_enabled {
-            1.0
-        } else {
-            0.0
-        },
         vegetation_animation_distance: settings.vegetation_animation_distance.max(0.0),
-        water_enabled: if settings.water_enabled { 1.0 } else { 0.0 },
-        water_reflections: if settings.water_reflections { 1.0 } else { 0.0 },
         water_reflection_distance: settings.water_reflection_distance.max(0.0),
-        water_shadows: if settings.water_shadows { 1.0 } else { 0.0 },
         water_shadow_distance: settings.water_shadow_distance.max(0.0),
+        ao_intensity: settings.ao_intensity.max(0.0),
         hybrid_near_radius: settings.hybrid_near_radius.max(0.0),
         hybrid_debug_tint: if settings.hybrid_debug_tint { 1.0 } else { 0.0 },
         _hybrid_pad: [0.0; 2],
@@ -81,7 +69,6 @@ pub(crate) struct RenderSettingsUniform {
     ray_epsilon: f32,
     max_chunk_steps: f32,
     max_node_steps: f32,
-    vegetation_enabled: f32,
     vegetation_density: f32,
     vegetation_length: f32,
     vegetation_scale: f32,
@@ -91,19 +78,16 @@ pub(crate) struct RenderSettingsUniform {
     vegetation_near_search_radius: f32,
     vegetation_far_search_radius: f32,
     vegetation_shadow_distance: f32,
-    vegetation_shadow_enabled: f32,
     vegetation_animation_distance: f32,
-    water_enabled: f32,
-    water_reflections: f32,
     water_reflection_distance: f32,
-    water_shadows: f32,
     water_shadow_distance: f32,
+    ao_intensity: f32,
     hybrid_near_radius: f32,
     hybrid_debug_tint: f32,
     _hybrid_pad: [f32; 2],
 }
 
-const _: () = assert!(std::mem::size_of::<RenderSettingsUniform>() == 16528);
+const _: () = assert!(std::mem::size_of::<RenderSettingsUniform>() == 16512);
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]

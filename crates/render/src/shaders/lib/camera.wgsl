@@ -14,7 +14,7 @@ struct CameraUniform {
     _pad4: f32,
     jitter: vec2<f32>,
     time: f32,
-    _pad5: f32,
+    temporal_outputs_enabled: f32,
     clip_from_world: mat4x4<f32>,
     prev_clip_from_world: mat4x4<f32>,
 };

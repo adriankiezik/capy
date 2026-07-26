@@ -34,7 +34,7 @@ pub(crate) struct CameraUniform {
     pub(crate) _pad4: f32,
     pub(crate) jitter: [f32; 2],
     pub(crate) time: f32,
-    pub(crate) _pad5: f32,
+    pub(crate) temporal_outputs_enabled: f32,
     pub(crate) clip_from_world: [f32; 16],
     pub(crate) prev_clip_from_world: [f32; 16],
 }
@@ -49,6 +49,7 @@ impl CameraUniform {
         lod_bias: f32,
         camera_underwater: bool,
         jitter: [f32; 2],
+        temporal_outputs_enabled: bool,
         prev_clip_from_world: [f32; 16],
         time: f32,
     ) -> Self {
@@ -93,7 +94,7 @@ impl CameraUniform {
             _pad4: 0.0,
             jitter,
             time,
-            _pad5: 0.0,
+            temporal_outputs_enabled: if temporal_outputs_enabled { 1.0 } else { 0.0 },
             clip_from_world: clip_from_world.to_cols_array(),
             prev_clip_from_world,
         }
@@ -114,6 +115,7 @@ pub fn create_camera_buffer(
         lod_bias,
         false,
         [0.0, 0.0],
+        false,
         clip_from_world(camera).to_cols_array(),
         0.0,
     );
@@ -139,6 +141,7 @@ pub fn write_camera_buffer(
         lod_bias,
         false,
         [0.0, 0.0],
+        false,
         clip_from_world(camera).to_cols_array(),
         0.0,
     );

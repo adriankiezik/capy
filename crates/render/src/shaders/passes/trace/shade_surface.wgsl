@@ -1,11 +1,6 @@
 fn shade_preview(pixel: vec2<i32>, preview_hit: HitResult) -> ShadowCounts {
     let tint_color = vec3<f32>(preview.tint_r, preview.tint_g, preview.tint_b);
-    var base: vec3<f32>;
-    if preview_hit.is_lod_hit {
-        base = preview_hit.color_override;
-    } else {
-        base = render_settings.material_colors[min(preview_hit.material & 0x7FFFu, 1023u)].rgb;
-    }
+    var base = render_settings.material_colors[min(preview_hit.material & 0x7FFFu, 1023u)].rgb;
     base = mix(base, tint_color, preview.tint_strength);
 
     let shading_pos = preview_hit.hit_pos_local;
@@ -28,7 +23,7 @@ fn shade_grass(pixel: vec2<i32>) -> ShadowCounts {
     var shadow_ray_count = 0u;
     var shadow_blocked_count = 0u;
     let grass_shadows_enabled =
-        render_settings.vegetation_shadow_enabled > 0.5
+        FEATURE_GRASS_SHADOWS
         && render_settings.vegetation_shadow_distance > 0.0
         && grass.t <= render_settings.vegetation_shadow_distance;
     if render_settings.sun_contribution > 0.0 && grass_shadows_enabled {
@@ -48,12 +43,7 @@ fn shade_grass(pixel: vec2<i32>) -> ShadowCounts {
 }
 
 fn shade_voxel(pixel: vec2<i32>, hit: HitResult) -> ShadowCounts {
-    var base: vec3<f32>;
-    if hit.is_lod_hit {
-        base = hit.color_override;
-    } else {
-        base = render_settings.material_colors[min(hit.material & 0x7FFFu, 1023u)].rgb;
-    }
+    let base = render_settings.material_colors[min(hit.material & 0x7FFFu, 1023u)].rgb;
 
     let shading_pos = hit.hit_pos_local;
     let shading_normal = hit.normal;
@@ -61,7 +51,7 @@ fn shade_voxel(pixel: vec2<i32>, hit: HitResult) -> ShadowCounts {
     var shadow = 1.0;
     var shadow_ray_count = 0u;
     var shadow_blocked_count = 0u;
-    if render_settings.sun_contribution > 0.0 {
+    if FEATURE_SHADOWS && render_settings.sun_contribution > 0.0 {
         let sun_dir = normalize(render_settings.sun_direction.xyz);
         let shadow_origin = shading_pos + shading_normal * render_settings.ray_epsilon;
         let in_shadow = trace_shadow_ray(shadow_origin, sun_dir);

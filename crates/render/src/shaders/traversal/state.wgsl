@@ -1,6 +1,6 @@
 // Sized for max tree depth 6 (chunk dims up to 4096). Re-indexed via
 // (root_se - scale_exp) >> 1  so entries pack from index 0.
-var<private> stk: array<StackEntry, 6>;
+var<private> stk: array<u32, 6>;
 // Best grass hit found during DDA traversal, read by trace.wgsl after trace_ray().
 var<private> dda_grass_hit: GrassHit;
 // When true, trace_ray() ignores grass entirely (used by pick shader for editor tools).
@@ -23,6 +23,10 @@ var<private> trace_stats_shadow_node_steps: u32;
 var<private> trace_stats_shadow_descents: u32;
 
 fn reset_trace_private_stats() {
+    if !ENABLE_TRACE_STATS {
+        return;
+    }
+
     trace_stats_primary_chunk_steps = 0u;
     trace_stats_primary_node_steps = 0u;
     trace_stats_primary_descents = 0u;
@@ -61,7 +65,7 @@ fn record_water_surface_hit(
     water_pos_local: vec3<f32>,
     entry_axis: i32,
 ) {
-    if render_settings.water_enabled <= 0.5 {
+    if !FEATURE_WATER {
         return;
     }
 

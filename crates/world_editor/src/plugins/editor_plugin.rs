@@ -1,6 +1,7 @@
 use bevy_ecs::schedule::{IntoScheduleConfigs, Schedules};
 use bevy_ecs::world::World;
 use capy_core::WindowConfig;
+use capy_render::RendererSettings;
 
 use capy_core::{PreviewGpuData, SelectionHighlight};
 
@@ -18,6 +19,15 @@ impl capy_core::Plugin for EditorPlugin {
             height: 900,
             vsync: false,
         });
+        let mut graphics = RendererSettings::with_palette(capy_core::MATERIAL_COLORS);
+        graphics.render_scale = 0.25;
+        graphics.sun_contribution = 0.0;
+        graphics.vegetation_enabled = false;
+        graphics.vegetation_shadow_enabled = false;
+        graphics.water_enabled = false;
+        graphics.water_reflections = false;
+        graphics.water_shadows = false;
+        world.insert_resource(graphics);
         #[cfg(feature = "dlss")]
         insert_dlss_settings(world);
         #[cfg(feature = "fsr")]

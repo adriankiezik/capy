@@ -183,6 +183,26 @@ pub(crate) fn render_passes_system(
         });
     }
 
+    if trace.features.beam {
+        let ts = gpu_profiler.pass_indices("beam");
+        let ts_writes = ts.map(|(b, e)| wgpu::ComputePassTimestampWrites {
+            query_set: gpu_profiler.query_set(),
+            beginning_of_pass_write_index: Some(b),
+            end_of_pass_write_index: Some(e),
+        });
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("Beam Prepass"),
+            timestamp_writes: ts_writes,
+        });
+        pass.set_pipeline(&trace.beam.pipeline);
+        pass.set_bind_group(0, &trace.beam.bind_group, &[]);
+        pass.dispatch_workgroups(
+            trace.beam.width.div_ceil(8),
+            trace.beam.height.div_ceil(8),
+            1,
+        );
+    }
+
     {
         let ts = gpu_profiler.pass_indices("trace");
         let ts_writes = ts.map(|(b, e)| wgpu::ComputePassTimestampWrites {
@@ -196,10 +216,14 @@ pub(crate) fn render_passes_system(
         });
         pass.set_pipeline(&trace.compute_pipeline);
         pass.set_bind_group(0, &trace.compute_bind_group, &[]);
-        pass.dispatch_workgroups(trace.width.div_ceil(8), trace.height.div_ceil(8), 1);
+        // Trace entry uses @workgroup_size(8, 4): one 32-lane simdgroup per group.
+        pass.dispatch_workgroups(trace.width.div_ceil(8), trace.height.div_ceil(4), 1);
     }
     trace.copy_stats_to_readback(&mut encoder);
 
+    if renderer_settings.ao_intensity > 0.0
+        && renderer_settings.ao_samples > 0
+        && renderer_settings.ao_steps > 0
     {
         let ts = gpu_profiler.pass_indices("ao");
         let ts_writes = ts.map(|(b, e)| wgpu::ComputePassTimestampWrites {

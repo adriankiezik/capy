@@ -39,7 +39,7 @@ fn main() {
     let ray_origin = camera.camera_pos;
 
     skip_grass = true;
-    let hit = trace_ray(ray_origin, ray_dir);
+    let hit = trace_ray(ray_origin, ray_dir, 0.0);
 
     if hit.hit {
         pick_output.hit = 1u;
@@ -49,7 +49,7 @@ fn main() {
         pick_output.normal_x = hit.normal.x;
         pick_output.normal_y = hit.normal.y;
         pick_output.normal_z = hit.normal.z;
-        pick_output.material = select(hit.material, 0u, hit.is_lod_hit);
+        pick_output.material = hit.material;
     } else {
         pick_output.hit = 0u;
         pick_output.pos_x = 0.0;

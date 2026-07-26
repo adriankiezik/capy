@@ -28,11 +28,7 @@ fn commit_trace_stats(
     if in_bounds {
         if hit.hit {
             atomicAdd(&wg_stats[6], 1u);
-            if hit.is_lod_hit {
-                atomicAdd(&wg_stats[10], 1u);
-            } else {
-                atomicAdd(&wg_stats[11], 1u);
-            }
+            atomicAdd(&wg_stats[11], 1u);
         } else {
             atomicAdd(&wg_stats[7], 1u);
         }
