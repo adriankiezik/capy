@@ -1,0 +1,40 @@
+#!/bin/sh
+set -eu
+
+cd "$(git rev-parse --show-toplevel)"
+
+temporary=$(mktemp -d "${TMPDIR:-/tmp}/capy-style-index.XXXXXX")
+
+case "$temporary" in
+    /*) ;;
+    *) temporary="$PWD/$temporary" ;;
+esac
+
+trap 'rm -rf "$temporary"' 0
+trap 'exit 1' 1 2 15
+
+git diff --cached --name-only --no-renames --diff-filter=ACDMRTUXB -z -- \
+    crates/ Cargo.toml Cargo.lock .cargo/ .githooks/ \
+    rustfmt.toml .rustfmt.toml rust-toolchain rust-toolchain.toml > "$temporary/changes"
+
+if [ ! -s "$temporary/changes" ]; then
+    exit 0
+fi
+
+mkdir "$temporary/tree"
+
+git -c core.autocrlf=false -c core.eol=lf checkout-index --all --prefix="$temporary/tree/"
+
+CARGO_TARGET_DIR="$(git rev-parse --path-format=absolute --git-common-dir)/style-hook-target"
+export CARGO_TARGET_DIR
+
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX
+
+cd "$temporary/tree"
+
+if cargo run --quiet --locked --offline --package style -- check --staged-changes "$temporary/changes"; then
+    exit 0
+else
+    printf '%s\n' 'Staged style check failed. Run cargo style fix, then stage the corrected files.' >&2
+    exit 1
+fi

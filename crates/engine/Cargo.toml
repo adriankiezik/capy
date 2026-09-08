@@ -1,0 +1,16 @@
+[package]
+name = "engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+pollster.workspace = true
+raw-window-handle.workspace = true
+wgpu.workspace = true
+winit.workspace = true
