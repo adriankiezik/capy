@@ -7,6 +7,8 @@ pub type Result<T> = std::result::Result<T, RuntimeError>;
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum RuntimeError {
+    #[error("asset initialization failed")]
+    Assets(#[from] crate::assets::AssetError),
     #[error("window operation failed")]
     Window(#[from] WindowError),
     #[error("graphics operation failed")]

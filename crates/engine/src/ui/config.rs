@@ -1,3 +1,5 @@
+use super::Font;
+use crate::assets::Handle;
 use glam::Vec2;
 
 pub type Color = [f32; 4];
@@ -114,6 +116,7 @@ impl From<f32> for Length {
 
 #[derive(Clone, Debug)]
 pub struct TextStyle {
+    pub font: Option<Handle<Font>>,
     pub size: f32,
     pub color: Color,
     pub line_height: f32,
@@ -122,6 +125,7 @@ pub struct TextStyle {
 impl Default for TextStyle {
     fn default() -> Self {
         Self {
+            font: None,
             size: 14.0,
             color: [1.0; 4],
             line_height: 1.4,

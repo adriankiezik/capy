@@ -1,5 +1,6 @@
 use super::driver::Shared;
 use crate::{
+    assets::Assets,
     player::Camera,
     runtime::{Input, Result, RuntimeError, Window},
     scene::{Hit, Scene},
@@ -9,6 +10,7 @@ use std::{cell::RefCell, future::poll_fn, rc::Rc, task::Poll, time::Duration};
 
 pub struct Engine {
     pub(super) shared: Rc<RefCell<Shared>>,
+    pub(super) assets: Assets,
 }
 
 struct FrameWait<'a> {
@@ -61,6 +63,10 @@ impl<'a> View<'a> {
 }
 
 impl Engine {
+    pub fn assets(&self) -> Assets {
+        self.assets.clone()
+    }
+
     pub async fn next_frame(&mut self) -> Result<Option<Frame<'_>>> {
         let waiting = FrameWait {
             shared: &self.shared,

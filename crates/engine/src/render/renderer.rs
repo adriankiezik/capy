@@ -2,7 +2,7 @@ use crate::{
     graphics::{Frame, Graphics, GraphicsError, Result},
     player::Camera,
     scene::{Hit, Mesh, Scene, Target, Vertex},
-    ui::Canvas,
+    ui::{Canvas, GlyphCache},
     world::VOXEL_SIZE,
 };
 use glam::{Mat4, Vec3, Vec4};
@@ -47,6 +47,7 @@ pub(crate) struct Renderer {
     hud: wgpu::Buffer,
     hud_count: u32,
     hud_capacity: usize,
+    glyphs: GlyphCache,
     clear: wgpu::Color,
 }
 
@@ -237,6 +238,7 @@ impl Renderer {
                 hud,
                 hud_count: 0,
                 hud_capacity: 0,
+                glyphs: GlyphCache::default(),
                 clear: wgpu::Color::BLACK,
             }
         })
@@ -487,7 +489,11 @@ impl Renderer {
         }
 
         let vertices = canvas
-            .vertices(glam::Vec2::new(size[0] as f32, size[1] as f32), dpi)
+            .vertices(
+                glam::Vec2::new(size[0] as f32, size[1] as f32),
+                dpi,
+                &mut self.glyphs,
+            )
             .map_err(|error| GraphicsError::Draw(error.into()))?;
 
         self.hud_count = vertices.len() as u32;

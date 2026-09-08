@@ -1,4 +1,5 @@
 use super::{Engine, View};
+use crate::assets::Assets;
 use crate::graphics::{FrameOutcome, Graphics};
 use crate::render::Renderer;
 use crate::runtime::{
@@ -60,8 +61,11 @@ pub fn run<F: Future<Output = ApplicationResult<()>> + 'static>(
         outcome: None,
     }));
 
+    let assets = Assets::new(settings.assets.clone())?;
+
     let mut runtime = Runtime {
         settings,
+        assets,
         create: Some(create),
         future: None,
         shared,
@@ -233,6 +237,7 @@ impl Shared {
 
 struct Runtime<C, F> {
     settings: Settings,
+    assets: Assets,
     create: Option<C>,
     future: Option<Pin<Box<F>>>,
     shared: Rc<RefCell<Shared>>,
@@ -380,6 +385,7 @@ where
         if let Some(create) = self.create.take() {
             self.future = Some(Box::pin(create(Engine {
                 shared: self.shared.clone(),
+                assets: self.assets.clone(),
             })));
         }
 

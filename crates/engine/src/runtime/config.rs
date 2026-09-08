@@ -1,3 +1,4 @@
+use crate::assets::AssetSettings;
 use crate::graphics::GraphicsSettings;
 use crate::runtime::{WindowControls, WindowSettings};
 use std::time::Duration;
@@ -5,6 +6,7 @@ use winit::keyboard::PhysicalKey;
 
 #[derive(Debug, Default)]
 pub struct Settings {
+    pub(super) assets: AssetSettings,
     pub(super) window: WindowSettings,
     pub(super) graphics: GraphicsSettings,
     pub(super) runtime: RuntimeSettings,
@@ -12,6 +14,13 @@ pub struct Settings {
 }
 
 impl Settings {
+    #[must_use]
+    pub fn with_assets(mut self, settings: AssetSettings) -> Self {
+        self.assets = settings;
+
+        self
+    }
+
     #[must_use]
     pub fn with_window_controls(mut self, controls: WindowControls) -> Self {
         self.window_controls = controls;

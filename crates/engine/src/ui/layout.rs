@@ -1,7 +1,8 @@
 use super::{
-    Canvas, Length, TextStyle, UiError,
+    Canvas, GlyphCache, Length, TextStyle, UiError,
     commands::{Commands, Kind},
     config::valid_color,
+    font,
 };
 use crate::scene::Vertex;
 use glam::Vec2;
@@ -80,14 +81,6 @@ fn build(
 }
 
 pub(super) fn lines(text: &str, style: &TextStyle, width: f32, wrap: bool) -> Vec<Vec<char>> {
-    let columns = if wrap && width.is_finite() {
-        ((width / (style.size / 7.0) + 1.0 + 0.001) / 6.0)
-            .floor()
-            .max(1.0) as usize
-    } else {
-        usize::MAX
-    };
-
     let mut lines = Vec::new();
 
     for paragraph in text.split('\n') {
@@ -102,7 +95,30 @@ pub(super) fn lines(text: &str, style: &TextStyle, width: f32, wrap: bool) -> Ve
         let mut start = 0;
 
         while start < chars.len() {
-            let mut end = start.saturating_add(columns).min(chars.len());
+            let mut end = start;
+
+            let mut advance = 0.0;
+
+            let mut previous = None;
+
+            while end < chars.len() {
+                let c = chars[end];
+
+                advance += font::kern(style, previous, c) + font::advance(style, c);
+
+                let measured = if style.font.is_none() {
+                    advance - style.size / 7.0
+                } else {
+                    advance
+                };
+
+                if wrap && end > start && measured > width + 0.001 {
+                    break;
+                }
+
+                previous = Some(c);
+                end += 1;
+            }
 
             if end < chars.len()
                 && !chars[end].is_whitespace()
@@ -127,8 +143,24 @@ pub(super) fn lines(text: &str, style: &TextStyle, width: f32, wrap: bool) -> Ve
     lines
 }
 
-pub(super) fn line_width(count: usize, style: &TextStyle) -> f32 {
-    (count as f32 * 6.0 - 1.0).max(0.0) * style.size / 7.0
+pub(super) fn line_width(chars: &[char], style: &TextStyle) -> f32 {
+    if style.font.is_none() {
+        return (chars.len() as f32 * 6.0 - 1.0).max(0.0) * style.size / 7.0;
+    }
+
+    let mut previous = None;
+
+    chars
+        .iter()
+        .map(|&c| {
+            let advance = font::kern(style, previous, c) + font::advance(style, c);
+
+            previous = Some(c);
+
+            advance
+        })
+        .sum::<f32>()
+        .max(0.0)
 }
 
 fn measure(
@@ -142,7 +174,7 @@ fn measure(
         AvailableSpace::Definite(width) => width,
         AvailableSpace::MinContent => text
             .split_whitespace()
-            .map(|word| line_width(word.chars().count(), style))
+            .map(|word| line_width(&word.chars().collect::<Vec<_>>(), style))
             .fold(0.0, f32::max),
         AvailableSpace::MaxContent => f32::INFINITY,
     });
@@ -153,17 +185,22 @@ fn measure(
         width: known.width.unwrap_or_else(|| {
             lines
                 .iter()
-                .map(|line| line_width(line.len(), style))
+                .map(|line| line_width(line, style))
                 .fold(0.0, f32::max)
         }),
         height: known.height.unwrap_or(
-            (lines.len().saturating_sub(1) as f32 * style.line_height + 1.0) * style.size,
+            (lines.len().saturating_sub(1) as f32 * style.line_height + 1.0) * font::height(style),
         ),
     }
 }
 
 impl Canvas {
-    pub(crate) fn vertices(&self, physical_size: Vec2, dpi: f32) -> Result<Vec<Vertex>, UiError> {
+    pub(crate) fn vertices(
+        &self,
+        physical_size: Vec2,
+        dpi: f32,
+        glyphs: &mut GlyphCache,
+    ) -> Result<Vec<Vertex>, UiError> {
         let commands = self.commands.borrow();
 
         if commands.invalid
@@ -321,7 +358,9 @@ impl Canvas {
             roots.push(child);
         }
 
-        let mut painter = super::paint::Painter::new(origin, scale);
+        glyphs.prune();
+
+        let mut painter = super::paint::Painter::new(origin, scale, glyphs);
 
         for root in roots {
             painter.node(

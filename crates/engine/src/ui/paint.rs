@@ -1,5 +1,5 @@
 use super::{
-    Align, Color, Rect, UiError,
+    Align, Color, GlyphCache, Rect, UiError, bitmap,
     commands::{Commands, Kind},
     font, layout,
 };
@@ -7,18 +7,20 @@ use crate::scene::Vertex;
 use glam::Vec2;
 use taffy::{NodeId, TaffyTree};
 
-pub(super) struct Painter {
+pub(super) struct Painter<'a> {
     vertices: Vec<Vertex>,
     origin: Vec2,
     scale: f32,
+    glyphs: &'a mut GlyphCache,
 }
 
-impl Painter {
-    pub(super) fn new(origin: Vec2, scale: f32) -> Self {
+impl<'a> Painter<'a> {
+    pub(super) fn new(origin: Vec2, scale: f32, glyphs: &'a mut GlyphCache) -> Self {
         Self {
             vertices: Vec::new(),
             origin,
             scale,
+            glyphs,
         }
     }
 
@@ -123,36 +125,69 @@ impl Painter {
                     .iter()
                     .enumerate()
                 {
-                    let shift = (width - layout::line_width(line.len(), style)).max(0.0)
+                    let shift = (width - layout::line_width(line, style)).max(0.0)
                         * match node.text_align {
                             Align::Start | Align::Stretch => 0.0,
                             Align::Center => 0.5,
                             Align::End => 1.0,
                         };
 
-                    let y = content_position.y + row as f32 * style.size * style.line_height;
+                    let y =
+                        content_position.y + row as f32 * font::height(style) * style.line_height;
 
                     if y >= clip.position.y + clip.size.y {
                         break;
                     }
 
-                    for (column, &c) in line.iter().enumerate() {
-                        let x = content_position.x + shift + column as f32 * 6.0 * unit;
+                    let mut x = content_position.x + shift;
 
-                        for (gy, bits) in font::glyph(c).into_iter().enumerate() {
-                            for gx in 0..5 {
-                                if bits & (1 << (4 - gx)) != 0 {
-                                    self.rect(
-                                        Rect::new(
-                                            Vec2::new(x + gx as f32 * unit, y + gy as f32 * unit),
-                                            Vec2::splat(unit),
-                                        ),
-                                        clip,
-                                        style.color,
-                                    )?;
+                    let mut previous = None;
+
+                    for &c in line {
+                        x += font::kern(style, previous, c);
+
+                        if let Some(font) = &style.font {
+                            let spans = self.glyphs.glyph(font, c, style.size * self.scale)?;
+
+                            let baseline = y + font::ascent(style);
+
+                            for span in spans.iter() {
+                                let mut color = style.color;
+
+                                color[3] *= span.alpha;
+
+                                self.rect(
+                                    Rect::new(
+                                        Vec2::new(x, baseline)
+                                            + Vec2::new(span.x, span.y) / self.scale,
+                                        Vec2::new(span.width, 1.0) / self.scale,
+                                    ),
+                                    clip,
+                                    color,
+                                )?;
+                            }
+                        } else {
+                            for (gy, bits) in bitmap::glyph(c).into_iter().enumerate() {
+                                for gx in 0..5 {
+                                    if bits & (1 << (4 - gx)) != 0 {
+                                        self.rect(
+                                            Rect::new(
+                                                Vec2::new(
+                                                    x + gx as f32 * unit,
+                                                    y + gy as f32 * unit,
+                                                ),
+                                                Vec2::splat(unit),
+                                            ),
+                                            clip,
+                                            style.color,
+                                        )?;
+                                    }
                                 }
                             }
                         }
+
+                        x += font::advance(style, c);
+                        previous = Some(c);
                     }
                 }
             }

@@ -30,3 +30,4 @@ winit = "0.30.13"
 engine = { path = "crates/engine" }
 glam = "0.33"
 bytemuck = { version = "1", features = ["derive"] }
+fontdue = "0.9"
