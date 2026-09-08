@@ -1,5 +1,5 @@
+use crate::error::{Result, StyleError};
 use crate::source::{Edit, Source, apply, group_spacing, spacing, strip_comments};
-use anyhow::{Context as _, Result, bail};
 use proc_macro2::{Span, TokenStream, TokenTree};
 use std::io::Write;
 use std::ops::Range;
@@ -22,7 +22,7 @@ fn literals(
             TokenTree::Literal(literal) => {
                 let range = source.range(literal.span())?;
 
-                let spelling = text.get(range.clone()).context("Invalid literal span")?;
+                let spelling = text.get(range.clone()).ok_or(StyleError::LiteralSpan)?;
 
                 if !spelling.starts_with("//") && !spelling.starts_with("/*") {
                     ranges.push(range);
@@ -59,7 +59,7 @@ fn uncomment(text: &str) -> Result<String> {
 
     let tokens = token_text
         .parse::<TokenStream>()
-        .map_err(|error| anyhow::anyhow!("Rust tokenization failed: {error}"))?;
+        .map_err(|error| StyleError::Tokenization(error.to_string()))?;
 
     literals(tokens, &Source::new(text), text, &mut ranges)?;
 
@@ -67,7 +67,7 @@ fn uncomment(text: &str) -> Result<String> {
 
     let text = strip_comments(text, &ranges)?;
 
-    let file = syn::parse_file(&text).context("Parsing uncommented Rust")?;
+    let file = syn::parse_file(&text)?;
 
     let mut attributes = Attributes::default();
 
@@ -219,30 +219,39 @@ fn format(text: &str) -> Result<String> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .context("Starting rustfmt")?;
+        .map_err(|source| StyleError::Io {
+            operation: "Starting rustfmt",
+            source,
+        })?;
 
-    let mut input = child.stdin.take().context("Opening rustfmt input")?;
+    let mut input = child.stdin.take().ok_or(StyleError::RustfmtInput)?;
 
     let output = std::thread::scope(|scope| {
         let writer = scope.spawn(move || input.write_all(text.as_bytes()));
 
-        let output = child.wait_with_output().context("Waiting for rustfmt")?;
+        let output = child.wait_with_output().map_err(|source| StyleError::Io {
+            operation: "Waiting for rustfmt",
+            source,
+        })?;
 
         writer
             .join()
-            .map_err(|_| anyhow::anyhow!("Rustfmt input writer failed"))??;
+            .map_err(|_| StyleError::RustfmtWriter)?
+            .map_err(|source| StyleError::Io {
+                operation: "Writing rustfmt input",
+                source,
+            })?;
 
-        Ok::<_, anyhow::Error>(output)
+        Ok::<_, StyleError>(output)
     })?;
 
     if !output.status.success() {
-        bail!(
-            "Rustfmt failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+        return Err(StyleError::Rustfmt(
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        ));
     }
 
-    String::from_utf8(output.stdout).context("Reading rustfmt output")
+    String::from_utf8(output.stdout).map_err(StyleError::RustfmtOutput)
 }
 
 pub fn normalize(text: &str, crate_name: Option<&str>, preserve_comments: bool) -> Result<String> {
@@ -256,7 +265,7 @@ pub fn normalize(text: &str, crate_name: Option<&str>, preserve_comments: bool) 
 
     let text = format(&text)?;
 
-    let file = syn::parse_file(&text).context("Parsing formatted Rust")?;
+    let file = syn::parse_file(&text)?;
 
     let mut boundaries = Boundaries::default();
 

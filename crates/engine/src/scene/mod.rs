@@ -16,8 +16,8 @@ mod support;
 mod work;
 
 pub(crate) use body::Body;
-pub use config::{EditSettings, SceneSettings, ShadowSettings, SimulationSettings, VisualSettings};
-pub use edit::{EditOutcome, SceneEdits};
+pub use config::{SceneSettings, ShadowSettings, SimulationSettings, VisualSettings};
+pub use edit::{EditOutcome, EditSettings, SceneEdits};
 pub use error::{Result, SceneError};
 pub(crate) use geometry::{Mesh, Vertex};
 pub use query::{Hit, Target};

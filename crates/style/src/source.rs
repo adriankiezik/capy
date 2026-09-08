@@ -1,4 +1,4 @@
-use anyhow::{Context as _, Result, bail};
+use crate::error::{Result, StyleError};
 use proc_macro2::{LineColumn, Span};
 use std::ops::Range;
 
@@ -20,19 +20,19 @@ impl<'a> Source<'a> {
         let start = *self
             .lines
             .get(position.line.saturating_sub(1))
-            .context("Invalid source line")?;
+            .ok_or(StyleError::SourceLine)?;
 
         let line = self.text[start..]
             .split('\n')
             .next()
-            .context("Missing source line")?;
+            .ok_or(StyleError::MissingSourceLine)?;
 
         let column = line
             .char_indices()
             .map(|(offset, _)| offset)
             .chain(std::iter::once(line.len()))
             .nth(position.column)
-            .context("Invalid source column")?;
+            .ok_or(StyleError::SourceColumn)?;
 
         Ok(start + column)
     }
@@ -56,12 +56,12 @@ pub fn apply(text: &str, mut edits: Vec<Edit>) -> Result<String> {
 
     for edit in edits {
         if edit.range.start < end || edit.range.end < edit.range.start {
-            bail!("Overlapping source edits");
+            return Err(StyleError::OverlappingEdits);
         }
 
         output.push_str(
             text.get(end..edit.range.start)
-                .context("Invalid edit boundary")?,
+                .ok_or(StyleError::Boundary("edit"))?,
         );
 
         output.push_str(&edit.replacement);
@@ -69,7 +69,7 @@ pub fn apply(text: &str, mut edits: Vec<Edit>) -> Result<String> {
         end = edit.range.end;
     }
 
-    output.push_str(text.get(end..).context("Invalid final edit boundary")?);
+    output.push_str(text.get(end..).ok_or(StyleError::Boundary("final edit"))?);
 
     Ok(output)
 }
@@ -77,7 +77,7 @@ pub fn apply(text: &str, mut edits: Vec<Edit>) -> Result<String> {
 pub fn spacing(text: &str, range: Range<usize>, indentation: usize) -> Result<Option<Edit>> {
     let gap = text
         .get(range.clone())
-        .context("Invalid spacing boundary")?;
+        .ok_or(StyleError::Boundary("spacing"))?;
 
     if !gap.trim().is_empty() || gap.bytes().filter(|&byte| byte == b'\n').count() >= 2 {
         return Ok(None);
@@ -96,7 +96,7 @@ pub fn spacing(text: &str, range: Range<usize>, indentation: usize) -> Result<Op
 pub fn group_spacing(text: &str, range: Range<usize>, indentation: usize) -> Result<Option<Edit>> {
     let gap = text
         .get(range.clone())
-        .context("Invalid assignment spacing boundary")?;
+        .ok_or(StyleError::Boundary("assignment spacing"))?;
 
     if !gap.trim().is_empty() {
         return Ok(None);
@@ -165,7 +165,7 @@ pub fn strip_comments(text: &str, protected: &[Range<usize>]) -> Result<String> 
             }
 
             if depth != 0 {
-                bail!("Unterminated block comment at byte {start}");
+                return Err(StyleError::BlockComment(start));
             }
 
             let newlines = text[start..cursor]

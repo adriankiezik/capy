@@ -1,4 +1,4 @@
-use anyhow::{Context as _, Result, bail};
+use crate::error::{Result, StyleError};
 use serde_json::Value;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -28,13 +28,15 @@ impl Workspace {
             ])
             .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"))
             .output()
-            .context("Reading Cargo workspace metadata")?;
+            .map_err(|source| StyleError::Io {
+                operation: "Reading Cargo workspace metadata",
+                source,
+            })?;
 
         if !output.status.success() {
-            bail!(
-                "Cargo metadata failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
+            return Err(StyleError::CargoMetadata(
+                String::from_utf8_lossy(&output.stderr).into_owned(),
+            ));
         }
 
         let metadata: Value = serde_json::from_slice(&output.stdout)?;
@@ -42,16 +44,16 @@ impl Workspace {
         let root = PathBuf::from(
             metadata["workspace_root"]
                 .as_str()
-                .context("Missing workspace root")?,
+                .ok_or(StyleError::MissingMetadata("workspace root"))?,
         );
 
         let members = metadata["workspace_members"]
             .as_array()
-            .context("Missing workspace members")?;
+            .ok_or(StyleError::MissingMetadata("workspace members"))?;
 
         let packages = metadata["packages"]
             .as_array()
-            .context("Missing Cargo packages")?
+            .ok_or(StyleError::MissingMetadata("Cargo packages"))?
             .iter()
             .filter(|package| members.contains(&package["id"]))
             .cloned()
@@ -71,12 +73,12 @@ impl Workspace {
                 let manifest = Path::new(
                     package["manifest_path"]
                         .as_str()
-                        .context("Missing package manifest")?,
+                        .ok_or(StyleError::MissingMetadata("package manifest"))?,
                 );
 
                 Ok(manifest
                     .parent()
-                    .context("Missing package directory")?
+                    .ok_or(StyleError::MissingMetadata("package directory"))?
                     .strip_prefix(&self.root)?
                     .to_owned())
             })
@@ -89,7 +91,7 @@ impl Workspace {
         for package in &self.packages {
             let targets = package["targets"]
                 .as_array()
-                .context("Missing Cargo targets")?;
+                .ok_or(StyleError::MissingMetadata("Cargo targets"))?;
 
             let library_names: HashSet<_> = targets
                 .iter()
@@ -116,7 +118,7 @@ impl Workspace {
 
             let dependencies: HashSet<_> = package["dependencies"]
                 .as_array()
-                .context("Missing dependency metadata")?
+                .ok_or(StyleError::MissingMetadata("dependency metadata"))?
                 .iter()
                 .filter_map(|dependency| {
                     dependency["rename"]
@@ -129,10 +131,12 @@ impl Workspace {
             for target in targets {
                 let name = target["name"]
                     .as_str()
-                    .context("Missing target name")?
+                    .ok_or(StyleError::MissingMetadata("target name"))?
                     .replace('-', "_");
 
-                let kinds = target["kind"].as_array().context("Missing target kind")?;
+                let kinds = target["kind"]
+                    .as_array()
+                    .ok_or(StyleError::MissingMetadata("target kind"))?;
 
                 let external_library = library_names.contains(&name)
                     && kinds.iter().any(|kind| {
@@ -151,7 +155,7 @@ impl Workspace {
                 let path = PathBuf::from(
                     target["src_path"]
                         .as_str()
-                        .context("Missing target source")?,
+                        .ok_or(StyleError::MissingMetadata("target source"))?,
                 );
 
                 sources.push(SourceTarget { path, crate_name });

@@ -1,5 +1,6 @@
 mod cli;
 mod crate_paths;
+mod error;
 mod ownership;
 mod rust;
 mod shader;
@@ -8,7 +9,8 @@ mod staged;
 mod structure;
 mod workspace;
 
-use anyhow::{Context as _, Result, bail};
+use crate::error::StyleError;
+use anyhow::{Context as _, Result};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -47,11 +49,11 @@ fn normalize(
     extension: &str,
     crate_name: Option<&str>,
     preserve_comments: bool,
-) -> Result<String> {
+) -> crate::error::Result<String> {
     match extension {
         "rs" => crate::rust::normalize(text, crate_name, preserve_comments),
         "wgsl" => crate::shader::normalize(text),
-        _ => bail!("Supported source types are rs and wgsl"),
+        _ => Err(StyleError::SourceType),
     }
 }
 
@@ -96,7 +98,7 @@ fn main() -> Result<()> {
         if fix {
             std::io::stdout().write_all(formatted.as_bytes())?;
         } else if text != formatted {
-            bail!("Standard input violates source style");
+            return Err(StyleError::StdinStyle.into());
         }
 
         return Ok(());
@@ -121,7 +123,7 @@ fn main() -> Result<()> {
     files.dedup();
 
     if files.is_empty() {
-        bail!("No Rust or WGSL source files found");
+        return Err(StyleError::NoSources.into());
     }
 
     let workspace = match workspace {
@@ -183,10 +185,7 @@ fn main() -> Result<()> {
             eprintln!("{}:{line}: {message}", file.display());
         }
 
-        bail!(
-            "{} structural violation(s) require manual changes",
-            violations.len()
-        );
+        return Err(StyleError::Structure(violations.len()).into());
     }
 
     if !fix && !changes.is_empty() {
@@ -197,7 +196,7 @@ fn main() -> Result<()> {
             );
         }
 
-        bail!("{} file(s) need cargo style fix", changes.len());
+        return Err(StyleError::Formatting(changes.len()).into());
     }
 
     for (file, formatted, _) in &changes {

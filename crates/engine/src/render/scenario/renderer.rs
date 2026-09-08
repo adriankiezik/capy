@@ -1,6 +1,6 @@
-use super::{Renderer, renderer::Target};
+use super::error::{Result, ScenarioError};
+use crate::render::{Renderer, renderer::Target};
 use crate::{View, ui::Canvas};
-use anyhow::{Context, Result, ensure};
 use std::{
     collections::VecDeque,
     sync::mpsc,
@@ -40,40 +40,39 @@ pub struct ScenarioRenderer {
 
 impl ScenarioRenderer {
     pub fn new(size: [u32; 2]) -> Result<Self> {
-        ensure!(
-            size.iter().all(|&value| value > 0),
-            "resolution must be positive"
-        );
+        if size.contains(&0) {
+            return Err(ScenarioError::ZeroResolution);
+        }
 
         let instance =
             wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle().with_env());
 
         let adapter = pollster::block_on(wgpu::util::initialize_adapter_from_env_or_default(
             &instance, None,
-        ))
-        .context("no GPU adapter available; select using WGPU_BACKEND and WGPU_ADAPTER_NAME")?;
+        ))?;
 
         let timestamp_features =
             wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
 
         let timestamps = adapter.features().contains(timestamp_features);
 
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("scenario benchmark"),
-            required_features: if timestamps {
-                timestamp_features
-            } else {
-                wgpu::Features::empty()
-            },
-            ..Default::default()
-        }))
-        .context("create scenario GPU device")?;
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+                label: Some("scenario benchmark"),
+                required_features: if timestamps {
+                    timestamp_features
+                } else {
+                    wgpu::Features::empty()
+                },
+                ..Default::default()
+            }))?;
 
-        ensure!(
-            size.iter()
-                .all(|&value| value <= device.limits().max_texture_dimension_2d),
-            "resolution exceeds device limits"
-        );
+        if size
+            .iter()
+            .any(|&value| value > device.limits().max_texture_dimension_2d)
+        {
+            return Err(ScenarioError::ResolutionLimit);
+        }
 
         let queries = timestamps.then(|| {
             device.create_query_set(&wgpu::QuerySetDescriptor {
@@ -167,16 +166,12 @@ impl ScenarioRenderer {
                     let _ = sender.send(result);
                 });
 
-            self.device
-                .poll(wgpu::PollType::Wait {
-                    submission_index: Some(submission),
-                    timeout: Some(TIMEOUT),
-                })
-                .context("GPU completion failed")?;
+            self.device.poll(wgpu::PollType::Wait {
+                submission_index: Some(submission),
+                timeout: Some(TIMEOUT),
+            })?;
 
-            receiver
-                .recv_timeout(TIMEOUT)
-                .context("timestamp mapping callback timed out")??;
+            receiver.recv_timeout(TIMEOUT)??;
 
             let mapped = slot.readback.slice(..).get_mapped_range()?;
 
@@ -188,10 +183,9 @@ impl ScenarioRenderer {
                 * f64::from(self.queue.get_timestamp_period())
                 * 1e-9;
 
-            ensure!(
-                seconds.is_finite() && seconds > 0.0,
-                "invalid GPU timestamp duration"
-            );
+            if !seconds.is_finite() || seconds <= 0.0 {
+                return Err(ScenarioError::InvalidTimestamp);
+            }
 
             self.gpu_times.push(Duration::from_secs_f64(seconds));
 
@@ -199,12 +193,10 @@ impl ScenarioRenderer {
 
             slot.readback.unmap();
         } else {
-            self.device
-                .poll(wgpu::PollType::Wait {
-                    submission_index: Some(submission),
-                    timeout: Some(TIMEOUT),
-                })
-                .context("GPU completion failed")?;
+            self.device.poll(wgpu::PollType::Wait {
+                submission_index: Some(submission),
+                timeout: Some(TIMEOUT),
+            })?;
         }
 
         Ok(())

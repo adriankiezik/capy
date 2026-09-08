@@ -1,5 +1,5 @@
+use crate::error::Result;
 use crate::source::{Edit, Source, apply};
-use anyhow::Result;
 use proc_macro2::Span;
 use syn::{
     spanned::Spanned,

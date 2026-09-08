@@ -1,5 +1,5 @@
+use crate::error::{Result, StyleError};
 use crate::source::{apply, group_spacing, spacing, strip_comments};
-use anyhow::{Result, bail};
 use std::ops::Range;
 
 fn tokens(text: &str) -> Result<Vec<Range<usize>>> {
@@ -38,7 +38,7 @@ fn tokens(text: &str) -> Result<Vec<Range<usize>>> {
             }
 
             if depth != 0 {
-                bail!("Unterminated WGSL block comment at byte {start}");
+                return Err(StyleError::WgslBlockComment(start));
             }
         } else if bytes[cursor] == b'"' {
             cursor += 1;
@@ -59,7 +59,7 @@ fn tokens(text: &str) -> Result<Vec<Range<usize>>> {
             }
 
             if !closed {
-                bail!("Unterminated quoted token at byte {start}");
+                return Err(StyleError::QuotedToken(start));
             }
 
             ranges.push(start..cursor);

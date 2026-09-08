@@ -1,4 +1,4 @@
-use anyhow::{Context as _, Result};
+use crate::error::{Result, StyleError};
 use proc_macro2::{Delimiter, Span, TokenStream, TokenTree};
 use std::path::Path;
 use syn::{Item, Visibility, spanned::Spanned};
@@ -34,7 +34,7 @@ fn error_paths(tokens: TokenStream, spans: &mut Vec<Span>) {
 }
 
 pub fn violations(text: &str, path: &Path) -> Result<Vec<(usize, &'static str)>> {
-    let file = syn::parse_file(text).context("Parsing Rust structure")?;
+    let file = syn::parse_file(text)?;
 
     let name = path.file_name().and_then(|name| name.to_str());
 
@@ -51,7 +51,7 @@ pub fn violations(text: &str, path: &Path) -> Result<Vec<(usize, &'static str)>>
 
         let tokens = text
             .parse::<TokenStream>()
-            .map_err(|error| anyhow::anyhow!("Rust tokenization failed: {error}"))?;
+            .map_err(|error| StyleError::Tokenization(error.to_string()))?;
 
         let mut spans = Vec::new();
 

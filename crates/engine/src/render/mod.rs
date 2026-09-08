@@ -5,7 +5,7 @@ pub use renderer::bench::run as benchmark_gpu;
 mod scenario;
 
 #[cfg(feature = "scenario-bench")]
-pub use scenario::{ScenarioRenderer, ScenarioTimings};
+pub use scenario::{ScenarioError, ScenarioRenderer, ScenarioTimings};
 
 mod overlay;
 mod renderer;

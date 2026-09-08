@@ -1,4 +1,4 @@
-use super::{Domain, local::LocalPatch};
+use super::{Domain, Limits, local::LocalPatch};
 use crate::{
     scene::{
         Body, Result, Scene, SceneError,
@@ -18,23 +18,6 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
-
-#[derive(Clone, Copy)]
-pub(in crate::scene) struct Limits {
-    pub(super) edge: i32,
-    pub(in crate::scene) bodies: usize,
-    pub(super) vertices: usize,
-}
-
-impl Limits {
-    pub(in crate::scene) fn new(scene: &Scene) -> Self {
-        Self {
-            edge: scene.settings.render_leaf_edge,
-            bodies: scene.settings.max_bodies,
-            vertices: scene.settings.max_mesh_vertices,
-        }
-    }
-}
 
 pub(in crate::scene) struct StaticPatch {
     base: WorldRead,

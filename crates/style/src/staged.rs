@@ -1,5 +1,5 @@
+use crate::error::{Result, StyleError};
 use crate::workspace::Workspace;
-use anyhow::{Context as _, Result, bail};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -13,7 +13,10 @@ pub fn affected(changes: &Path, workspace: &Workspace) -> Result<Vec<PathBuf>> {
 
     let tool = Path::new(env!("CARGO_MANIFEST_DIR")).strip_prefix(root)?;
 
-    let contents = fs::read(changes).context("Reading staged paths")?;
+    let contents = fs::read(changes).map_err(|source| StyleError::Io {
+        operation: "Reading staged paths",
+        source,
+    })?;
 
     let mut selected = BTreeSet::new();
 
@@ -21,14 +24,14 @@ pub fn affected(changes: &Path, workspace: &Workspace) -> Result<Vec<PathBuf>> {
         .split(|&byte| byte == 0)
         .filter(|path| !path.is_empty())
     {
-        let path = Path::new(std::str::from_utf8(path).context("Staged path is not UTF-8")?);
+        let path = Path::new(std::str::from_utf8(path)?);
 
         if path.is_absolute()
             || path
                 .components()
                 .any(|part| matches!(part, std::path::Component::ParentDir))
         {
-            bail!("Staged paths must be relative to the repository");
+            return Err(StyleError::StagedPath);
         }
 
         let shared = matches!(

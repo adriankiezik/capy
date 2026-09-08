@@ -3,7 +3,10 @@ use crate::{
         Body, Result, SceneError, SceneSettings, Target,
         connectivity::Connectivity,
         dynamics,
-        edit::patch::{Limits, Patch, StaticPatch},
+        edit::{
+            Limits,
+            patch::{Patch, StaticPatch},
+        },
         geometry::MeshSources,
     },
     world::{Transaction, WorldRead},
