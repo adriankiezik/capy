@@ -5,6 +5,7 @@ mod rust;
 mod shader;
 mod source;
 mod staged;
+mod structure;
 mod workspace;
 
 use anyhow::{Context as _, Result, bail};
@@ -127,6 +128,8 @@ fn main() -> Result<()> {
 
     let mut changes = Vec::new();
 
+    let mut violations = Vec::new();
+
     for file in &files {
         let text =
             fs::read_to_string(file).with_context(|| format!("Reading {}", file.display()))?;
@@ -135,6 +138,21 @@ fn main() -> Result<()> {
             .extension()
             .and_then(|extension| extension.to_str())
             .context("Missing source extension")?;
+
+        if extension == "rs" {
+            let issues = crate::structure::violations(&text, file)
+                .with_context(|| format!("Checking {}", file.display()))?;
+
+            if !issues.is_empty() {
+                violations.extend(
+                    issues
+                        .into_iter()
+                        .map(|(line, message)| (file, line, message)),
+                );
+
+                continue;
+            }
+        }
 
         let formatted = normalize(&text, extension, ownership.name(file)?)
             .with_context(|| format!("Checking {}", file.display()))?;
@@ -148,6 +166,17 @@ fn main() -> Result<()> {
 
             changes.push((file, formatted, line));
         }
+    }
+
+    if !violations.is_empty() {
+        for (file, line, message) in &violations {
+            eprintln!("{}:{line}: {message}", file.display());
+        }
+
+        bail!(
+            "{} structural violation(s) require manual changes",
+            violations.len()
+        );
     }
 
     if !fix && !changes.is_empty() {
