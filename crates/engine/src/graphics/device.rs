@@ -1,6 +1,6 @@
 use crate::graphics::{GraphicsError, GraphicsSettings, Result};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
-use std::sync::Arc;
+use std::sync::{Arc, mpsc};
 
 pub(super) trait WindowTarget:
     HasWindowHandle + HasDisplayHandle + Send + Sync + std::fmt::Debug
@@ -30,7 +30,8 @@ pub struct Graphics {
     adapter: wgpu::Adapter,
     pub(super) device: wgpu::Device,
     pub(super) queue: wgpu::Queue,
-    requested: Option<wgpu::SurfaceConfiguration>,
+    settings: GraphicsSettings,
+    errors: mpsc::Receiver<wgpu::Error>,
     pub(super) presentation: Option<Presentation>,
 }
 
@@ -39,54 +40,60 @@ impl Graphics {
         target: Arc<T>,
         width: u32,
         height: u32,
-        mut settings: GraphicsSettings,
+        settings: GraphicsSettings,
     ) -> Result<Self>
     where
         T: HasWindowHandle + HasDisplayHandle + Send + Sync + std::fmt::Debug + 'static,
     {
         let target: Arc<dyn WindowTarget> = target;
 
-        settings.instance.display = Some(Box::new(target.clone()));
+        let mut instance_settings = wgpu::InstanceDescriptor::new_without_display_handle();
 
-        let instance = wgpu::Instance::new(settings.instance);
+        instance_settings.display = Some(Box::new(target.clone()));
+
+        let instance = wgpu::Instance::new(instance_settings);
 
         let surface = instance.create_surface(target.clone())?;
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 compatible_surface: Some(&surface),
-                ..settings.adapter
+                power_preference: match settings.power_preference {
+                    crate::graphics::PowerPreference::LowPower => wgpu::PowerPreference::LowPower,
+                    crate::graphics::PowerPreference::HighPerformance => {
+                        wgpu::PowerPreference::HighPerformance
+                    }
+                    crate::graphics::PowerPreference::Default => wgpu::PowerPreference::None,
+                },
+                ..Default::default()
             })
             .await?;
 
-        let supported = adapter.features();
-
-        let missing = settings.device.required_features - supported;
-
-        if !missing.is_empty() {
-            return Err(GraphicsError::MissingFeatures(missing));
+        if settings.maximum_frame_latency == 0 {
+            return Err(GraphicsError::ZeroFrameLatency);
         }
 
-        settings.device.required_features |= settings.preferred_features & supported;
+        let (device, queue) = adapter.request_device(&Default::default()).await?;
 
-        let (device, queue) = adapter.request_device(&settings.device).await?;
+        let (sender, errors) = mpsc::sync_channel(1);
+
+        device.on_uncaptured_error(Arc::new(move |error| {
+            let _ = sender.try_send(error);
+        }));
 
         let mut graphics = Self {
             instance,
             adapter,
             device,
             queue,
-            requested: settings.surface,
+            settings,
+            errors,
             presentation: None,
         };
 
         graphics.configure(surface, target, width, height)?;
 
         Ok(graphics)
-    }
-
-    pub fn adapter(&self) -> &wgpu::Adapter {
-        &self.adapter
     }
 
     pub fn device(&self) -> &wgpu::Device {
@@ -101,13 +108,14 @@ impl Graphics {
         self.presentation.as_ref().map(|p| &p.config)
     }
 
-    pub fn surface_capabilities(&self) -> Result<wgpu::SurfaceCapabilities> {
-        Ok(self
-            .presentation
-            .as_ref()
-            .ok_or(GraphicsError::NotPresenting)?
-            .surface
-            .get_capabilities(&self.adapter))
+    pub(crate) fn check_errors(&self) -> Result<()> {
+        self.device.poll(wgpu::PollType::Poll)?;
+
+        match self.errors.try_recv() {
+            Ok(error) => Err(error.into()),
+            Err(mpsc::TryRecvError::Empty) => Ok(()),
+            Err(mpsc::TryRecvError::Disconnected) => Err(GraphicsError::ErrorChannel),
+        }
     }
 
     pub fn checked<T>(
@@ -200,7 +208,13 @@ impl Graphics {
         width: u32,
         height: u32,
     ) -> Result<()> {
-        let config = self.select(&surface, width, height, self.requested.as_ref())?;
+        let mut config = self.select(&surface, width, height, None)?;
+
+        config.present_mode = match self.settings.presentation {
+            crate::graphics::PresentationMode::Vsync => wgpu::PresentMode::AutoVsync,
+            crate::graphics::PresentationMode::Immediate => wgpu::PresentMode::AutoNoVsync,
+        };
+        config.desired_maximum_frame_latency = self.settings.maximum_frame_latency;
 
         if width > 0 && height > 0 {
             self.checked(|device, _| surface.configure(device, &config))?;
@@ -236,7 +250,6 @@ impl Graphics {
             .as_mut()
             .ok_or(GraphicsError::NotPresenting)?
             .config = config;
-        self.requested = Some(configuration);
 
         Ok(())
     }

@@ -23,7 +23,10 @@ syn = { version = "2", features = ["full", "visit"] }
 serde_json = "1"
 clap = { version = "4", features = ["derive"] }
 pollster = "1"
+taffy = { version = "0.14", default-features = false, features = ["std", "taffy_tree", "flexbox"] }
 raw-window-handle = "0.6"
 wgpu = "30.0.1"
 winit = "0.30.13"
 engine = { path = "crates/engine" }
+glam = "0.33"
+bytemuck = { version = "1", features = ["derive"] }

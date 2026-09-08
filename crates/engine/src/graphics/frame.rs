@@ -1,28 +1,25 @@
 use crate::graphics::{FrameOutcome, Graphics, GraphicsError, Result};
 
 #[derive(Debug)]
-pub struct Frame<'a> {
-    texture: &'a wgpu::Texture,
+pub struct Frame {
     view: wgpu::TextureView,
     encoder: wgpu::CommandEncoder,
 }
 
-impl Frame<'_> {
+impl Frame {
     pub fn parts(&mut self) -> (&wgpu::TextureView, &mut wgpu::CommandEncoder) {
         (&self.view, &mut self.encoder)
-    }
-
-    pub fn texture(&self) -> &wgpu::Texture {
-        self.texture
     }
 }
 
 impl Graphics {
     pub(crate) fn render(
         &mut self,
-        draw: impl FnOnce(&mut Frame<'_>) -> anyhow::Result<()>,
+        draw: impl FnOnce(&mut Frame) -> anyhow::Result<()>,
         before_present: impl FnOnce(),
     ) -> Result<FrameOutcome> {
+        self.check_errors()?;
+
         if !self.drawable() {
             return Ok(FrameOutcome::Retry);
         }
@@ -55,25 +52,18 @@ impl Graphics {
             Texture::Validation => return Err(GraphicsError::SurfaceValidation),
         };
 
-        self.checked(|device, queue| -> Result<()> {
-            let mut frame = Frame {
-                texture: &texture.texture,
-                view: texture.texture.create_view(&Default::default()),
-                encoder: device.create_command_encoder(&Default::default()),
-            };
+        let mut frame = Frame {
+            view: texture.texture.create_view(&Default::default()),
+            encoder: self.device.create_command_encoder(&Default::default()),
+        };
 
-            draw(&mut frame).map_err(GraphicsError::Draw)?;
+        draw(&mut frame).map_err(GraphicsError::Draw)?;
 
-            queue.submit([frame.encoder.finish()]);
+        self.queue.submit([frame.encoder.finish()]);
 
-            Ok(())
-        })??;
+        before_present();
 
-        self.checked(|_, queue| {
-            before_present();
-
-            queue.present(texture);
-        })?;
+        self.queue.present(texture);
 
         if reconfigure {
             let configuration = self
@@ -85,6 +75,8 @@ impl Graphics {
 
             self.configure_presentation(configuration)?;
         }
+
+        self.check_errors()?;
 
         Ok(FrameOutcome::Presented)
     }

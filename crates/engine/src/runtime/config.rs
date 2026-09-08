@@ -1,5 +1,5 @@
 use crate::graphics::GraphicsSettings;
-use crate::runtime::WindowSettings;
+use crate::runtime::{WindowControls, WindowSettings};
 use std::time::Duration;
 use winit::keyboard::PhysicalKey;
 
@@ -8,9 +8,17 @@ pub struct Settings {
     pub(super) window: WindowSettings,
     pub(super) graphics: GraphicsSettings,
     pub(super) runtime: RuntimeSettings,
+    pub(super) window_controls: WindowControls,
 }
 
 impl Settings {
+    #[must_use]
+    pub fn with_window_controls(mut self, controls: WindowControls) -> Self {
+        self.window_controls = controls;
+
+        self
+    }
+
     #[must_use]
     pub fn with_window(mut self, settings: WindowSettings) -> Self {
         self.window = settings;
@@ -39,6 +47,8 @@ pub struct RuntimeSettings {
     pub(super) retry_delay: Duration,
     pub(super) continuous_redraw: bool,
     pub(super) close_on_request: bool,
+    pub(super) tick_rate: u32,
+    pub(super) max_ticks_per_update: u32,
 }
 
 impl Default for RuntimeSettings {
@@ -48,11 +58,27 @@ impl Default for RuntimeSettings {
             retry_delay: Duration::from_millis(100),
             continuous_redraw: true,
             close_on_request: true,
+            tick_rate: 20,
+            max_ticks_per_update: 4,
         }
     }
 }
 
 impl RuntimeSettings {
+    #[must_use]
+    pub fn with_tick_rate(mut self, ticks_per_second: u32) -> Self {
+        self.tick_rate = ticks_per_second;
+
+        self
+    }
+
+    #[must_use]
+    pub fn with_max_ticks_per_update(mut self, maximum: u32) -> Self {
+        self.max_ticks_per_update = maximum;
+
+        self
+    }
+
     #[must_use]
     pub fn with_exit_key(mut self, key: impl Into<PhysicalKey>) -> Self {
         self.exit_key = Some(key.into());

@@ -1,21 +1,27 @@
+mod controls;
 mod game;
+mod scene;
 
-use engine::{RuntimeSettings, Settings, graphics::GraphicsSettings, wgpu, winit};
+use engine::{
+    ApplicationResult, GraphicsSettings, PowerPreference, RuntimeSettings, Settings,
+    WindowSettings, runtime::LogicalSize,
+};
 
-fn main() -> engine::anyhow::Result<()> {
-    let mut graphics = GraphicsSettings::default();
-
-    graphics.adapter_mut().power_preference = wgpu::PowerPreference::HighPerformance;
-
+fn main() -> ApplicationResult<()> {
     let settings = Settings::default()
         .with_window(
-            winit::window::Window::default_attributes()
-                .with_inner_size(winit::dpi::LogicalSize::new(1280, 800)),
+            WindowSettings::default()
+                .with_title("Capy")
+                .with_inner_size(LogicalSize::new(1440, 900)),
         )
-        .with_runtime(RuntimeSettings::default().with_exit_key(winit::keyboard::KeyCode::Escape))
-        .with_graphics(graphics);
+        .with_graphics(GraphicsSettings {
+            power_preference: PowerPreference::HighPerformance,
+            ..Default::default()
+        })
+        .with_runtime(RuntimeSettings::default().with_tick_rate(20))
+        .with_window_controls(controls::window_controls());
 
-    engine::run(settings, crate::game::Game::new)?;
+    engine::run(settings, game::run)?;
 
     Ok(())
 }

@@ -1,170 +1,103 @@
-use engine::anyhow::{Context as _, Result};
-use engine::{Application, Context, graphics::Frame, runtime::Update, wgpu, winit};
-use wgpu::util::DeviceExt;
+use crate::{
+    controls::{self, Action},
+    scene,
+};
+use engine::{
+    ApplicationResult as Result, Engine, Vec2, Vec3, View,
+    player::{Player, PlayerInput, PlayerPose, PlayerSettings},
+    scene::{Hit, Target},
+    ui::TextStyle,
+};
+use std::time::{Duration, Instant};
 
-#[derive(Debug)]
-pub struct Game {
-    vertices: wgpu::Buffer,
-    shader: wgpu::ShaderModule,
-    pipeline: wgpu::RenderPipeline,
-    format: wgpu::TextureFormat,
+fn spawn_player() -> Result<Player> {
+    Ok(Player::new(
+        PlayerSettings::default(),
+        PlayerPose {
+            position: Vec3::new(0.0, 0.01, 6.0),
+            yaw_radians: 0.0,
+            pitch_radians: 0.0,
+        },
+    )?)
 }
 
-impl Game {
-    pub fn new(context: &mut Context<'_>) -> Result<Self> {
-        let graphics = context.graphics();
+pub async fn run(mut app: Engine) -> Result<()> {
+    let mut scene = scene::create()?;
 
-        let format = graphics
-            .presentation()
-            .context("Presentation is unavailable")?
-            .format;
+    let mut player = spawn_player()?;
 
-        let data: Vec<u8> = [
-            [0.0f32, 0.65, 1.0, 0.25, 0.3],
-            [-0.65, -0.55, 0.2, 0.85, 0.65],
-            [0.65, -0.55, 0.25, 0.5, 1.0],
-        ]
-        .into_iter()
-        .flatten()
-        .flat_map(f32::to_ne_bytes)
-        .collect();
+    let mut controls = controls::bindings();
 
-        graphics
-            .checked(|device, _| {
-                let vertices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("triangle vertices"),
-                    contents: &data,
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
+    let mut selection = None;
 
-                let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                    label: Some("triangle"),
-                    source: wgpu::ShaderSource::Wgsl(include_str!("shaders/triangle.wgsl").into()),
-                });
+    let mut fps_start = Instant::now();
 
-                let pipeline = Self::pipeline(device, &shader, format);
+    let mut frame_count = 0_u64;
 
-                Self {
-                    vertices,
-                    shader,
-                    pipeline,
-                    format,
-                }
-            })
-            .context("Creating triangle resources")
-    }
+    let mut fps = String::from("FPS: ...");
 
-    fn pipeline(
-        device: &wgpu::Device,
-        shader: &wgpu::ShaderModule,
-        format: wgpu::TextureFormat,
-    ) -> wgpu::RenderPipeline {
-        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("triangle"),
-            layout: None,
-            vertex: wgpu::VertexState {
-                module: shader,
-                entry_point: Some("vs_main"),
-                compilation_options: Default::default(),
-                buffers: &[Some(wgpu::VertexBufferLayout {
-                    array_stride: 20,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x3],
-                })],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: shader,
-                entry_point: Some("fs_main"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: Default::default(),
-            depth_stencil: None,
-            multisample: Default::default(),
-            multiview_mask: None,
-            cache: None,
-        })
-    }
-}
+    while let Some(mut frame) = app.next_frame().await? {
+        frame_count += 1;
 
-impl Application for Game {
-    fn update(&mut self, mut update: Update<'_>) -> Result<()> {
-        if update.input().pressed(winit::keyboard::KeyCode::F11) {
-            let window = update.context().window().native();
+        let elapsed = fps_start.elapsed();
 
-            window.set_fullscreen(if window.fullscreen().is_none() {
-                Some(winit::window::Fullscreen::Borderless(
-                    window.current_monitor(),
-                ))
-            } else {
-                None
-            });
+        if elapsed >= Duration::from_millis(500) {
+            fps = format!("FPS: {:.0}", frame_count as f64 / elapsed.as_secs_f64());
+            fps_start = Instant::now();
+            frame_count = 0;
         }
 
-        if update.input().pressed(winit::keyboard::KeyCode::Space) {
-            let graphics = update.context().graphics();
+        while let Some(tick) = frame.next_tick()? {
+            let actions = controls.update(&tick.input, tick.delta);
 
-            let mut settings = graphics
-                .presentation()
-                .context("Presentation is unavailable")?
-                .clone();
+            if !tick.input.focused() {
+                continue;
+            }
 
-            settings.present_mode = if settings.present_mode == wgpu::PresentMode::AutoNoVsync {
-                wgpu::PresentMode::AutoVsync
-            } else {
-                wgpu::PresentMode::AutoNoVsync
-            };
+            let look = actions.axis2(Action::Look);
 
-            graphics.configure_presentation(settings)?;
-        }
+            player.rotate_view(look.x, look.y)?;
 
-        let graphics = update.context().graphics();
-
-        let format = graphics
-            .presentation()
-            .context("Presentation is unavailable")?
-            .format;
-
-        if format != self.format {
-            self.pipeline =
-                graphics.checked(|device, _| Self::pipeline(device, &self.shader, format))?;
-            self.format = format;
-        }
-
-        Ok(())
-    }
-
-    fn draw(&self, frame: &mut Frame<'_>) -> Result<()> {
-        let (view, encoder) = frame.parts();
-
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: 0.015,
-                        g: 0.025,
-                        b: 0.045,
-                        a: 1.0,
-                    }),
-                    store: wgpu::StoreOp::Store,
+            player.advance(
+                &scene,
+                PlayerInput {
+                    movement: actions.axis2(Action::Move),
+                    sprint: actions.pressed(Action::Sprint),
+                    jump: actions.just_pressed(Action::Jump),
                 },
-            })],
-            ..Default::default()
-        });
+                tick.delta,
+            )?;
 
-        pass.set_pipeline(&self.pipeline);
+            if player.position().y < -6.0 {
+                player = spawn_player()?;
+            }
 
-        pass.set_vertex_buffer(0, self.vertices.slice(..));
+            let camera = player.camera();
 
-        pass.draw(0..3, 0..1);
+            selection = scene.raycast(camera.position, camera.direction, 8.0)?;
 
-        Ok(())
+            if actions.active(Action::Destroy)
+                && let Some(Hit {
+                    target: Target::Static(voxel),
+                    ..
+                }) = selection
+            {
+                let mut transaction = scene.transaction();
+
+                transaction.remove(voxel)?;
+
+                scene.commit(transaction)?;
+
+                selection = scene.raycast(camera.position, camera.direction, 8.0)?;
+            }
+        }
+
+        frame
+            .canvas()
+            .text(fps.as_str(), Vec2::splat(16.0), &TextStyle::default());
+
+        frame.present(View::new(&scene, player.camera()).with_selection(selection))?;
     }
+
+    Ok(())
 }

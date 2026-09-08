@@ -11,8 +11,12 @@ pub enum GraphicsError {
     Adapter(#[from] wgpu::RequestAdapterError),
     #[error("creating the graphics device failed")]
     Device(#[from] wgpu::RequestDeviceError),
-    #[error("required graphics features are unavailable: {0:?}")]
-    MissingFeatures(wgpu::Features),
+    #[error("polling the graphics device failed")]
+    Poll(#[from] wgpu::PollError),
+    #[error("graphics error channel disconnected")]
+    ErrorChannel,
+    #[error("preparing voxel geometry failed")]
+    Geometry(#[from] crate::scene::SceneError),
     #[error("surface has no supported configuration")]
     UnsupportedSurface,
     #[error("graphics presentation is suspended")]
@@ -33,6 +37,10 @@ pub enum GraphicsError {
     SurfaceUsage(wgpu::TextureUsages),
     #[error("maximum frame latency must be nonzero")]
     ZeroFrameLatency,
+    #[error("invalid camera projection or pose")]
+    InvalidCamera,
+    #[error("voxel resource exceeds device limits")]
+    ResourceLimit,
     #[error("GPU surface validation failed")]
     SurfaceValidation,
     #[error("GPU operation failed")]

@@ -478,8 +478,11 @@ name = "engine"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bytemuck",
+ "glam",
  "pollster",
  "raw-window-handle",
+ "taffy",
  "thiserror 2.0.20",
  "wgpu",
  "winit",
@@ -614,6 +617,12 @@ dependencies = [
  "log",
  "xml-rs",
 ]
+
+[[package]]
+name = "glam"
+version = "0.33.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e762b9b188634fc508d4ec54b62ea3d352c43fd431d18d05d46f559f217f4725"
 
 [[package]]
 name = "glow"
@@ -1801,6 +1810,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "taffy"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "639627c87f43b9181c811f40a6296409e093a17bc761214cba3c15df74f86b99"
+dependencies = [
+ "arrayvec",
+ "serde",
+ "slotmap",
 ]
 
 [[package]]

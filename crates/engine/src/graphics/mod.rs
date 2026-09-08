@@ -3,7 +3,7 @@ mod device;
 mod error;
 mod frame;
 
-pub use config::GraphicsSettings;
+pub use config::{GraphicsSettings, PowerPreference, PresentationMode};
 pub(crate) use device::FrameOutcome;
 pub use device::Graphics;
 pub use error::{GraphicsError, Result};
