@@ -44,6 +44,22 @@ pub struct VisualSettings {
     pub ambient: f32,
     pub fog_distance: f32,
     pub view_distance: f32,
+    pub shadows: Option<ShadowSettings>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ShadowSettings {
+    pub resolution: u32,
+    pub distance: f32,
+}
+
+impl Default for ShadowSettings {
+    fn default() -> Self {
+        Self {
+            resolution: 2048,
+            distance: 96.0,
+        }
+    }
 }
 
 impl VisualSettings {
@@ -76,9 +92,20 @@ impl VisualSettings {
             ));
         }
 
+        if let Some(shadows) = self.shadows
+            && (!(256..=4096).contains(&shadows.resolution)
+                || !shadows.resolution.is_power_of_two()
+                || !shadows.distance.is_finite()
+                || shadows.distance <= 1.0)
+        {
+            return Err(SceneError::InvalidSetting(
+                "shadows require a power-of-two resolution between 256 and 4096 and finite distance greater than 1",
+            ));
+        }
+
         let sunlight = glam::Vec3::from_array(self.sunlight);
 
-        if !sunlight.is_finite() || sunlight.length_squared() < f32::EPSILON {
+        if sunlight.try_normalize().is_none() || sunlight.length_squared() < f32::EPSILON {
             return Err(SceneError::InvalidSetting(
                 "sunlight must be finite with squared length at least f32::EPSILON",
             ));
@@ -96,6 +123,7 @@ impl Default for VisualSettings {
             ambient: 0.4,
             fog_distance: 100.0,
             view_distance: 160.0,
+            shadows: Some(ShadowSettings::default()),
         }
     }
 }

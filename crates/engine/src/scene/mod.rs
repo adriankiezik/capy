@@ -5,12 +5,13 @@ mod config;
 mod dynamics;
 mod error;
 mod geometry;
+mod halo;
 mod query;
 mod render;
 mod state;
 mod support;
 
-pub use config::{SceneSettings, SimulationSettings, VisualSettings};
+pub use config::{SceneSettings, ShadowSettings, SimulationSettings, VisualSettings};
 pub(crate) use dynamics::Body;
 pub use error::{Result, SceneError};
 pub(crate) use geometry::{Mesh, Vertex};

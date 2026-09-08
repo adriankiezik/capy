@@ -22,7 +22,7 @@ impl Scene {
             let mesh = source.resolve(
                 key,
                 self.settings.render_leaf_edge,
-                |p| self.world.resident_voxel(p),
+                |key| self.world.leaf(key).map(Arc::as_ref),
                 &self.world,
                 available,
             )?;
@@ -41,7 +41,7 @@ impl Scene {
                 let mesh = source.resolve(
                     key,
                     self.settings.render_leaf_edge,
-                    |p| body.geometry.voxel(p),
+                    |key| body.geometry.leaves.get(&key).map(Arc::as_ref),
                     &self.world,
                     available,
                 )?;

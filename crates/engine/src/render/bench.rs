@@ -313,6 +313,10 @@ impl Workload {
             return;
         }
 
+        if matches!(layer, Layer::World) {
+            self.renderer.world.draw_shadows(encoder);
+        }
+
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some(layer.name()),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {

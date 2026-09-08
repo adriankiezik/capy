@@ -2,7 +2,11 @@
 #[path = "bench.rs"]
 pub(super) mod bench;
 
-use super::{overlay::OverlayRenderer, ui::UiRenderer, world::WorldRenderer};
+use super::{
+    overlay::OverlayRenderer,
+    ui::UiRenderer,
+    world::{WorldRenderer, WorldView},
+};
 use crate::{
     Aabb,
     graphics::{Frame, Graphics, GraphicsError, Result},
@@ -158,10 +162,6 @@ impl Renderer {
             .presentation()
             .ok_or(GraphicsError::NotPresenting)?;
 
-        if p.format != self.format {
-            graphics.checked(|device, _| self.reconfigure(device, p.format))?;
-        }
-
         self.prepare_target(
             Target {
                 device: graphics.device(),
@@ -195,6 +195,12 @@ impl Renderer {
             size,
         } = target;
 
+        let visuals = &scene.settings.visuals;
+
+        let matrix = camera
+            .matrix(size[0] as f32 / size[1] as f32, visuals.view_distance)
+            .ok_or(GraphicsError::InvalidCamera)?;
+
         if format != self.format {
             self.reconfigure(device, format);
         }
@@ -203,24 +209,6 @@ impl Renderer {
             self.depth = depth(device, size);
             self.size = size;
         }
-
-        let visuals = &scene.settings.visuals;
-
-        if !camera.position.is_finite()
-            || !camera.direction.is_finite()
-            || !camera.direction.is_normalized()
-            || camera.direction.cross(Vec3::Y).length_squared() < f32::EPSILON
-            || !camera.fov_radians.is_finite()
-            || !(0.0..std::f32::consts::PI).contains(&camera.fov_radians)
-            || camera.fov_radians == 0.0
-            || !camera.near_plane.is_finite()
-            || camera.near_plane <= 0.0
-            || camera.near_plane >= visuals.view_distance
-        {
-            return Err(GraphicsError::InvalidCamera);
-        }
-
-        let matrix = camera.matrix(size[0] as f32 / size[1] as f32, visuals.view_distance);
 
         let sun = Vec3::from_array(visuals.sunlight).normalize();
 
@@ -249,8 +237,13 @@ impl Renderer {
             device,
             queue,
             scene.render_geometry()?,
-            matrix,
-            camera.position,
+            WorldView {
+                matrix,
+                eye: camera.position,
+                sun,
+                near_plane: camera.near_plane,
+                shadows: visuals.shadows,
+            },
         )?;
 
         let outline = selection
@@ -278,6 +271,8 @@ impl Renderer {
     }
 
     pub(super) fn draw_target(&self, view: &wgpu::TextureView, encoder: &mut wgpu::CommandEncoder) {
+        self.world.draw_shadows(encoder);
+
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("world"),

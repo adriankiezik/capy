@@ -1,6 +1,6 @@
 use crate::{
-    scene::{Result, SceneError},
-    world::{VOXEL_SIZE, Voxel, VoxelCoord, WorldRead},
+    scene::{Result, SceneError, halo::Halo},
+    world::{Leaf, VOXEL_SIZE, Voxel, VoxelCoord, WorldRead},
 };
 use glam::{IVec3, Vec3};
 use std::sync::{Arc, OnceLock};
@@ -11,11 +11,11 @@ pub(crate) struct MeshSource {
 }
 
 impl MeshSource {
-    pub(crate) fn resolve(
+    pub(crate) fn resolve<'a>(
         &self,
         key: [i32; 3],
         edge: i32,
-        sample: impl Fn(VoxelCoord) -> Voxel,
+        leaf: impl Fn([i32; 3]) -> Option<&'a Leaf>,
         world: &WorldRead,
         maximum: usize,
     ) -> Result<Arc<Mesh>> {
@@ -27,7 +27,9 @@ impl MeshSource {
             return Ok(mesh.clone());
         }
 
-        let mesh = Arc::new(build(key, edge, sample, world, maximum)?);
+        let halo = Halo::from_leaves(IVec3::from_array(key) * edge, edge, leaf);
+
+        let mesh = Arc::new(build_halo(key, edge, halo, world, maximum)?);
 
         Ok(self.mesh.get_or_init(|| mesh).clone())
     }
@@ -39,6 +41,7 @@ pub(crate) struct Vertex {
     pub(crate) position: [f32; 3],
     pub(crate) normal: [f32; 3],
     pub(crate) color: [f32; 3],
+    pub(crate) occlusion: f32,
 }
 
 #[derive(Debug)]
@@ -53,10 +56,23 @@ pub(crate) fn key(voxel: VoxelCoord, edge: i32) -> [i32; 3] {
     voxel.to_array().map(|v| v.div_euclid(edge))
 }
 
+#[cfg(feature = "cpu-bench")]
 pub(crate) fn build(
     key: [i32; 3],
     edge: i32,
     sample: impl Fn(VoxelCoord) -> Voxel,
+    world: &WorldRead,
+    maximum: usize,
+) -> Result<Mesh> {
+    let halo = Halo::new(IVec3::from_array(key) * edge, edge, sample);
+
+    build_halo(key, edge, halo, world, maximum)
+}
+
+fn build_halo(
+    key: [i32; 3],
+    edge: i32,
+    halo: Halo,
     world: &WorldRead,
     maximum: usize,
 ) -> Result<Mesh> {
@@ -71,12 +87,12 @@ pub(crate) fn build(
 
     let n = edge as usize;
 
-    let mut mask = vec![Voxel::EMPTY; n * n];
+    let mut mask = vec![Face::EMPTY; n * n];
 
     for axis in 0..3 {
         for sign in [-1, 1] {
             for slice in 0..edge {
-                fill_mask(&mut mask, edge, origin, axis, sign, slice, &sample);
+                fill_mask(&mut mask, edge, origin, axis, sign, slice, &halo);
 
                 for j in 0..n {
                     let mut i = 0;
@@ -89,7 +105,7 @@ pub(crate) fn build(
                         };
 
                         let color = world
-                            .material(rectangle.voxel.material)
+                            .material(rectangle.face.voxel.material)
                             .ok_or(SceneError::Invalid)?
                             .color;
 
@@ -99,6 +115,7 @@ pub(crate) fn build(
                             axis,
                             sign,
                             color,
+                            rectangle.face.occlusion,
                             maximum,
                         )?;
 
@@ -112,14 +129,39 @@ pub(crate) fn build(
     Ok(mesh)
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Face {
+    voxel: Voxel,
+    occlusion: [u8; 4],
+}
+
+impl Face {
+    const EMPTY: Self = Self {
+        voxel: Voxel::EMPTY,
+        occlusion: [3; 4],
+    };
+
+    fn merges(self, other: Self, horizontal: bool) -> bool {
+        let [a, b, c, d] = self.occlusion;
+
+        self.voxel.material == other.voxel.material
+            && self.occlusion == other.occlusion
+            && if horizontal {
+                a == b && c == d
+            } else {
+                a == d && b == c
+            }
+    }
+}
+
 fn fill_mask(
-    mask: &mut [Voxel],
+    mask: &mut [Face],
     edge: i32,
     origin: IVec3,
     axis: usize,
     sign: i32,
     slice: i32,
-    sample: &impl Fn(VoxelCoord) -> Voxel,
+    halo: &Halo,
 ) {
     let u = (axis + 1) % 3;
 
@@ -137,20 +179,23 @@ fn fill_mask(
             p[u] += i;
             p[v] += j;
 
-            let voxel = sample(p);
+            let voxel = halo.voxel(p);
 
             mask[i as usize + j as usize * edge as usize] =
-                if !voxel.is_empty() && sample(p + normal).is_empty() {
-                    voxel
+                if !voxel.is_empty() && halo.voxel(p + normal).is_empty() {
+                    Face {
+                        voxel,
+                        occlusion: halo.occlusion(p, axis, sign),
+                    }
                 } else {
-                    Voxel::EMPTY
+                    Face::EMPTY
                 };
         }
     }
 }
 
 struct Rectangle {
-    voxel: Voxel,
+    face: Face,
     i: usize,
     j: usize,
     width: usize,
@@ -180,35 +225,33 @@ impl Rectangle {
     }
 }
 
-fn take_rectangle(mask: &mut [Voxel], n: usize, i: usize, j: usize) -> Option<Rectangle> {
-    let voxel = mask[i + j * n];
+fn take_rectangle(mask: &mut [Face], n: usize, i: usize, j: usize) -> Option<Rectangle> {
+    let face = mask[i + j * n];
 
-    if voxel.is_empty() {
+    if face.voxel.is_empty() {
         return None;
     }
 
     let mut width = 1;
 
-    while i + width < n && mask[i + width + j * n].material == voxel.material {
+    while i + width < n && face.merges(mask[i + width + j * n], true) {
         width += 1;
     }
 
     let mut height = 1;
 
-    while j + height < n
-        && (0..width).all(|x| mask[i + x + (j + height) * n].material == voxel.material)
-    {
+    while j + height < n && (0..width).all(|x| face.merges(mask[i + x + (j + height) * n], false)) {
         height += 1;
     }
 
     for y in 0..height {
         for x in 0..width {
-            mask[i + x + (j + y) * n] = Voxel::EMPTY;
+            mask[i + x + (j + y) * n] = Face::EMPTY;
         }
     }
 
     Some(Rectangle {
-        voxel,
+        face,
         i,
         j,
         width,
@@ -222,6 +265,7 @@ fn emit_quad(
     axis: usize,
     sign: i32,
     color: [f32; 3],
+    occlusion: [u8; 4],
     maximum: usize,
 ) -> Result<()> {
     if mesh.vertices.len() + 6 > maximum {
@@ -232,11 +276,17 @@ fn emit_quad(
 
     normal[axis] = sign as f32;
 
-    let order = if sign > 0 {
-        [0, 1, 2, 0, 2, 3]
+    let mut order = if occlusion[0] + occlusion[2] > occlusion[1] + occlusion[3] {
+        [0, 1, 3, 1, 2, 3]
     } else {
-        [0, 2, 1, 0, 3, 2]
+        [0, 1, 2, 0, 2, 3]
     };
+
+    if sign < 0 {
+        order.swap(1, 2);
+
+        order.swap(4, 5);
+    }
 
     for index in order {
         let p = corners[index];
@@ -248,6 +298,7 @@ fn emit_quad(
             position: p.to_array(),
             normal: normal.to_array(),
             color,
+            occlusion: occlusion[index] as f32 / 3.0,
         });
     }
 

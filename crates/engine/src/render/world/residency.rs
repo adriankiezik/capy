@@ -1,0 +1,228 @@
+use super::visibility::{Hierarchy, Order};
+use crate::{
+    Aabb,
+    graphics::{GraphicsError, Result},
+    scene::{Mesh, MeshId, MeshInstance},
+};
+use glam::{Mat4, Vec3};
+use std::{collections::BTreeMap, sync::Arc};
+use wgpu::util::DeviceExt;
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub(super) struct Instance {
+    translation: [f32; 4],
+    origin: [f32; 4],
+}
+
+impl Instance {
+    const SIZE: u64 = std::mem::size_of::<Self>() as u64;
+
+    fn new(origin: Vec3, translation: Vec3) -> Self {
+        Self {
+            translation: (origin + translation).extend(0.0).to_array(),
+            origin: origin.extend(0.0).to_array(),
+        }
+    }
+}
+
+struct Resident {
+    id: MeshId,
+    source: Arc<Mesh>,
+    buffer: wgpu::Buffer,
+    origin: Vec3,
+}
+
+pub(super) struct Geometry {
+    instances: wgpu::Buffer,
+    instance_capacity: usize,
+    transforms: Vec<Instance>,
+    meshes: Vec<Resident>,
+    bounds: Vec<Aabb>,
+    hierarchy: Hierarchy,
+}
+
+impl Geometry {
+    pub(super) fn new(device: &wgpu::Device) -> Self {
+        Self {
+            instances: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("world instances"),
+                size: Instance::SIZE,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
+            instance_capacity: 1,
+            transforms: Vec::new(),
+            meshes: Vec::new(),
+            bounds: Vec::new(),
+            hierarchy: Hierarchy::default(),
+        }
+    }
+
+    pub(super) fn prepare(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        mut sources: Vec<MeshInstance>,
+    ) -> Result<bool> {
+        sources.retain(|source| !source.mesh.vertices.is_empty());
+
+        let changed = sources.len() != self.meshes.len()
+            || sources.iter().zip(&self.meshes).any(|(source, resident)| {
+                source.id != resident.id || !Arc::ptr_eq(&source.mesh, &resident.source)
+            });
+
+        if !changed {
+            return Ok(self.update_transforms(queue, &sources));
+        }
+
+        if sources.len() > u32::MAX as usize {
+            return Err(GraphicsError::ResourceLimit);
+        }
+
+        let capacity = sources
+            .len()
+            .max(1)
+            .checked_next_power_of_two()
+            .ok_or(GraphicsError::ResourceLimit)?;
+
+        if capacity as u64 > device.limits().max_buffer_size / Instance::SIZE {
+            return Err(GraphicsError::ResourceLimit);
+        }
+
+        for source in &sources {
+            if std::mem::size_of_val(source.mesh.vertices.as_slice()) as u64
+                > device.limits().max_buffer_size
+                || source.mesh.vertices.len() > u32::MAX as usize
+            {
+                return Err(GraphicsError::ResourceLimit);
+            }
+        }
+
+        let mut previous: BTreeMap<_, _> = std::mem::take(&mut self.meshes)
+            .into_iter()
+            .map(|resident| (resident.id, resident))
+            .collect();
+
+        self.bounds.clear();
+
+        self.transforms.clear();
+
+        for MeshInstance {
+            id,
+            mesh,
+            translation,
+        } in sources
+        {
+            let origin = mesh.origin + translation;
+
+            let resident = if let Some(mut resident) = previous
+                .remove(&id)
+                .filter(|resident| Arc::ptr_eq(&resident.source, &mesh))
+            {
+                resident.origin = origin;
+
+                resident
+            } else {
+                let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("immutable voxel leaf"),
+                    contents: bytemuck::cast_slice(&mesh.vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+
+                Resident {
+                    id,
+                    source: mesh.clone(),
+                    buffer,
+                    origin,
+                }
+            };
+
+            self.bounds.push(Aabb {
+                min: mesh.min + origin,
+                max: mesh.max + origin,
+            });
+
+            self.transforms
+                .push(Instance::new(mesh.origin, translation));
+
+            self.meshes.push(resident);
+        }
+
+        self.hierarchy.rebuild(&self.bounds);
+
+        if self.transforms.len() > self.instance_capacity {
+            self.instances = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("world instances"),
+                size: capacity as u64 * Instance::SIZE,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            self.instance_capacity = capacity;
+        }
+
+        if !self.transforms.is_empty() {
+            queue.write_buffer(&self.instances, 0, bytemuck::cast_slice(&self.transforms));
+        }
+
+        Ok(true)
+    }
+
+    fn update_transforms(&mut self, queue: &wgpu::Queue, sources: &[MeshInstance]) -> bool {
+        let mut first = sources.len();
+
+        let mut end = 0;
+
+        for (index, (source, resident)) in sources.iter().zip(&mut self.meshes).enumerate() {
+            let origin = source.mesh.origin + source.translation;
+
+            if origin != resident.origin {
+                resident.origin = origin;
+                self.bounds[index] = Aabb {
+                    min: source.mesh.min + origin,
+                    max: source.mesh.max + origin,
+                };
+                self.transforms[index] = Instance::new(source.mesh.origin, source.translation);
+                first = first.min(index);
+                end = index + 1;
+            }
+        }
+
+        if first == sources.len() {
+            return false;
+        }
+
+        queue.write_buffer(
+            &self.instances,
+            first as u64 * Instance::SIZE,
+            bytemuck::cast_slice(&self.transforms[first..end]),
+        );
+
+        self.hierarchy.refit(&self.bounds);
+
+        true
+    }
+
+    pub(super) fn bounds(&self) -> Option<Aabb> {
+        self.hierarchy.bounds()
+    }
+
+    pub(super) fn visible(&self, matrix: Mat4, order: Order, output: &mut Vec<usize>) {
+        self.hierarchy.visible(matrix, order, output);
+    }
+
+    pub(super) fn draw(&self, pass: &mut wgpu::RenderPass<'_>, visible: &[usize]) {
+        pass.set_vertex_buffer(1, self.instances.slice(..));
+
+        for &index in visible {
+            let mesh = &self.meshes[index];
+
+            pass.set_vertex_buffer(0, mesh.buffer.slice(..));
+
+            pass.draw(
+                0..mesh.source.vertices.len() as u32,
+                index as u32..index as u32 + 1,
+            );
+        }
+    }
+}
