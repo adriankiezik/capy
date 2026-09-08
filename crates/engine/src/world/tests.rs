@@ -27,7 +27,6 @@ pub(crate) fn settings() -> WorldSettings {
             .map(|id| Owner {
                 id: OwnerId(id),
                 structure: StructureId(id),
-                support: Support::Fixed,
             })
             .collect(),
         max_leaves: 4096,
@@ -235,7 +234,6 @@ fn leaf_representations_preserve_contents_and_old_snapshots() {
         .map(|id| Owner {
             id: OwnerId(id),
             structure: StructureId(id),
-            support: Support::Fixed,
         })
         .collect();
 

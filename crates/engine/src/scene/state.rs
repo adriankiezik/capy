@@ -1,23 +1,23 @@
 use crate::{
     scene::{
-        Body, Result, SceneError, SceneSettings, dynamics, geometry, geometry::MeshSource, support,
+        Body, Result, SceneError, SceneSettings, Target,
+        connectivity::Connectivity,
+        dynamics,
+        edit::patch::{Limits, Patch, StaticPatch},
+        geometry::MeshSources,
     },
-    world::{Transaction, VoxelCoord, WorldRead, prepare},
+    world::{Transaction, WorldRead},
 };
-use glam::IVec3;
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
-    time::Duration,
-};
+use std::{sync::Arc, time::Duration};
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Scene {
     pub(crate) world: WorldRead,
-    pub(crate) meshes: BTreeMap<[i32; 3], Arc<MeshSource>>,
+    pub(crate) meshes: Arc<MeshSources>,
     pub(crate) bodies: Vec<Body>,
     pub(crate) settings: SceneSettings,
-    next_body: u64,
+    pub(super) next_body: u64,
+    connectivity: Connectivity,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -36,10 +36,11 @@ impl Scene {
 
         Ok(Self {
             world: WorldRead::new(settings.world.clone())?,
-            meshes: BTreeMap::new(),
+            meshes: Arc::default(),
             bodies: Vec::new(),
             settings,
             next_body: 1,
+            connectivity: Connectivity::default(),
         })
     }
 
@@ -59,57 +60,64 @@ impl Scene {
                 + self
                     .bodies
                     .iter()
-                    .map(|b| b.geometry.meshes.len())
+                    .map(|body| body.geometry.meshes.len())
                     .sum::<usize>(),
             bodies: self.bodies.len(),
-            sleeping_bodies: self.bodies.iter().filter(|b| b.sleeping).count(),
-            dynamic_mass: self.bodies.iter().map(|b| b.geometry.mass).sum(),
+            sleeping_bodies: self.bodies.iter().filter(|body| body.sleeping).count(),
+            dynamic_mass: self.bodies.iter().map(|body| body.geometry.mass).sum(),
         }
     }
 
     pub fn commit(&mut self, transaction: Transaction) -> Result<()> {
-        let (world, mut changed) = prepare(&self.world, transaction)?;
+        let mut limits = Limits::new(self);
 
-        if changed.is_empty() {
-            return Ok(());
-        }
+        limits.bodies = self.settings.max_bodies.saturating_sub(self.bodies.len());
 
-        let mut next_body = self.next_body;
-
-        let affected = support::affected(&self.world, &world, &changed);
-
-        let (world, additions, removed) = support::detach(
-            &world,
-            &affected,
-            &mut next_body,
-            self.settings.render_leaf_edge,
-            self.settings.max_bodies.saturating_sub(self.bodies.len()),
+        let mut patch = StaticPatch::prepare(
+            &self.world,
+            &self.meshes,
+            &mut self.connectivity,
+            transaction,
+            limits,
         )?;
 
-        changed.extend(removed);
+        patch.publish(self)?;
 
-        let dirty = dirty_keys(&changed, self.settings.render_leaf_edge);
+        Ok(())
+    }
 
-        let mut meshes = self.meshes.clone();
+    pub fn remove(&mut self, target: Target) -> Result<()> {
+        let (id, voxel) = match target {
+            Target::Static(voxel) => {
+                let mut transaction = self.transaction();
 
-        for key in dirty {
-            if world.has_render_voxels(key, self.settings.render_leaf_edge) {
-                meshes.insert(key, Arc::new(MeshSource::default()));
-            } else {
-                meshes.remove(&key);
+                transaction.remove(voxel)?;
+
+                return self.commit(transaction);
             }
+            Target::Dynamic { body, voxel } => (body, voxel),
+        };
+
+        let body = self
+            .bodies
+            .iter()
+            .find(|body| body.id == id)
+            .ok_or(SceneError::Invalid)?;
+
+        let replacements = body.geometry.remove(
+            &mut self.connectivity,
+            &self.world,
+            &[voxel],
+            self.settings.render_leaf_edge,
+            self.settings.max_bodies - (self.bodies.len() - 1),
+        )?;
+
+        Patch::Dynamic {
+            id,
+            base: body.geometry.clone(),
+            replacements,
         }
-
-        self.world = world;
-        self.meshes = meshes;
-
-        self.bodies.extend(additions);
-
-        self.next_body = next_body;
-
-        for body in &mut self.bodies {
-            body.sleeping = false;
-        }
+        .publish(self)?;
 
         Ok(())
     }
@@ -130,20 +138,4 @@ impl Scene {
 
         Ok(())
     }
-}
-
-fn dirty_keys(changed: &[VoxelCoord], edge: i32) -> BTreeSet<[i32; 3]> {
-    let mut dirty = BTreeSet::new();
-
-    for &p in changed {
-        for z in -1..=1 {
-            for y in -1..=1 {
-                for x in -1..=1 {
-                    dirty.insert(geometry::key(p + IVec3::new(x, y, z), edge));
-                }
-            }
-        }
-    }
-
-    dirty
 }

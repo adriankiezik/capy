@@ -1,16 +1,22 @@
 #![allow(clippy::expect_used)]
 
-use super::{Scene, SceneSettings, SimulationSettings, VisualSettings, geometry};
+use super::{
+    EditSettings, Scene, SceneEdits, SceneSettings, SimulationSettings, Target, VisualSettings,
+    geometry,
+};
 use crate::{
     Aabb,
     world::{
-        Material, MaterialId, Owner, OwnerId, StructureId, Support, Transaction, VOXEL_SIZE, Voxel,
+        Material, MaterialId, Owner, OwnerId, StructureId, Transaction, VOXEL_SIZE, Voxel,
         VoxelBounds, WorldRead, WorldSettings,
     },
 };
 use divan::{Bencher, black_box, counter::ItemsCount};
 use glam::{IVec3, Vec3};
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 fn world(edge: i32) -> WorldRead {
     WorldRead::new(WorldSettings {
@@ -87,12 +93,10 @@ fn scene() -> Scene {
                 Owner {
                     id: OwnerId(1),
                     structure: StructureId(1),
-                    support: Support::Fixed,
                 },
                 Owner {
                     id: OwnerId(2),
                     structure: StructureId(2),
-                    support: Support::Contact(OwnerId(1)),
                 },
             ],
             max_leaves: 4096,
@@ -368,7 +372,7 @@ fn render_scene(leaves: i32) -> Scene {
         &mut scene,
         (0..leaves).flat_map(|leaf| {
             (2..6).flat_map(move |z| {
-                (2..6).flat_map(move |y| (2..6).map(move |x| IVec3::new(leaf * 8 + x, y, z)))
+                (0..6).flat_map(move |y| (2..6).map(move |x| IVec3::new(leaf * 8 + x, y, z)))
             })
         }),
         1,
@@ -410,6 +414,197 @@ fn edited_render_scene(leaves: i32) -> Scene {
     );
 
     scene
+}
+
+fn finish_edits(scene: &mut Scene, edits: &mut SceneEdits) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+
+    while edits.pending() != 0 {
+        for outcome in edits.update(scene).expect("valid edit scheduler") {
+            outcome.result.expect("valid batched edit");
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "edit scheduler completed within its deadline"
+        );
+
+        std::thread::yield_now();
+    }
+}
+
+fn edit_bodies(bencher: Bencher, count: i32, workers: usize) {
+    let mut fixture = scene();
+
+    place(
+        &mut fixture,
+        (0..count).flat_map(|body| {
+            (0..8).flat_map(move |z| {
+                (16..24).flat_map(move |y| (0..8).map(move |x| IVec3::new(body * 16 + x, y, z)))
+            })
+        }),
+        2,
+    );
+
+    let settings = EditSettings {
+        workers,
+        max_pending: 4096,
+        max_batch: 64,
+    };
+
+    let commands: Vec<_> = fixture
+        .bodies
+        .iter()
+        .flat_map(|body| {
+            let id = body.id;
+
+            (0..8)
+                .flat_map(move |z| {
+                    (0..8).map(move |y| Target::Dynamic {
+                        body: id,
+                        voxel: IVec3::new(4, y, z),
+                    })
+                })
+                .chain([Target::Dynamic {
+                    body: id,
+                    voxel: IVec3::new(6, 1, 1),
+                }])
+        })
+        .collect();
+
+    let run = |scene: &mut Scene, edits: &mut SceneEdits| {
+        for &target in &commands {
+            assert!(edits.queue_remove(target));
+        }
+
+        for outcome in edits.update(scene).expect("dispatch independent bodies") {
+            outcome.result.expect("valid body edit");
+        }
+
+        scene
+            .advance(Duration::from_millis(16))
+            .expect("advance during preparation");
+
+        let translation = scene.bodies[0].translation.y;
+
+        finish_edits(scene, edits);
+
+        assert_eq!(scene.bodies.len(), count as usize * 2);
+
+        assert!(
+            scene
+                .bodies
+                .iter()
+                .all(|body| body.translation.y == translation)
+        );
+
+        assert!(
+            (scene.stats().dynamic_mass - count as f32 * 447.0 * VOXEL_SIZE.powi(3)).abs() < 0.001
+        );
+    };
+
+    bencher
+        .counter(ItemsCount::new(commands.len() as u64))
+        .with_inputs(|| {
+            let scene = fixture.clone();
+
+            let edits = SceneEdits::new(&scene, settings).expect("valid scheduler settings");
+
+            (scene, edits)
+        })
+        .bench_local_refs(|(scene, edits)| run(scene, edits));
+}
+
+#[divan::bench(args = [1, 8, 32])]
+fn edits_bodies_serial(bencher: Bencher, count: i32) {
+    edit_bodies(bencher, count, 1);
+}
+
+#[divan::bench(args = [1, 8, 32])]
+fn edits_bodies_parallel(bencher: Bencher, count: i32) {
+    edit_bodies(bencher, count, 4);
+}
+
+#[divan::bench(args = [16, 128, 512])]
+fn edits_static_batch(bencher: Bencher, length: i32) {
+    let mut fixture = scene();
+
+    place(
+        &mut fixture,
+        (0..length)
+            .flat_map(|x| (0..4).flat_map(move |y| (0..4).map(move |z| IVec3::new(x, y, z)))),
+        1,
+    );
+
+    bencher
+        .counter(ItemsCount::new(length as u64))
+        .with_inputs(|| {
+            let scene = fixture.clone();
+
+            let edits = SceneEdits::new(
+                &scene,
+                EditSettings {
+                    workers: 4,
+                    max_pending: length as usize,
+                    max_batch: (length as usize).min(256),
+                },
+            )
+            .expect("valid batch scheduler");
+
+            (scene, edits)
+        })
+        .bench_local_refs(|(scene, edits)| {
+            for x in 0..length {
+                assert!(edits.queue_remove(Target::Static(IVec3::new(x, 1, 1))));
+            }
+
+            finish_edits(scene, edits);
+
+            assert!(scene.bodies.is_empty());
+
+            assert!(
+                (0..length).all(|x| scene.world.resident_voxel(IVec3::new(x, 1, 1)).is_empty())
+            );
+        });
+}
+
+#[divan::bench(args = [8, 64, 512])]
+fn edits_queued_support_cuts(bencher: Bencher, length: i32) {
+    bencher
+        .counter(ItemsCount::new(3u64))
+        .with_inputs(|| {
+            let (scene, _) = supported_beam(length);
+
+            let edits = SceneEdits::new(
+                &scene,
+                EditSettings {
+                    workers: 2,
+                    max_pending: 3,
+                    max_batch: 1,
+                },
+            )
+            .expect("valid support scheduler");
+
+            (scene, edits)
+        })
+        .bench_local_refs(|(scene, edits)| {
+            for voxel in [
+                IVec3::ZERO,
+                IVec3::new(length / 2, 1, 0),
+                IVec3::new(length - 1, 1, 0),
+            ] {
+                assert!(edits.queue_remove(Target::Static(voxel)));
+            }
+
+            finish_edits(scene, edits);
+
+            assert_eq!(scene.bodies.len(), 2);
+
+            assert!(
+                (scene.stats().dynamic_mass - (length - 2) as f32 * VOXEL_SIZE.powi(3)).abs()
+                    < 0.0001
+            );
+        });
 }
 
 #[divan::bench(args = [8, 64, 128])]

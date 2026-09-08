@@ -3,7 +3,12 @@ use crate::{
     world::{Leaf, VOXEL_SIZE, Voxel, VoxelCoord, WorldRead},
 };
 use glam::{IVec3, Vec3};
-use std::sync::{Arc, OnceLock};
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, OnceLock},
+};
+
+pub(crate) type MeshSources = BTreeMap<[i32; 3], Arc<MeshSource>>;
 
 #[derive(Debug, Default)]
 pub(crate) struct MeshSource {
@@ -47,7 +52,6 @@ pub(crate) struct Vertex {
 #[derive(Debug)]
 pub(crate) struct Mesh {
     pub(crate) vertices: Vec<Vertex>,
-    pub(crate) origin: Vec3,
     pub(crate) min: Vec3,
     pub(crate) max: Vec3,
 }
@@ -80,7 +84,6 @@ fn build_halo(
 
     let mut mesh = Mesh {
         vertices: Vec::new(),
-        origin: origin.as_vec3() * VOXEL_SIZE,
         min: Vec3::splat(f32::INFINITY),
         max: Vec3::splat(f32::NEG_INFINITY),
     };

@@ -1,6 +1,6 @@
 use super::{Hit, Mesh, Result, Scene, Target};
 use crate::{Aabb, world::VOXEL_SIZE};
-use glam::Vec3;
+use glam::{IVec3, Vec3};
 use std::sync::Arc;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -9,7 +9,8 @@ pub(crate) struct MeshId(u64, [i32; 3]);
 pub(crate) struct MeshInstance {
     pub(crate) id: MeshId,
     pub(crate) mesh: Arc<Mesh>,
-    pub(crate) translation: Vec3,
+    pub(crate) world_origin: Vec3,
+    pub(crate) surface_origin: Vec3,
 }
 
 impl Scene {
@@ -18,7 +19,7 @@ impl Scene {
 
         let mut available = self.settings.max_mesh_vertices;
 
-        for (&key, source) in &self.meshes {
+        for (&key, source) in self.meshes.iter() {
             let mesh = source.resolve(
                 key,
                 self.settings.render_leaf_edge,
@@ -29,10 +30,14 @@ impl Scene {
 
             available -= mesh.vertices.len();
 
+            let origin =
+                (IVec3::from_array(key) * self.settings.render_leaf_edge).as_vec3() * VOXEL_SIZE;
+
             instances.push(MeshInstance {
                 id: MeshId(0, key),
+                world_origin: origin,
+                surface_origin: origin,
                 mesh,
-                translation: Vec3::ZERO,
             });
         }
 
@@ -48,10 +53,14 @@ impl Scene {
 
                 available -= mesh.vertices.len();
 
+                let origin = (IVec3::from_array(key) * self.settings.render_leaf_edge).as_vec3()
+                    * VOXEL_SIZE;
+
                 instances.push(MeshInstance {
                     id: MeshId(body.id, key),
+                    world_origin: body.translation + origin,
+                    surface_origin: origin,
                     mesh,
-                    translation: body.translation,
                 });
             }
         }

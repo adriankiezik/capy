@@ -18,10 +18,10 @@ pub(super) struct Instance {
 impl Instance {
     const SIZE: u64 = std::mem::size_of::<Self>() as u64;
 
-    fn new(origin: Vec3, translation: Vec3) -> Self {
+    fn new(world_origin: Vec3, surface_origin: Vec3) -> Self {
         Self {
-            translation: (origin + translation).extend(0.0).to_array(),
-            origin: origin.extend(0.0).to_array(),
+            translation: world_origin.extend(0.0).to_array(),
+            origin: surface_origin.extend(0.0).to_array(),
         }
     }
 }
@@ -101,7 +101,7 @@ impl Geometry {
 
         let mut previous: BTreeMap<_, _> = std::mem::take(&mut self.meshes)
             .into_iter()
-            .map(|resident| (resident.id, resident))
+            .map(|resident| (Arc::as_ptr(&resident.source) as usize, resident))
             .collect();
 
         self.bounds.clear();
@@ -111,40 +111,37 @@ impl Geometry {
         for MeshInstance {
             id,
             mesh,
-            translation,
+            world_origin: origin,
+            surface_origin,
         } in sources
         {
-            let origin = mesh.origin + translation;
+            let resident =
+                if let Some(mut resident) = previous.remove(&(Arc::as_ptr(&mesh) as usize)) {
+                    resident.id = id;
+                    resident.origin = origin;
 
-            let resident = if let Some(mut resident) = previous
-                .remove(&id)
-                .filter(|resident| Arc::ptr_eq(&resident.source, &mesh))
-            {
-                resident.origin = origin;
+                    resident
+                } else {
+                    let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("immutable voxel leaf"),
+                        contents: bytemuck::cast_slice(&mesh.vertices),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
 
-                resident
-            } else {
-                let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("immutable voxel leaf"),
-                    contents: bytemuck::cast_slice(&mesh.vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
-
-                Resident {
-                    id,
-                    source: mesh.clone(),
-                    buffer,
-                    origin,
-                }
-            };
+                    Resident {
+                        id,
+                        source: mesh.clone(),
+                        buffer,
+                        origin,
+                    }
+                };
 
             self.bounds.push(Aabb {
                 min: mesh.min + origin,
                 max: mesh.max + origin,
             });
 
-            self.transforms
-                .push(Instance::new(mesh.origin, translation));
+            self.transforms.push(Instance::new(origin, surface_origin));
 
             self.meshes.push(resident);
         }
@@ -174,15 +171,17 @@ impl Geometry {
         let mut end = 0;
 
         for (index, (source, resident)) in sources.iter().zip(&mut self.meshes).enumerate() {
-            let origin = source.mesh.origin + source.translation;
+            let origin = source.world_origin;
 
-            if origin != resident.origin {
+            if origin != resident.origin
+                || self.transforms[index].origin != source.surface_origin.extend(0.0).to_array()
+            {
                 resident.origin = origin;
                 self.bounds[index] = Aabb {
                     min: source.mesh.min + origin,
                     max: source.mesh.max + origin,
                 };
-                self.transforms[index] = Instance::new(source.mesh.origin, source.translation);
+                self.transforms[index] = Instance::new(origin, source.surface_origin);
                 first = first.min(index);
                 end = index + 1;
             }

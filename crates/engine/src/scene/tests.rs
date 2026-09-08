@@ -1,9 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
 use super::*;
-use crate::world::{
-    self, MaterialId, OwnerId, StructureId, Support, VOXEL_SIZE, Voxel, WorldError,
-};
+use crate::world::{self, MaterialId, OwnerId, StructureId, VOXEL_SIZE, Voxel, WorldError};
 use glam::{IVec3, Vec3};
 use proptest::prelude::*;
 use std::{
@@ -40,7 +38,6 @@ fn structure_settings() -> SceneSettings {
     config.world.bounds.min.y = -8;
 
     for owner in &mut config.world.owners[1..] {
-        owner.support = Support::Contact(OwnerId(1));
         owner.structure = StructureId(2);
     }
 
@@ -52,15 +49,17 @@ fn bridge(config: SceneSettings) -> Scene {
 
     place(
         &mut scene,
-        [
-            (IVec3::new(0, 0, 0), voxel(1)),
-            (IVec3::new(4, 0, 0), voxel(1)),
-            (IVec3::new(0, 1, 0), voxel(2)),
-            (IVec3::new(1, 1, 0), voxel(3)),
-            (IVec3::new(2, 1, 0), Voxel::new(MaterialId(2), OwnerId(2))),
-            (IVec3::new(3, 1, 0), voxel(3)),
-            (IVec3::new(4, 1, 0), voxel(2)),
-        ],
+        (-8..0)
+            .flat_map(|y| [0, 4].map(|x| (IVec3::new(x, y, 0), voxel(1))))
+            .chain([
+                (IVec3::new(0, 0, 0), voxel(1)),
+                (IVec3::new(4, 0, 0), voxel(1)),
+                (IVec3::new(0, 1, 0), voxel(2)),
+                (IVec3::new(1, 1, 0), voxel(3)),
+                (IVec3::new(2, 1, 0), Voxel::new(MaterialId(2), OwnerId(2))),
+                (IVec3::new(3, 1, 0), voxel(3)),
+                (IVec3::new(4, 1, 0), voxel(2)),
+            ]),
     );
 
     scene
@@ -86,10 +85,6 @@ fn body_voxels(scene: &Scene) -> BTreeMap<[i32; 3], Voxel> {
     occupied
 }
 
-// Removes one bridge support, then cuts the bridge in two. Only the unsupported section
-// should fall, with no missing blocks or unexplained weight changes. It should stop at
-// the world floor; removing the other support should start the remaining section falling.
-// A saved copy of the original bridge must remain unchanged throughout.
 #[test]
 fn severed_structure_preserves_voxels_mass_and_snapshot_then_settles_and_wakes() {
     let mut scene = bridge(structure_settings());
@@ -152,9 +147,7 @@ fn severed_structure_preserves_voxels_mass_and_snapshot_then_settles_and_wakes()
     assert_eq!(body.velocity, 0.0);
 
     assert!(
-        (body.translation.y + body.geometry.min.y
-            - (-0.8 + scene.settings.simulation.contact_slop))
-            .abs()
+        (body.translation.y + body.geometry.min.y - scene.settings.simulation.contact_slop).abs()
             < 1e-5
     );
 
@@ -175,9 +168,6 @@ fn severed_structure_preserves_voxels_mass_and_snapshot_then_settles_and_wakes()
     assert_eq!(original.voxel(IVec3::new(4, 0, 0)).unwrap(), voxel(1));
 }
 
-// Checks that separate structures do not become one supported structure just because
-// they touch. When their support is removed, they should fall separately and come to rest
-// in a stack without passing through each other or through the world floor.
 #[test]
 fn touching_different_structures_detach_separately_and_stack_without_penetration() {
     let mut config = structure_settings();
@@ -188,18 +178,14 @@ fn touching_different_structures_detach_separately_and_stack_without_penetration
 
     place(
         &mut scene,
-        [
+        (-8..0).map(|y| (IVec3::new(0, y, 0), voxel(1))).chain([
             (IVec3::ZERO, voxel(1)),
             (IVec3::Y, voxel(2)),
             (IVec3::Y * 2, voxel(3)),
-        ],
+        ]),
     );
 
-    assert_eq!(
-        scene.bodies.len(),
-        1,
-        "contact with another structure is not fixed support"
-    );
+    assert!(scene.bodies.is_empty());
 
     let mut transaction = scene.transaction();
 
@@ -368,8 +354,34 @@ type Faces = BTreeMap<([i32; 3], [i32; 3], [u32; 3]), usize>;
 fn expected_faces(scene: &Scene) -> Faces {
     let mut faces = BTreeMap::new();
 
-    for owner in &scene.settings.world.owners {
-        for (p, voxel) in scene.world.owner_voxels(owner.id) {
+    let mut groups = vec![
+        scene
+            .settings
+            .world
+            .owners
+            .iter()
+            .flat_map(|owner| scene.world.owner_voxels(owner.id))
+            .map(|(p, voxel)| (p.to_array(), voxel))
+            .collect::<BTreeMap<_, _>>(),
+    ];
+
+    groups.extend(scene.bodies.iter().map(|body| {
+        body.geometry
+            .occupied()
+            .map(|(p, voxel)| {
+                let p = (p.as_vec3() + body.translation / VOXEL_SIZE)
+                    .round()
+                    .as_ivec3();
+
+                (p.to_array(), voxel)
+            })
+            .collect()
+    }));
+
+    for group in groups {
+        for (&p, voxel) in &group {
+            let p = IVec3::from_array(p);
+
             for normal in [
                 IVec3::X,
                 -IVec3::X,
@@ -378,7 +390,7 @@ fn expected_faces(scene: &Scene) -> Faces {
                 IVec3::Z,
                 -IVec3::Z,
             ] {
-                if scene.world.resident_voxel(p + normal).is_empty() {
+                if !group.contains_key(&(p + normal).to_array()) {
                     let color = scene
                         .world
                         .material(voxel.material)
@@ -434,7 +446,7 @@ fn mesh_faces(scene: &Scene) -> Faces {
 
                         assert!(local.cmpge(mesh.min).all() && local.cmple(mesh.max).all());
 
-                        let p = (local + mesh.origin + instance.translation) / VOXEL_SIZE;
+                        let p = (local + instance.world_origin) / VOXEL_SIZE;
 
                         assert!((p - p.round()).abs().max_element() < 1e-3);
 
@@ -533,6 +545,7 @@ fn cached_meshes_follow_boundary_edits_and_enforce_resident_budget() {
             let mut config = settings();
 
             config.render_leaf_edge = edge;
+            config.world.bounds.min.y = 0;
 
             let mut scene = Scene::new(config.clone()).unwrap();
 
@@ -635,7 +648,14 @@ proptest! {
         let actual = scene.raycast(origin, direction, 3.0).unwrap();
         assert_eq!(actual.is_some(), !expected.is_empty());
         if let Some(hit) = actual {
-            assert_eq!(hit.target, Target::Static(expected[0].0));
+            let coordinate = match hit.target {
+                Target::Static(p) => p,
+                Target::Dynamic { body, voxel } => {
+                    let body = scene.bodies.iter().find(|b| b.id == body).unwrap();
+                    (voxel.as_vec3() + body.translation / VOXEL_SIZE).round().as_ivec3()
+                }
+            };
+            assert_eq!(coordinate, expected[0].0);
             assert_eq!(hit.voxel, voxel(1));
             assert!((hit.distance - expected[0].1).abs() < 1e-5);
         }
@@ -651,10 +671,10 @@ fn queries_track_translated_bodies_and_nearest_static_occluders() {
 
     place(
         &mut scene,
-        [
+        (-8..=-2).map(|y| (IVec3::new(1, y, 0), voxel(1))).chain([
             (IVec3::new(0, 10, 0), voxel(2)),
             (IVec3::new(0, -2, 0), voxel(1)),
-        ],
+        ]),
     );
 
     scene.advance(Duration::from_millis(200)).unwrap();
@@ -747,7 +767,12 @@ fn raycasts_handle_axis_parallel_entry_inside_hits_and_distance_limits() {
             .unwrap()
             .unwrap();
 
-        assert_eq!(hit.target, Target::Static(p), "normal {normal}");
+        let target = Target::Dynamic {
+            body: scene.bodies[0].id,
+            voxel: IVec3::splat(7),
+        };
+
+        assert_eq!(hit.target, target, "normal {normal}");
 
         assert_eq!(hit.normal, normal);
 
@@ -757,7 +782,7 @@ fn raycasts_handle_axis_parallel_entry_inside_hits_and_distance_limits() {
 
         let inside = scene.raycast(center, direction, 0.01).unwrap().unwrap();
 
-        assert_eq!(inside.target, Target::Static(p));
+        assert_eq!(inside.target, target);
 
         assert_eq!(inside.distance, 0.0);
 

@@ -8,7 +8,7 @@ use crate::{
         tests::{place, settings},
     },
     ui::{Canvas, Rect, TextStyle},
-    world::{MaterialId, OwnerId, Support, Voxel, tests::voxel},
+    world::{MaterialId, OwnerId, Voxel, tests::voxel},
 };
 use glam::{IVec3, Vec2, Vec3};
 use std::{
@@ -247,7 +247,7 @@ impl Fixture {
     fn new() -> Self {
         let mut config = settings();
 
-        config.world.owners[1].support = Support::Contact(OwnerId(1));
+        config.world.bounds.min.y = -1;
 
         Self {
             scene: Scene::new(config).unwrap(),
@@ -272,7 +272,7 @@ impl Fixture {
                 place(
                     &mut self.scene,
                     (-4..4).flat_map(|x| {
-                        (0..4).flat_map(move |y| {
+                        (-1..4).flat_map(move |y| {
                             (-2..2).map(move |z| (IVec3::new(x, y, z), voxel(1)))
                         })
                     }),
@@ -294,15 +294,26 @@ impl Fixture {
                     .text("GPU", Vec2::new(5.0, 20.0), &TextStyle::default());
             }
             2 => {
-                place(
-                    &mut self.scene,
-                    (-16..16)
-                        .flat_map(|x| (-16..16).map(move |z| (IVec3::new(x, -1, z), voxel(1)))),
-                );
+                let world = self.scene.snapshot();
 
                 place(
                     &mut self.scene,
-                    (0..24).map(|i| (IVec3::new((i % 8 - 4) * 8, 4, (i / 8 - 1) * 8), voxel(3))),
+                    (-16..16)
+                        .flat_map(|x| (-16..16).map(move |z| (IVec3::new(x, -1, z), voxel(1))))
+                        .filter(|(p, _)| world.voxel(*p).unwrap().is_empty()),
+                );
+
+                let world = self.scene.snapshot();
+
+                place(
+                    &mut self.scene,
+                    (0..24)
+                        .flat_map(|i| {
+                            (-1..=4).map(move |y| {
+                                (IVec3::new((i % 8 - 4) * 8, y, (i / 8 - 1) * 8), voxel(3))
+                            })
+                        })
+                        .filter(|(p, _)| world.voxel(*p).unwrap().is_empty()),
                 );
 
                 place(

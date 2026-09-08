@@ -1,6 +1,5 @@
 use crate::world::{
-    Material, MaterialId, Owner, OwnerId, Result, Support, Voxel, VoxelCoord, WorldError,
-    WorldSettings,
+    Material, MaterialId, Owner, OwnerId, Result, Voxel, VoxelCoord, WorldError, WorldSettings,
 };
 use glam::IVec3;
 use std::{
@@ -171,14 +170,6 @@ impl WorldRead {
             }
         }
 
-        for owner in owners.values() {
-            if let Support::Contact(id) = owner.support
-                && !owners.get(&id).is_some_and(|o| o.support == Support::Fixed)
-            {
-                return Err(WorldError::Invalid);
-            }
-        }
-
         Ok(Self {
             root: Arc::new(Root {
                 epoch: 0,
@@ -226,6 +217,30 @@ impl WorldRead {
             .map_or(Voxel::EMPTY, |leaf| leaf.voxel(index))
     }
 
+    pub(crate) fn overlaps_leaves(&self, min: VoxelCoord, max: VoxelCoord) -> bool {
+        let min = min.to_array().map(|v| v.div_euclid(LEAF_EDGE));
+
+        let max = (max - IVec3::ONE)
+            .to_array()
+            .map(|v| v.div_euclid(LEAF_EDGE));
+
+        let count = (0..3).fold(1u64, |count, axis| {
+            count.saturating_mul((i64::from(max[axis]) - i64::from(min[axis]) + 1).max(0) as u64)
+        });
+
+        if count > self.leaf_count() as u64 {
+            return self.root.regions.values().any(|region| {
+                region
+                    .keys()
+                    .any(|key| (0..3).all(|axis| key[axis] >= min[axis] && key[axis] <= max[axis]))
+            });
+        }
+
+        (min[2]..=max[2]).any(|z| {
+            (min[1]..=max[1]).any(|y| (min[0]..=max[0]).any(|x| self.leaf([x, y, z]).is_some()))
+        })
+    }
+
     pub(crate) fn has_render_voxels(&self, key: [i32; 3], edge: i32) -> bool {
         let count = edge / LEAF_EDGE;
 
@@ -262,6 +277,18 @@ impl WorldRead {
     }
 
     pub(crate) fn replace_leaves(&self, changes: BTreeMap<LeafCoord, Vec<Voxel>>) -> Result<Self> {
+        self.replace_sources(
+            changes
+                .into_iter()
+                .map(|(key, voxels)| (key, Leaf::encode(&voxels).map(Arc::new)))
+                .collect(),
+        )
+    }
+
+    pub(crate) fn replace_sources(
+        &self,
+        changes: BTreeMap<LeafCoord, Option<Arc<Leaf>>>,
+    ) -> Result<Self> {
         let mut root = (*self.root).clone();
 
         root.epoch = root
@@ -269,7 +296,7 @@ impl WorldRead {
             .checked_add(1)
             .ok_or(WorldError::Limit("epochs"))?;
 
-        for (key, voxels) in changes {
+        for (key, leaf) in changes {
             if let Some(old) = self.leaf(key) {
                 for owner in old.owners() {
                     if let Some(keys) = root.owner_leaves.get_mut(&owner) {
@@ -280,12 +307,12 @@ impl WorldRead {
 
             let r = Arc::make_mut(root.regions.entry(region(key)).or_default());
 
-            if let Some(leaf) = Leaf::encode(&voxels) {
+            if let Some(leaf) = leaf {
                 for owner in leaf.owners() {
                     Arc::make_mut(root.owner_leaves.entry(owner).or_default()).insert(key);
                 }
 
-                r.insert(key, Arc::new(leaf));
+                r.insert(key, leaf);
             } else {
                 r.remove(&key);
             }

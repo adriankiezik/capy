@@ -14,8 +14,8 @@ pub(crate) use storage::{LEAF_EDGE, LEAF_VOXELS, Leaf, LeafCoord, address, coord
 pub use transaction::Transaction;
 pub(crate) use transaction::prepare;
 pub use types::{
-    Material, MaterialId, Owner, OwnerId, StructureId, Support, VOXEL_SIZE, Voxel, VoxelBounds,
-    VoxelCoord, voxel_bounds,
+    Material, MaterialId, Owner, OwnerId, StructureId, VOXEL_SIZE, Voxel, VoxelBounds, VoxelCoord,
+    voxel_bounds,
 };
 
 #[cfg(test)]

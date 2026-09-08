@@ -10,4 +10,10 @@ pub enum SceneError {
     InvalidSetting(&'static str),
     #[error("scene capacity or work limit exceeded: {0}")]
     Limit(&'static str),
+    #[error("scene geometry changed while preparing an edit")]
+    StaleEdit,
+    #[error("could not start scene edit worker: {0}")]
+    EditWorker(std::io::Error),
+    #[error("scene edit worker stopped without a result")]
+    EditWorkerStopped,
 }

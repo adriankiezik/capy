@@ -1,8 +1,8 @@
 #![allow(clippy::expect_used)]
 
 use super::{
-    LEAF_VOXELS, Leaf, Material, MaterialId, Owner, OwnerId, StructureId, Support, Voxel,
-    VoxelBounds, WorldRead, WorldSettings,
+    LEAF_VOXELS, Leaf, Material, MaterialId, Owner, OwnerId, StructureId, Voxel, VoxelBounds,
+    WorldRead, WorldSettings,
 };
 use divan::{Bencher, black_box, counter::ItemsCount};
 use glam::IVec3;
@@ -22,7 +22,6 @@ fn populated_world(leaves: i32) -> WorldRead {
         owners: vec![Owner {
             id: OwnerId(1),
             structure: StructureId(1),
-            support: Support::Fixed,
         }],
         max_leaves: leaves as usize,
         max_edit_voxels: 65536,

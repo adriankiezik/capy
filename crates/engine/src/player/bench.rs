@@ -3,10 +3,7 @@
 use super::{Player, PlayerInput, PlayerPose, PlayerSettings};
 use crate::{
     scene::{Scene, SceneSettings, SimulationSettings, VisualSettings},
-    world::{
-        Material, MaterialId, Owner, OwnerId, StructureId, Support, Voxel, VoxelBounds,
-        WorldSettings,
-    },
+    world::{Material, MaterialId, Owner, OwnerId, StructureId, Voxel, VoxelBounds, WorldSettings},
 };
 use divan::{Bencher, black_box};
 use glam::{IVec3, Vec2, Vec3};
@@ -34,7 +31,6 @@ fn scene(movement: Movement) -> Scene {
             owners: vec![Owner {
                 id: OwnerId(1),
                 structure: StructureId(1),
-                support: Support::Fixed,
             }],
             max_leaves: 4096,
             max_edit_voxels: 65536,

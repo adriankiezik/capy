@@ -5,10 +5,7 @@ use engine::{
     player::{Player, PlayerInput, PlayerPose, PlayerSettings},
     scene::{Hit, Scene, SceneSettings},
     ui::{Canvas, Rect, TextStyle},
-    world::{
-        Material, MaterialId, Owner, OwnerId, StructureId, Support, Voxel, VoxelBounds,
-        WorldSettings,
-    },
+    world::{Material, MaterialId, Owner, OwnerId, StructureId, Voxel, VoxelBounds, WorldSettings},
 };
 use serde::Serialize;
 use std::time::Duration;
@@ -53,7 +50,7 @@ impl Scenario {
         let mut scene = Scene::new(SceneSettings {
             world: WorldSettings {
                 bounds: VoxelBounds {
-                    min: IVec3::new(-160, -16, -160),
+                    min: IVec3::new(-160, -1, -160),
                     max: IVec3::new(160, 128, 160),
                 },
                 materials: vec![
@@ -72,12 +69,10 @@ impl Scenario {
                     Owner {
                         id: OwnerId(1),
                         structure: StructureId(1),
-                        support: Support::Fixed,
                     },
                     Owner {
                         id: OwnerId(2),
                         structure: StructureId(2),
-                        support: Support::Contact(OwnerId(1)),
                     },
                 ],
                 max_leaves: 4096,

@@ -1,8 +1,11 @@
 #[cfg(feature = "cpu-bench")]
 mod bench;
 
+mod body;
 mod config;
+mod connectivity;
 mod dynamics;
+mod edit;
 mod error;
 mod geometry;
 mod halo;
@@ -11,8 +14,9 @@ mod render;
 mod state;
 mod support;
 
-pub use config::{SceneSettings, ShadowSettings, SimulationSettings, VisualSettings};
-pub(crate) use dynamics::Body;
+pub(crate) use body::Body;
+pub use config::{EditSettings, SceneSettings, ShadowSettings, SimulationSettings, VisualSettings};
+pub use edit::{EditOutcome, SceneEdits};
 pub use error::{Result, SceneError};
 pub(crate) use geometry::{Mesh, Vertex};
 pub use query::{Hit, Target};

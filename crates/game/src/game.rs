@@ -5,7 +5,7 @@ use crate::{
 use engine::{
     ApplicationResult as Result, Engine, Vec2, Vec3, View,
     player::{Player, PlayerInput, PlayerPose, PlayerSettings},
-    scene::{Hit, Target},
+    scene::SceneEdits,
     ui::TextStyle,
 };
 use std::time::{Duration, Instant};
@@ -29,6 +29,8 @@ pub async fn run(mut app: Engine) -> Result<()> {
     let mut controls = controls::bindings();
 
     let mut selection = None;
+
+    let mut edits = SceneEdits::new(&scene, Default::default())?;
 
     let mut fps_start = Instant::now();
 
@@ -54,6 +56,12 @@ pub async fn run(mut app: Engine) -> Result<()> {
                 continue;
             }
 
+            for outcome in edits.update(&mut scene)? {
+                outcome.result?;
+            }
+
+            scene.advance(tick.delta)?;
+
             let look = actions.axis2(Action::Look);
 
             player.rotate_view(look.x, look.y)?;
@@ -77,18 +85,9 @@ pub async fn run(mut app: Engine) -> Result<()> {
             selection = scene.raycast(camera.position, camera.direction, 8.0)?;
 
             if actions.active(Action::Destroy)
-                && let Some(Hit {
-                    target: Target::Static(voxel),
-                    ..
-                }) = selection
+                && let Some(hit) = selection
             {
-                let mut transaction = scene.transaction();
-
-                transaction.remove(voxel)?;
-
-                scene.commit(transaction)?;
-
-                selection = scene.raycast(camera.position, camera.direction, 8.0)?;
+                let _ = edits.queue_remove(hit.target);
             }
         }
 

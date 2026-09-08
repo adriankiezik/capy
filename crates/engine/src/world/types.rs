@@ -51,17 +51,10 @@ pub struct Material {
     pub density: f32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Support {
-    Fixed,
-    Contact(OwnerId),
-}
-
 #[derive(Clone, Debug)]
 pub struct Owner {
     pub id: OwnerId,
     pub structure: StructureId,
-    pub support: Support,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

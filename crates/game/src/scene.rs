@@ -1,17 +1,14 @@
 use engine::{
     ApplicationResult as Result, IVec3,
     scene::{Scene, SceneSettings},
-    world::{
-        Material, MaterialId, Owner, OwnerId, StructureId, Support, Voxel, VoxelBounds,
-        WorldSettings,
-    },
+    world::{Material, MaterialId, Owner, OwnerId, StructureId, Voxel, VoxelBounds, WorldSettings},
 };
 
 pub fn create() -> Result<Scene> {
     let mut scene = Scene::new(SceneSettings {
         world: WorldSettings {
             bounds: VoxelBounds {
-                min: IVec3::new(-160, -128, -160),
+                min: IVec3::new(-160, -3, -160),
                 max: IVec3::new(160, 128, 160),
             },
             materials: vec![
@@ -29,7 +26,6 @@ pub fn create() -> Result<Scene> {
             owners: vec![Owner {
                 id: OwnerId(1),
                 structure: StructureId(1),
-                support: Support::Fixed,
             }],
             max_leaves: 2048,
             max_edit_voxels: 1_000_000,
@@ -39,7 +35,7 @@ pub fn create() -> Result<Scene> {
         simulation: Default::default(),
         render_leaf_edge: 16,
         max_mesh_vertices: 1_000_000,
-        max_bodies: 1,
+        max_bodies: 128,
     })?;
 
     let mut transaction = scene.transaction();

@@ -1,50 +1,8 @@
 use crate::{
-    scene::{Result, SceneError, SimulationSettings, geometry::MeshSource},
-    world::{
-        LEAF_VOXELS, Leaf, LeafCoord, VOXEL_SIZE, Voxel, VoxelCoord, WorldRead, address, coordinate,
-    },
+    scene::{Body, Result, SceneError, SimulationSettings, body::BodyGeometry},
+    world::{VOXEL_SIZE, WorldRead},
 };
 use glam::{IVec3, Vec3};
-use std::{collections::BTreeMap, sync::Arc};
-
-#[derive(Debug)]
-pub(crate) struct BodyGeometry {
-    pub(crate) leaves: BTreeMap<LeafCoord, Arc<Leaf>>,
-    pub(crate) meshes: BTreeMap<[i32; 3], Arc<MeshSource>>,
-    pub(crate) bottom: Vec<VoxelCoord>,
-    pub(crate) min: Vec3,
-    pub(crate) max: Vec3,
-    pub(crate) mass: f32,
-}
-
-impl BodyGeometry {
-    pub(crate) fn voxel(&self, p: VoxelCoord) -> Voxel {
-        let (key, index) = address(p);
-
-        self.leaves
-            .get(&key)
-            .map_or(Voxel::EMPTY, |leaf| leaf.voxel(index))
-    }
-
-    pub(crate) fn occupied(&self) -> impl Iterator<Item = (VoxelCoord, Voxel)> + '_ {
-        self.leaves.iter().flat_map(|(&key, leaf)| {
-            (0..LEAF_VOXELS).filter_map(move |i| {
-                let voxel = leaf.voxel(i);
-
-                (!voxel.is_empty()).then_some((coordinate(key, i), voxel))
-            })
-        })
-    }
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct Body {
-    pub(crate) id: u64,
-    pub(crate) geometry: Arc<BodyGeometry>,
-    pub(crate) translation: Vec3,
-    pub(crate) velocity: f32,
-    pub(crate) sleeping: bool,
-}
 
 pub(crate) fn step(
     world: &WorldRead,
@@ -64,6 +22,10 @@ pub(crate) fn step(
 
     let mut probe_count = 0usize;
 
+    let mut candidates = Vec::new();
+
+    let mut regional = Vec::new();
+
     for index in 0..next.len() {
         if next[index].sleeping {
             continue;
@@ -79,29 +41,80 @@ pub(crate) fn step(
             (body.translation.y + body.geometry.min.y - floor_y - settings.contact_slop).max(0.0),
         );
 
-        for p in &body.geometry.bottom {
-            let bottom = p.as_vec3() * VOXEL_SIZE + body.translation;
+        let min = body.translation + body.geometry.min
+            - Vec3::Y * (requested_drop + settings.contact_slop);
 
-            allowed_drop = allowed_drop.min(world_allowed_drop(
-                world,
-                bottom,
-                requested_drop,
-                settings,
-                &mut probe_count,
-            )?);
+        let max = body.translation + body.geometry.max + Vec3::Y * settings.contact_slop;
 
-            for (other_index, other) in next.iter().enumerate() {
-                if other_index == index {
-                    continue;
+        let static_collision = world.overlaps_leaves(
+            (min / VOXEL_SIZE).floor().as_ivec3(),
+            (max / VOXEL_SIZE).ceil().as_ivec3(),
+        );
+
+        candidates.clear();
+
+        candidates.extend(next.iter().enumerate().filter_map(|(other_index, other)| {
+            (other_index != index
+                && min.cmplt(other.translation + other.geometry.max).all()
+                && max.cmpgt(other.translation + other.geometry.min).all())
+            .then_some(other_index)
+        }));
+
+        for (bounds, points) in body.geometry.bottom_regions() {
+            if allowed_drop == 0.0 || !static_collision && candidates.is_empty() {
+                break;
+            }
+
+            let min =
+                body.translation + bounds.min - Vec3::Y * (requested_drop + settings.contact_slop);
+
+            let max = body.translation + bounds.max + Vec3::Y * settings.contact_slop;
+
+            let static_region = static_collision
+                && world.overlaps_leaves(
+                    (min / VOXEL_SIZE).floor().as_ivec3(),
+                    (max / VOXEL_SIZE).ceil().as_ivec3(),
+                );
+
+            regional.clear();
+
+            regional.extend(candidates.iter().copied().filter(|&other| {
+                let other = &next[other];
+
+                min.cmplt(other.translation + other.geometry.max).all()
+                    && max.cmpgt(other.translation + other.geometry.min).all()
+            }));
+
+            if !static_region && regional.is_empty() {
+                continue;
+            }
+
+            for p in points {
+                if allowed_drop == 0.0 {
+                    break;
                 }
 
-                allowed_drop = allowed_drop.min(body_allowed_drop(
-                    other,
-                    bottom,
-                    requested_drop,
-                    settings,
-                    &mut probe_count,
-                )?);
+                let bottom = p.as_vec3() * VOXEL_SIZE + body.translation;
+
+                if static_region {
+                    allowed_drop = allowed_drop.min(world_allowed_drop(
+                        world,
+                        bottom,
+                        requested_drop,
+                        settings,
+                        &mut probe_count,
+                    )?);
+                }
+
+                for &other in &regional {
+                    allowed_drop = allowed_drop.min(body_allowed_drop(
+                        &next[other],
+                        bottom,
+                        requested_drop,
+                        settings,
+                        &mut probe_count,
+                    )?);
+                }
             }
         }
 

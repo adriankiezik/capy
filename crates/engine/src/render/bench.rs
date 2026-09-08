@@ -5,10 +5,7 @@ use crate::{
     player::Camera,
     scene::{Scene, SceneSettings, SimulationSettings, VisualSettings},
     ui::{Canvas, Rect},
-    world::{
-        Material, MaterialId, Owner, OwnerId, StructureId, Support, Voxel, VoxelBounds,
-        WorldSettings,
-    },
+    world::{Material, MaterialId, Owner, OwnerId, StructureId, Voxel, VoxelBounds, WorldSettings},
 };
 use criterion::{BenchmarkId, Criterion};
 use glam::{IVec3, Vec2, Vec3};
@@ -370,7 +367,6 @@ fn scene(objects: i32) -> Scene {
             owners: vec![Owner {
                 id: OwnerId(1),
                 structure: StructureId(1),
-                support: Support::Fixed,
             }],
             max_leaves: 4096,
             max_edit_voxels: 65536,
