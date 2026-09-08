@@ -1,3 +1,9 @@
+#[cfg(feature = "gpu-bench")]
+pub use render::benchmark_gpu;
+
+#[cfg(feature = "scenario-bench")]
+pub use render::{ScenarioRenderer, ScenarioTimings};
+
 pub mod assets;
 mod geometry;
 mod graphics;

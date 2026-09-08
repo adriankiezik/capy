@@ -203,6 +203,15 @@ impl Session {
             self.window.native.scale_factor() as f32,
         )?;
 
+        let uncapped = self.graphics.presentation().is_some_and(|config| {
+            matches!(
+                config.present_mode,
+                wgpu::PresentMode::Immediate
+                    | wgpu::PresentMode::Mailbox
+                    | wgpu::PresentMode::AutoNoVsync
+            )
+        });
+
         self.graphics
             .render(
                 |frame| {
@@ -210,7 +219,7 @@ impl Session {
 
                     Ok(())
                 },
-                || self.window.native.pre_present_notify(),
+                || self.window.pre_present_notify(uncapped),
             )
             .map_err(RuntimeError::from)
     }

@@ -1,4 +1,5 @@
 use crate::runtime::{WindowError, WindowSettings};
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::sync::Arc;
 use winit::{event_loop::ActiveEventLoop, window::Window as NativeWindow};
 
@@ -29,6 +30,17 @@ impl Window {
 
     pub(in crate::runtime) fn request_redraw(&self) {
         self.native.request_redraw();
+    }
+
+    pub(in crate::runtime) fn pre_present_notify(&self, uncapped: bool) {
+        let wayland = self
+            .native
+            .window_handle()
+            .is_ok_and(|handle| matches!(handle.as_raw(), RawWindowHandle::Wayland(_)));
+
+        if !uncapped || !wayland {
+            self.native.pre_present_notify();
+        }
     }
 
     pub fn capture_cursor(&mut self) -> Result<(), WindowError> {

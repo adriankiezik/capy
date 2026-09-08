@@ -210,10 +210,24 @@ impl Graphics {
     ) -> Result<()> {
         let mut config = self.select(&surface, width, height, None)?;
 
-        config.present_mode = match self.settings.presentation {
-            crate::graphics::PresentationMode::Vsync => wgpu::PresentMode::AutoVsync,
-            crate::graphics::PresentationMode::Immediate => wgpu::PresentMode::AutoNoVsync,
+        let caps = surface.get_capabilities(&self.adapter);
+
+        let modes: &[wgpu::PresentMode] = match self.settings.presentation {
+            crate::graphics::PresentationMode::Vsync => {
+                &[wgpu::PresentMode::FifoRelaxed, wgpu::PresentMode::Fifo]
+            }
+            crate::graphics::PresentationMode::Immediate => &[
+                wgpu::PresentMode::Immediate,
+                wgpu::PresentMode::Mailbox,
+                wgpu::PresentMode::Fifo,
+            ],
         };
+
+        config.present_mode = modes
+            .iter()
+            .copied()
+            .find(|mode| caps.present_modes.contains(mode))
+            .ok_or(GraphicsError::UnsupportedSurface)?;
         config.desired_maximum_frame_latency = self.settings.maximum_frame_latency;
 
         if width > 0 && height > 0 {
