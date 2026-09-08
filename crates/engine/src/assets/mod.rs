@@ -11,3 +11,6 @@ pub use error::{AssetError, Result};
 pub use handle::Handle;
 pub use manager::Assets;
 pub use source::{AssetSource, EmbeddedSource, FileSource};
+
+#[cfg(test)]
+mod tests;

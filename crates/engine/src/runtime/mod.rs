@@ -18,3 +18,6 @@ pub use winit::{
     keyboard::{KeyCode, PhysicalKey},
     window::Fullscreen,
 };
+
+#[cfg(test)]
+mod tests;

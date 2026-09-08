@@ -42,9 +42,14 @@ fn collect(path: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
     Ok(())
 }
 
-fn normalize(text: &str, extension: &str, crate_name: Option<&str>) -> Result<String> {
+fn normalize(
+    text: &str,
+    extension: &str,
+    crate_name: Option<&str>,
+    preserve_comments: bool,
+) -> Result<String> {
     match extension {
-        "rs" => crate::rust::normalize(text, crate_name),
+        "rs" => crate::rust::normalize(text, crate_name, preserve_comments),
         "wgsl" => crate::shader::normalize(text),
         _ => bail!("Supported source types are rs and wgsl"),
     }
@@ -86,7 +91,7 @@ fn main() -> Result<()> {
 
         std::io::stdin().read_to_string(&mut text)?;
 
-        let formatted = normalize(&text, extension, input.crate_name.as_deref())?;
+        let formatted = normalize(&text, extension, input.crate_name.as_deref(), false)?;
 
         if fix {
             std::io::stdout().write_all(formatted.as_bytes())?;
@@ -154,8 +159,13 @@ fn main() -> Result<()> {
             }
         }
 
-        let formatted = normalize(&text, extension, ownership.name(file)?)
-            .with_context(|| format!("Checking {}", file.display()))?;
+        let formatted = normalize(
+            &text,
+            extension,
+            ownership.name(file)?,
+            file.file_name().is_some_and(|name| name == "tests.rs"),
+        )
+        .with_context(|| format!("Checking {}", file.display()))?;
 
         if formatted != text {
             let line = text

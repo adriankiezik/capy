@@ -245,8 +245,12 @@ fn format(text: &str) -> Result<String> {
     String::from_utf8(output.stdout).context("Reading rustfmt output")
 }
 
-pub fn normalize(text: &str, crate_name: Option<&str>) -> Result<String> {
-    let text = uncomment(text)?;
+pub fn normalize(text: &str, crate_name: Option<&str>, preserve_comments: bool) -> Result<String> {
+    let text = if preserve_comments {
+        text.to_owned()
+    } else {
+        uncomment(text)?
+    };
 
     let text = crate::crate_paths::replace(&text, crate_name)?;
 

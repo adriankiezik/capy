@@ -18,3 +18,6 @@ pub use font::Font;
 pub use geometry::Rect;
 pub(crate) use geometry::Vertex;
 pub(crate) use raster::GlyphCache;
+
+#[cfg(test)]
+mod tests;

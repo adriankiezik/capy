@@ -14,3 +14,6 @@ pub use types::{
     Material, MaterialId, Owner, OwnerId, StructureId, Support, VOXEL_SIZE, Voxel, VoxelBounds,
     VoxelCoord, voxel_bounds,
 };
+
+#[cfg(test)]
+pub(crate) mod tests;

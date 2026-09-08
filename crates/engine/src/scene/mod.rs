@@ -14,3 +14,6 @@ pub(crate) use geometry::{Mesh, Vertex};
 pub use query::{Hit, Target};
 pub(crate) use render::{MeshId, MeshInstance};
 pub use state::{Scene, SceneStats};
+
+#[cfg(test)]
+pub(crate) mod tests;

@@ -18,3 +18,6 @@ winit.workspace = true
 glam.workspace = true
 bytemuck.workspace = true
 fontdue.workspace = true
+
+[dev-dependencies]
+proptest = "1"
