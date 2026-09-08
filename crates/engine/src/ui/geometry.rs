@@ -1,5 +1,12 @@
 use glam::Vec2;
 
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub(crate) struct Vertex {
+    pub(crate) position: [f32; 2],
+    pub(crate) color: [f32; 4],
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Rect {
     pub position: Vec2,

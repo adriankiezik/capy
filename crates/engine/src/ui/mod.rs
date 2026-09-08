@@ -16,4 +16,5 @@ pub use config::{Align, Anchor, Color, Insets, Length, TextStyle};
 pub use error::UiError;
 pub use font::Font;
 pub use geometry::Rect;
+pub(crate) use geometry::Vertex;
 pub(crate) use raster::GlyphCache;

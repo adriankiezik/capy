@@ -1,10 +1,9 @@
 use super::{
-    Canvas, GlyphCache, Length, TextStyle, UiError,
+    Canvas, GlyphCache, Length, TextStyle, UiError, Vertex,
     commands::{Commands, Kind},
     config::valid_color,
     font,
 };
-use crate::scene::Vertex;
 use glam::Vec2;
 use taffy::prelude::*;
 

@@ -1,9 +1,8 @@
 use super::{
-    Align, Color, GlyphCache, Rect, UiError, bitmap,
+    Align, Color, GlyphCache, Rect, UiError, Vertex, bitmap,
     commands::{Commands, Kind},
     font, layout,
 };
-use crate::scene::Vertex;
 use glam::Vec2;
 use taffy::{NodeId, TaffyTree};
 
@@ -54,9 +53,8 @@ impl<'a> Painter<'a> {
             }
 
             self.vertices.push(Vertex {
-                position: [position.x, position.y, 0.0],
-                normal: [color[3], 0.0, 0.0],
-                color: [color[0], color[1], color[2]],
+                position: position.to_array(),
+                color,
             });
         }
 
