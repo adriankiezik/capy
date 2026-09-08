@@ -8,7 +8,10 @@ use crate::{
     },
     world::{Transaction, WorldRead},
 };
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 
 #[derive(Clone, Debug)]
 pub struct Scene {
@@ -17,6 +20,7 @@ pub struct Scene {
     pub(crate) bodies: Vec<Body>,
     pub(crate) settings: SceneSettings,
     pub(super) next_body: u64,
+    pub(super) contacts: Arc<OnceLock<dynamics::Contacts>>,
     connectivity: Connectivity,
 }
 
@@ -40,6 +44,7 @@ impl Scene {
             bodies: Vec::new(),
             settings,
             next_body: 1,
+            contacts: Arc::default(),
             connectivity: Connectivity::default(),
         })
     }
@@ -128,12 +133,18 @@ impl Scene {
         }
 
         if !delta.is_zero() {
+            let moving = self.bodies.iter().any(|body| !body.sleeping);
+
             self.bodies = dynamics::step(
                 &self.world,
                 &self.bodies,
                 &self.settings.simulation,
                 delta.as_secs_f32(),
             )?;
+
+            if moving {
+                self.contacts = Arc::default();
+            }
         }
 
         Ok(())

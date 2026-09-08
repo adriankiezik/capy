@@ -1,19 +1,22 @@
-pub(super) mod patch;
-mod worker;
+#[cfg(test)]
+#[path = "tests.rs"]
+mod tests;
 
+use super::{
+    patch::{Input, Patch},
+    worker::{Receipt, Workers},
+};
 use crate::{
-    scene::{Body, EditSettings, Result, Scene, SceneError, Target},
+    scene::{Body, EditSettings, Result, Scene, SceneError, Target, geometry},
     world::{VOXEL_SIZE, VoxelCoord, WorldSettings},
 };
-use patch::{Input, Patch};
 use std::{
     collections::{BTreeSet, VecDeque},
     sync::{Arc, mpsc},
 };
-use worker::Workers;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum Domain {
+pub(in crate::scene) enum Domain {
     Static,
     Body(u64),
 }
@@ -22,6 +25,23 @@ enum Domain {
 struct Command {
     domain: Domain,
     voxel: [i32; 3],
+}
+
+impl Command {
+    fn chunk(self, edge: i32) -> [i32; 3] {
+        geometry::key(VoxelCoord::from_array(self.voxel), edge)
+    }
+
+    fn structural_key(self, edge: i32) -> (Domain, [i32; 3]) {
+        (
+            self.domain,
+            if self.domain == Domain::Static {
+                self.chunk(edge)
+            } else {
+                [0; 3]
+            },
+        )
+    }
 }
 
 impl From<Target> for Command {
@@ -58,8 +78,10 @@ pub struct EditOutcome {
 
 struct Flight {
     domain: Domain,
+    structural: bool,
+    chunk: [i32; 3],
     commands: Vec<Command>,
-    receiver: mpsc::Receiver<Result<Patch>>,
+    receiver: Receipt,
 }
 
 pub struct SceneEdits {
@@ -68,7 +90,14 @@ pub struct SceneEdits {
     workers: Workers,
     pending: VecDeque<Command>,
     accepted: BTreeSet<Command>,
+    structural: BTreeSet<(Domain, [i32; 3])>,
     flights: Vec<Flight>,
+}
+
+impl Drop for SceneEdits {
+    fn drop(&mut self) {
+        self.flights.clear();
+    }
 }
 
 impl SceneEdits {
@@ -81,6 +110,7 @@ impl SceneEdits {
             workers: Workers::new(settings.workers)?,
             pending: VecDeque::new(),
             accepted: BTreeSet::new(),
+            structural: BTreeSet::new(),
             flights: Vec::new(),
         })
     }
@@ -129,14 +159,20 @@ impl SceneEdits {
 
             let flight = self.flights.remove(index);
 
-            for command in &flight.commands {
-                self.accepted.remove(command);
-            }
+            let mut structural = flight.structural;
 
             let result = result.and_then(|mut patch| {
+                if matches!(patch, Patch::StructuralRequired) {
+                    structural = true;
+
+                    return Err(SceneError::StaleEdit);
+                }
+
                 let result = patch.publish(scene);
 
-                if let Ok(replacements) = &result {
+                if flight.structural
+                    && let Ok(replacements) = &result
+                {
                     self.retarget(scene, flight.domain, replacements);
                 }
 
@@ -145,21 +181,61 @@ impl SceneEdits {
                 result.map(|_| ())
             });
 
+            if matches!(result, Err(SceneError::StaleEdit)) {
+                for command in flight.commands {
+                    if structural {
+                        self.structural
+                            .insert(command.structural_key(scene.settings.render_leaf_edge));
+                    }
+
+                    self.pending.push_back(command);
+                }
+
+                continue;
+            }
+
+            for command in &flight.commands {
+                self.accepted.remove(command);
+
+                self.structural
+                    .remove(&command.structural_key(scene.settings.render_leaf_edge));
+            }
+
             outcomes.push(EditOutcome {
                 targets: flight.commands.into_iter().map(Target::from).collect(),
                 result,
             });
         }
 
-        while self.flights.len() < self.settings.workers {
-            let Some(domain) = self
+        while self.flights.len() < self.settings.workers * 2 {
+            let Some(first) = self
                 .pending
                 .iter()
-                .map(|command| command.domain)
-                .find(|domain| !self.flights.iter().any(|flight| flight.domain == *domain))
+                .find(|command| {
+                    let edge = scene.settings.render_leaf_edge;
+
+                    let structural = self.requires_structural(**command, edge);
+
+                    !self.flights.iter().any(|flight| {
+                        flight.domain == command.domain
+                            && ((0..3).all(|axis| {
+                                (flight.chunk[axis] - command.chunk(edge)[axis]).abs() <= 1
+                            }) || command.domain != Domain::Static
+                                && (structural || flight.structural))
+                    })
+                })
+                .copied()
             else {
                 break;
             };
+
+            let domain = first.domain;
+
+            let structural = self.requires_structural(first, scene.settings.render_leaf_edge)
+                || matches!(domain, Domain::Body(id) if scene.bodies.binary_search_by_key(&id, |body| body.id)
+                    .is_ok_and(|index| scene.bodies[index].geometry.leaves.len() == 1));
+
+            let chunk = first.chunk(scene.settings.render_leaf_edge);
 
             let Some(input) = Input::capture(scene, domain) else {
                 let mut targets = Vec::new();
@@ -167,6 +243,9 @@ impl SceneEdits {
                 self.pending.retain(|command| {
                     if command.domain == domain {
                         self.accepted.remove(command);
+
+                        self.structural
+                            .remove(&command.structural_key(scene.settings.render_leaf_edge));
 
                         targets.push(Target::from(*command));
 
@@ -192,7 +271,11 @@ impl SceneEdits {
             let commands: Vec<_> = self
                 .pending
                 .iter()
-                .filter(|command| command.domain == domain)
+                .filter(|command| {
+                    command.domain == domain
+                        && (structural && domain != Domain::Static
+                            || command.chunk(scene.settings.render_leaf_edge) == chunk)
+                })
                 .take(limit)
                 .copied()
                 .collect();
@@ -202,7 +285,7 @@ impl SceneEdits {
                 .map(|command| VoxelCoord::from_array(command.voxel))
                 .collect();
 
-            let Some(receiver) = self.workers.submit(input, voxels)? else {
+            let Some(receiver) = self.workers.submit(input, voxels, structural)? else {
                 break;
             };
 
@@ -212,6 +295,8 @@ impl SceneEdits {
 
             self.flights.push(Flight {
                 domain,
+                structural,
+                chunk,
                 commands,
                 receiver,
             });
@@ -220,7 +305,40 @@ impl SceneEdits {
         Ok(outcomes)
     }
 
+    fn requires_structural(&self, command: Command, edge: i32) -> bool {
+        self.structural.contains(&command.structural_key(edge))
+    }
+
     fn retarget(&mut self, scene: &Scene, domain: Domain, replacements: &[Body]) {
+        let mut index = 0;
+
+        while index < self.flights.len() {
+            let flight = &self.flights[index];
+
+            let transferred = domain == Domain::Static
+                && flight.domain == domain
+                && flight.commands.iter().any(|command| {
+                    let voxel = VoxelCoord::from_array(command.voxel);
+
+                    replacements.iter().any(|body| {
+                        !body
+                            .geometry
+                            .voxel(voxel - (body.translation / VOXEL_SIZE).round().as_ivec3())
+                            .is_empty()
+                    })
+                });
+
+            if transferred {
+                let flight = self.flights.remove(index);
+
+                drop(flight.receiver);
+
+                self.pending.extend(flight.commands);
+            } else {
+                index += 1;
+            }
+        }
+
         let mut remapped = Vec::new();
 
         self.pending.retain(|command| {
@@ -229,6 +347,9 @@ impl SceneEdits {
             }
 
             self.accepted.remove(command);
+
+            self.structural
+                .remove(&command.structural_key(scene.settings.render_leaf_edge));
 
             let voxel = VoxelCoord::from_array(command.voxel);
 

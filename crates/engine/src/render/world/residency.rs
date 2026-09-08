@@ -99,6 +99,35 @@ impl Geometry {
             }
         }
 
+        if sources.len() == self.meshes.len()
+            && sources
+                .iter()
+                .zip(&self.meshes)
+                .all(|(source, resident)| source.id == resident.id)
+        {
+            for (index, (source, resident)) in sources.iter().zip(&mut self.meshes).enumerate() {
+                if !Arc::ptr_eq(&source.mesh, &resident.source) {
+                    resident.buffer =
+                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("immutable voxel leaf"),
+                            contents: bytemuck::cast_slice(&source.mesh.vertices),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        });
+                    resident.source = source.mesh.clone();
+                    self.bounds[index] = Aabb {
+                        min: source.mesh.min + source.world_origin,
+                        max: source.mesh.max + source.world_origin,
+                    };
+                }
+            }
+
+            if !self.update_transforms(queue, &sources) {
+                self.hierarchy.refit(&self.bounds);
+            }
+
+            return Ok(true);
+        }
+
         let mut previous: BTreeMap<_, _> = std::mem::take(&mut self.meshes)
             .into_iter()
             .map(|resident| (Arc::as_ptr(&resident.source) as usize, resident))

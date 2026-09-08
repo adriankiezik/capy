@@ -1,8 +1,148 @@
 use crate::{
+    Aabb,
     scene::{Body, Result, SceneError, SimulationSettings, body::BodyGeometry},
     world::{VOXEL_SIZE, WorldRead},
 };
 use glam::{IVec3, Vec3};
+
+#[derive(Debug, Default)]
+pub(super) struct Contacts {
+    nodes: Vec<ContactNode>,
+    root: Option<usize>,
+}
+
+#[derive(Debug)]
+struct ContactNode {
+    bounds: Aabb,
+    entry: ContactEntry,
+}
+
+#[derive(Debug)]
+enum ContactEntry {
+    Body(usize),
+    Branch(usize, usize),
+}
+
+impl Contacts {
+    pub(super) fn new(bodies: &[Body]) -> Self {
+        let mut contacts = Self::default();
+
+        let mut bounds: Vec<_> = bodies
+            .iter()
+            .enumerate()
+            .map(|(index, body)| {
+                (
+                    index,
+                    Aabb {
+                        min: body.translation + body.geometry.min,
+                        max: body.translation + body.geometry.max,
+                    },
+                )
+            })
+            .collect();
+
+        if !bounds.is_empty() {
+            contacts.root = Some(contacts.build(&mut bounds));
+        }
+
+        contacts
+    }
+
+    fn build(&mut self, bodies: &mut [(usize, Aabb)]) -> usize {
+        let bounds = bodies.iter().fold(
+            Aabb {
+                min: Vec3::splat(f32::INFINITY),
+                max: Vec3::splat(f32::NEG_INFINITY),
+            },
+            |bounds, (_, body)| Aabb {
+                min: bounds.min.min(body.min),
+                max: bounds.max.max(body.max),
+            },
+        );
+
+        let entry = if bodies.len() == 1 {
+            ContactEntry::Body(bodies[0].0)
+        } else {
+            let size = bounds.max - bounds.min;
+
+            let axis = if size.x >= size.y && size.x >= size.z {
+                0
+            } else if size.y >= size.z {
+                1
+            } else {
+                2
+            };
+
+            let middle = bodies.len() / 2;
+
+            bodies.select_nth_unstable_by(middle, |a, b| {
+                (a.1.min[axis] + a.1.max[axis]).total_cmp(&(b.1.min[axis] + b.1.max[axis]))
+            });
+
+            let (left, right) = bodies.split_at_mut(middle);
+
+            ContactEntry::Branch(self.build(left), self.build(right))
+        };
+
+        let index = self.nodes.len();
+
+        self.nodes.push(ContactNode { bounds, entry });
+
+        index
+    }
+
+    pub(super) fn wake(&self, bodies: &mut [Body], min: Vec3, max: Vec3, contact_slop: f32) {
+        let Some(root) = self.root else { return };
+
+        let slop = Vec3::splat(contact_slop + f32::EPSILON);
+
+        let mut visited = std::collections::HashSet::new();
+
+        let mut pending = vec![Aabb { min, max }];
+
+        let mut nodes = Vec::new();
+
+        while let Some(bounds) = pending.pop() {
+            let min = bounds.min - slop;
+
+            let max = bounds.max + slop;
+
+            nodes.push(root);
+
+            while let Some(index) = nodes.pop() {
+                let node = &self.nodes[index];
+
+                if !node.bounds.min.cmple(max).all() || !node.bounds.max.cmpge(min).all() {
+                    continue;
+                }
+
+                match node.entry {
+                    ContactEntry::Branch(left, right) => nodes.extend([left, right]),
+                    ContactEntry::Body(index) => {
+                        if visited.contains(&index) {
+                            continue;
+                        }
+
+                        let body = &mut bodies[index];
+
+                        let bounds = Aabb {
+                            min: body.translation + body.geometry.min,
+                            max: body.translation + body.geometry.max,
+                        };
+
+                        if bounds.min.cmple(max).all() && bounds.max.cmpge(min).all() {
+                            visited.insert(index);
+
+                            body.sleeping = false;
+
+                            pending.push(bounds);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 pub(crate) fn step(
     world: &WorldRead,

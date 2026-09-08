@@ -1,10 +1,12 @@
 use super::{
     graph::{DIRECTIONS, Graph, Group, Node, Relation},
-    partition::{Metrics, Partition},
+    partition::{EMPTY, Metrics, Partition},
 };
 use crate::{
-    scene::{Result, SceneError},
-    world::{LEAF_EDGE, LEAF_VOXELS, Leaf, LeafCoord, Voxel, VoxelCoord, WorldRead, address},
+    scene::{Result, SceneError, work::Work},
+    world::{
+        LEAF_EDGE, LEAF_VOXELS, Leaf, LeafCoord, LeafSources, Voxel, VoxelCoord, WorldRead, address,
+    },
 };
 use glam::IVec3;
 use std::{
@@ -20,7 +22,7 @@ struct CachedPartition {
 
 #[derive(Clone, Debug, Default)]
 pub(in crate::scene) struct Connectivity {
-    partitions: Arc<HashMap<usize, CachedPartition>>,
+    partitions: im::HashMap<usize, CachedPartition>,
     edits: usize,
 }
 
@@ -40,7 +42,7 @@ impl Connectivity {
 
         let partition = Arc::new(Partition::new(world, leaf)?);
 
-        Arc::make_mut(&mut self.partitions).insert(
+        self.partitions.insert(
             key,
             CachedPartition {
                 source: Arc::downgrade(leaf),
@@ -59,23 +61,30 @@ impl Connectivity {
         Ok(self.partition(world, leaf)?.metrics.clone())
     }
 
-    fn maintain(&mut self) {
+    async fn maintain(&mut self) {
         self.edits += 1;
 
         if self.edits == 64 {
-            Arc::make_mut(&mut self.partitions)
-                .retain(|_, cached| cached.source.strong_count() != 0);
+            let mut work = Work::default();
+
+            for (&key, cached) in &self.partitions.clone() {
+                work.checkpoint().await;
+
+                if cached.source.strong_count() == 0 {
+                    self.partitions.remove(&key);
+                }
+            }
 
             self.edits = 0;
         }
     }
 
-    pub(in crate::scene) fn unsupported(
+    pub(in crate::scene) async fn unsupported(
         &mut self,
         world: &WorldRead,
         changed: &[VoxelCoord],
     ) -> Result<Vec<Group>> {
-        self.maintain();
+        self.maintain().await;
 
         let mut graph = Graph::new(self, world, |key| world.leaf(key));
 
@@ -126,7 +135,7 @@ impl Connectivity {
                     continue;
                 }
 
-                graph.charge(node)?;
+                graph.charge(node).await?;
 
                 let partition = graph.partition(node.leaf)?.ok_or(SceneError::Invalid)?;
 
@@ -172,16 +181,16 @@ impl Connectivity {
             }
         }
 
-        graph.groups(unsupported)
+        graph.groups(unsupported).await
     }
 
-    pub(in crate::scene) fn split<'a>(
+    pub(in crate::scene) async fn split<'a>(
         &mut self,
         world: &WorldRead,
         removed: &[VoxelCoord],
         source: impl Fn(LeafCoord) -> Option<&'a Arc<Leaf>>,
     ) -> Result<Option<Vec<Group>>> {
-        self.maintain();
+        self.maintain().await;
 
         let mut graph = Graph::new(self, world, source);
 
@@ -213,7 +222,7 @@ impl Connectivity {
             let mut pending = std::collections::VecDeque::from([seed]);
 
             while let Some(node) = pending.pop_front() {
-                graph.charge(node)?;
+                graph.charge(node).await?;
 
                 remaining.remove(&node);
 
@@ -228,21 +237,125 @@ impl Connectivity {
                 }
             }
 
-            groups.push(graph.group(visited)?);
+            groups.push(graph.group(visited).await?);
         }
 
         Ok(Some(groups))
     }
 
-    pub(in crate::scene) fn extract<'a>(
+    pub(in crate::scene) async fn preserves<'a>(
+        &mut self,
+        world: &WorldRead,
+        changes: &BTreeMap<LeafCoord, Option<Arc<Leaf>>>,
+        source: impl Fn(LeafCoord) -> Option<&'a Arc<Leaf>>,
+    ) -> Result<bool> {
+        self.maintain().await;
+
+        let mut mapping = BTreeMap::new();
+
+        let mut work = Work::default();
+
+        for (&key, replacement) in changes {
+            work.checkpoint().await;
+
+            let (Some(before), Some(after)) = (source(key), replacement.as_ref()) else {
+                return Ok(false);
+            };
+
+            let before = self.partition(world, before)?;
+
+            let after = self.partition(world, after)?;
+
+            if before.components.len() != after.components.len() {
+                return Ok(false);
+            }
+
+            let mut labels = BTreeMap::new();
+
+            for i in 0..LEAF_VOXELS {
+                if after.labels[i] != EMPTY {
+                    let old = before.labels[i];
+
+                    let new = after.labels[i];
+
+                    if old == EMPTY || labels.insert(new, old).is_some_and(|label| label != old) {
+                        return Ok(false);
+                    }
+                }
+            }
+
+            if labels.values().copied().collect::<BTreeSet<_>>().len() != before.components.len() {
+                return Ok(false);
+            }
+
+            for (new, old) in labels {
+                let anchored = |partition: &Partition, label: u16| {
+                    key[1] * LEAF_EDGE + partition.components[label as usize].min_y
+                        == world.bounds().min.y
+                };
+
+                if anchored(&before, old) != anchored(&after, new) {
+                    return Ok(false);
+                }
+
+                mapping.insert(
+                    Node {
+                        leaf: key,
+                        component: new,
+                    },
+                    Node {
+                        leaf: key,
+                        component: old,
+                    },
+                );
+            }
+        }
+
+        for (&after, &before) in &mapping {
+            work.checkpoint().await;
+
+            for relation in [Relation::Bond, Relation::Support, Relation::Dependents] {
+                let old = Graph::new(self, world, &source).neighbors(before, relation)?;
+
+                let mut new = Graph::new(self, world, |key| {
+                    changes
+                        .get(&key)
+                        .map_or_else(|| source(key), Option::as_ref)
+                })
+                .neighbors(after, relation)?;
+
+                for node in &mut new {
+                    if let Some(original) = mapping.get(node) {
+                        *node = *original;
+                    }
+                }
+
+                new.sort_unstable();
+
+                new.dedup();
+
+                if old != new {
+                    return Ok(false);
+                }
+            }
+        }
+
+        Ok(true)
+    }
+
+    pub(in crate::scene) async fn extract<'a>(
         &mut self,
         world: &WorldRead,
         group: &Group,
         source: impl Fn(LeafCoord) -> Option<&'a Arc<Leaf>>,
-    ) -> Result<BTreeMap<LeafCoord, Arc<Leaf>>> {
-        let mut leaves = BTreeMap::new();
+    ) -> Result<LeafSources> {
+        let mut leaves = LeafSources::new();
+
+        let mut work = Work::default();
 
         for (&key, &mask) in &group.leaves {
+            work.checkpoint().await;
+
             let leaf = source(key).ok_or(SceneError::Invalid)?;
 
             let partition = self.partition(world, leaf)?;

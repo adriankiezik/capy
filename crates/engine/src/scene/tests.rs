@@ -222,7 +222,7 @@ fn touching_different_structures_detach_separately_and_stack_without_penetration
 fn assert_unchanged(
     scene: &Scene,
     world: &world::WorldRead,
-    meshes: &BTreeMap<[i32; 3], Arc<geometry::MeshSource>>,
+    meshes: &geometry::MeshSources,
     bodies: &[Body],
 ) {
     assert!(Arc::ptr_eq(&scene.world.root, &world.root));

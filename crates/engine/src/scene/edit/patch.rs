@@ -1,16 +1,23 @@
-use super::Domain;
+use super::{Domain, local::LocalPatch};
 use crate::{
     scene::{
         Body, Result, Scene, SceneError,
         body::BodyGeometry,
         connectivity::Connectivity,
+        dynamics,
         geometry::{self, MeshSource, MeshSources},
         support,
+        work::Work,
     },
-    world::{LEAF_VOXELS, Transaction, VoxelCoord, WorldRead, coordinate, prepare},
+    world::{
+        LEAF_VOXELS, Leaf, LeafCoord, Transaction, VoxelCoord, WorldRead, coordinate, prepare,
+    },
 };
-use glam::IVec3;
-use std::{collections::BTreeSet, sync::Arc};
+use glam::{IVec3, Vec3};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 #[derive(Clone, Copy)]
 pub(in crate::scene) struct Limits {
@@ -35,6 +42,16 @@ pub(in crate::scene) struct StaticPatch {
     meshes: Arc<MeshSources>,
     additions: Vec<Body>,
     dirty: BTreeSet<[i32; 3]>,
+    dependencies: BTreeSet<LeafCoord>,
+    changes: BTreeMap<LeafCoord, Option<Arc<Leaf>>>,
+}
+
+struct StaticDraft {
+    base: WorldRead,
+    world: WorldRead,
+    meshes: Arc<MeshSources>,
+    additions: Vec<Body>,
+    dirty: BTreeSet<[i32; 3]>,
 }
 
 impl StaticPatch {
@@ -45,6 +62,27 @@ impl StaticPatch {
         transaction: Transaction,
         limits: Limits,
     ) -> Result<Self> {
+        pollster::block_on(async {
+            StaticDraft::prepare(base, sources, cache, transaction, limits)
+                .await?
+                .finish(None)
+                .await
+        })
+    }
+}
+
+impl StaticDraft {
+    async fn prepare(
+        base: &WorldRead,
+        sources: &Arc<MeshSources>,
+        cache: &mut Connectivity,
+        transaction: Transaction,
+        limits: Limits,
+    ) -> Result<Self> {
+        let tracked = base.tracked();
+
+        let base = &tracked;
+
         let (world, changed) = prepare(base, transaction)?;
 
         if changed.is_empty() {
@@ -58,12 +96,13 @@ impl StaticPatch {
         }
 
         let (world, mut additions, removed) =
-            support::detach(cache, &world, &changed, limits.edge, limits.bodies)?;
+            support::detach(cache, &world, &changed, limits.edge, limits.bodies).await?;
 
         for body in &mut additions {
             Arc::get_mut(&mut body.geometry)
                 .ok_or(SceneError::Invalid)?
-                .inherit_meshes(base, sources, body.translation, limits.edge);
+                .inherit_meshes(base, sources, body.translation, limits.edge)
+                .await;
         }
 
         let mut dirty = BTreeSet::new();
@@ -100,18 +139,24 @@ impl StaticPatch {
         })
     }
 
-    fn warm(&self, limits: Limits) -> Result<()> {
+    async fn warm(&self, limits: Limits) -> Result<()> {
         let mut available = limits.vertices;
 
+        let mut work = Work::default();
+
         for key in &self.dirty {
+            work.checkpoint().await;
+
             if let Some(source) = self.meshes.get(key) {
-                let mesh = source.resolve(
-                    *key,
-                    limits.edge,
-                    |key| self.world.leaf(key).map(Arc::as_ref),
-                    &self.world,
-                    available,
-                )?;
+                let mesh = source
+                    .resolve_async(
+                        *key,
+                        limits.edge,
+                        |key| self.world.leaf(key).map(Arc::as_ref),
+                        &self.world,
+                        available,
+                    )
+                    .await?;
 
                 available -= mesh.vertices.len();
             }
@@ -119,14 +164,54 @@ impl StaticPatch {
 
         for body in &self.additions {
             body.geometry
-                .prepare_meshes(&self.world, limits.edge, &mut available)?;
+                .prepare_meshes(&self.world, limits.edge, &mut available)
+                .await?;
         }
 
         Ok(())
     }
 
+    async fn finish(mut self, warm: Option<Limits>) -> Result<StaticPatch> {
+        if let Some(limits) = warm {
+            self.warm(limits).await?;
+        }
+
+        let dependencies = self.base.finish_reads();
+
+        let world = self.world.untracked();
+
+        let mut changes = BTreeMap::new();
+
+        let mut work = Work::default();
+
+        for &key in &dependencies {
+            work.checkpoint().await;
+
+            if !same_leaf(self.base.leaf(key), world.leaf(key)) {
+                changes.insert(key, world.leaf(key).cloned());
+            }
+        }
+
+        Ok(StaticPatch {
+            base: self.base,
+            world,
+            meshes: self.meshes,
+            additions: self.additions,
+            dirty: self.dirty,
+            dependencies,
+            changes,
+        })
+    }
+}
+
+impl StaticPatch {
     pub(in crate::scene) fn publish(&mut self, scene: &mut Scene) -> Result<Vec<Body>> {
-        if !Arc::ptr_eq(&self.base.root, &scene.world.root) {
+        if !Arc::ptr_eq(&self.base.root, &scene.world.root)
+            && self
+                .dependencies
+                .iter()
+                .any(|&key| !same_leaf(self.base.leaf(key), scene.world.leaf(key)))
+        {
             return Err(SceneError::StaleEdit);
         }
 
@@ -140,15 +225,55 @@ impl StaticPatch {
             body.id = scene.next_body + offset as u64;
         }
 
-        std::mem::swap(&mut scene.world, &mut self.world);
+        if Arc::ptr_eq(&self.base.root, &scene.world.root) {
+            std::mem::swap(&mut scene.world, &mut self.world);
 
-        std::mem::swap(&mut scene.meshes, &mut self.meshes);
+            std::mem::swap(&mut scene.meshes, &mut self.meshes);
+        } else {
+            let world = scene.world.replace_sources(self.changes.clone())?;
+
+            self.world = std::mem::replace(&mut scene.world, world);
+
+            let mut meshes = (*scene.meshes).clone();
+
+            for key in &self.dirty {
+                if let Some(source) = self.meshes.get(key) {
+                    meshes.insert(*key, source.clone());
+                } else {
+                    meshes.remove(key);
+                }
+            }
+
+            self.meshes = std::mem::replace(&mut scene.meshes, Arc::new(meshes));
+        }
 
         scene.bodies.extend(self.additions.iter().cloned());
 
         scene.next_body = next;
 
-        wake(scene);
+        if !self.additions.is_empty() {
+            scene.contacts = Arc::default();
+        }
+
+        let min = self
+            .changes
+            .keys()
+            .fold(IVec3::splat(i32::MAX), |min, &key| {
+                min.min(coordinate(key, 0))
+            });
+
+        let max = self
+            .changes
+            .keys()
+            .fold(IVec3::splat(i32::MIN), |max, &key| {
+                max.max(coordinate(key, LEAF_VOXELS - 1) + IVec3::ONE)
+            });
+
+        wake_bounds(
+            scene,
+            min.as_vec3() * crate::world::VOXEL_SIZE,
+            max.as_vec3() * crate::world::VOXEL_SIZE,
+        );
 
         Ok(self.additions.clone())
     }
@@ -183,18 +308,18 @@ impl Input {
             Domain::Body(id) => Self::Dynamic {
                 world,
                 id,
-                geometry: scene
+                geometry: scene.bodies[scene
                     .bodies
-                    .iter()
-                    .find(|body| body.id == id)?
-                    .geometry
-                    .clone(),
+                    .binary_search_by_key(&id, |body| body.id)
+                    .ok()?]
+                .geometry
+                .clone(),
                 limits,
             },
         })
     }
 
-    pub(super) fn prepare(
+    pub(super) async fn prepare(
         self,
         voxels: Vec<VoxelCoord>,
         cache: &mut Connectivity,
@@ -211,9 +336,10 @@ impl Input {
                     transaction.remove(voxel)?;
                 }
 
-                let patch = StaticPatch::prepare(&world, &meshes, cache, transaction, limits)?;
-
-                patch.warm(limits)?;
+                let patch = StaticDraft::prepare(&world, &meshes, cache, transaction, limits)
+                    .await?
+                    .finish(Some(limits))
+                    .await?;
 
                 Ok(Patch::Static(patch))
             }
@@ -236,13 +362,16 @@ impl Input {
                     });
                 }
 
-                let replacements =
-                    geometry.remove(cache, &world, &voxels, limits.edge, limits.bodies)?;
+                let replacements = geometry
+                    .remove_async(cache, &world, &voxels, limits.edge, limits.bodies)
+                    .await?;
 
                 let mut available = limits.vertices;
 
                 for geometry in &replacements {
-                    geometry.prepare_meshes(&world, limits.edge, &mut available)?;
+                    geometry
+                        .prepare_meshes(&world, limits.edge, &mut available)
+                        .await?;
                 }
 
                 Ok(Patch::Dynamic {
@@ -256,6 +385,9 @@ impl Input {
 }
 
 pub(in crate::scene) enum Patch {
+    Local(Box<LocalPatch>),
+    StructuralRequired,
+    Unchanged,
     Static(StaticPatch),
     Dynamic {
         id: u64,
@@ -267,6 +399,9 @@ pub(in crate::scene) enum Patch {
 impl Patch {
     pub(in crate::scene) fn publish(&mut self, scene: &mut Scene) -> Result<Vec<Body>> {
         match self {
+            Self::Local(patch) => patch.publish(scene),
+            Self::StructuralRequired => Err(SceneError::Invalid),
+            Self::Unchanged => Ok(Vec::new()),
             Self::Static(patch) => patch.publish(scene),
             Self::Dynamic {
                 id,
@@ -275,9 +410,8 @@ impl Patch {
             } => {
                 let index = scene
                     .bodies
-                    .iter()
-                    .position(|body| body.id == *id)
-                    .ok_or(SceneError::StaleEdit)?;
+                    .binary_search_by_key(id, |body| body.id)
+                    .map_err(|_| SceneError::StaleEdit)?;
 
                 let current = &scene.bodies[index];
 
@@ -295,6 +429,10 @@ impl Patch {
                     replacements.len(),
                     replacements.len().saturating_sub(1),
                 )?;
+
+                let min = current.translation + current.geometry.min;
+
+                let max = current.translation + current.geometry.max;
 
                 let bodies: Vec<_> = replacements
                     .iter()
@@ -317,12 +455,21 @@ impl Patch {
                 scene.bodies.sort_by_key(|body| body.id);
 
                 scene.next_body = next;
+                scene.contacts = Arc::default();
 
-                wake(scene);
+                wake_bounds(scene, min, max);
 
                 Ok(bodies)
             }
         }
+    }
+}
+
+pub(super) fn same_leaf(a: Option<&Arc<Leaf>>, b: Option<&Arc<Leaf>>) -> bool {
+    match (a, b) {
+        (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+        (None, None) => true,
+        _ => false,
     }
 }
 
@@ -342,13 +489,25 @@ fn reserve(scene: &Scene, removed: usize, added: usize, identities: usize) -> Re
         .ok_or(SceneError::Limit("body identities"))
 }
 
-fn wake(scene: &mut Scene) {
-    for body in &mut scene.bodies {
-        body.sleeping = false;
-    }
+pub(super) fn wake_bounds(scene: &mut Scene, min: Vec3, max: Vec3) {
+    let contacts = scene
+        .contacts
+        .get_or_init(|| dynamics::Contacts::new(&scene.bodies));
+
+    contacts.wake(
+        &mut scene.bodies,
+        min,
+        max,
+        scene.settings.simulation.contact_slop,
+    );
 }
 
-fn dirty_keys(dirty: &mut BTreeSet<[i32; 3]>, min: VoxelCoord, max: VoxelCoord, edge: i32) {
+pub(super) fn dirty_keys(
+    dirty: &mut BTreeSet<[i32; 3]>,
+    min: VoxelCoord,
+    max: VoxelCoord,
+    edge: i32,
+) {
     let min = IVec3::from_array(geometry::key(min - IVec3::ONE, edge));
 
     let max = IVec3::from_array(geometry::key(max + IVec3::ONE, edge));

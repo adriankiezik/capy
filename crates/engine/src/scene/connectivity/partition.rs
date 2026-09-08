@@ -44,7 +44,7 @@ pub(super) struct Component {
 pub(in crate::scene) struct Metrics {
     pub(in crate::scene) min: IVec3,
     pub(in crate::scene) max: IVec3,
-    pub(in crate::scene) mass: f32,
+    pub(in crate::scene) mass: f64,
     pub(in crate::scene) bottom: Vec<u16>,
 }
 
@@ -79,11 +79,12 @@ impl Partition {
 
                 metrics.min = metrics.min.min(p);
                 metrics.max = metrics.max.max(p + IVec3::ONE);
-                metrics.mass += world
-                    .material(voxel.material)
-                    .ok_or(SceneError::Invalid)?
-                    .density
-                    * VOXEL_SIZE.powi(3);
+                metrics.mass += f64::from(
+                    world
+                        .material(voxel.material)
+                        .ok_or(SceneError::Invalid)?
+                        .density,
+                ) * f64::from(VOXEL_SIZE).powi(3);
 
                 if index / 8 % 8 == 0 || source.voxel(index - 8).is_empty() {
                     metrics.bottom.push(index as u16);

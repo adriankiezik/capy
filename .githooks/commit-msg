@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+
+if ! LC_ALL=C awk '
+    NR == 1 && $0 !~ /^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^()[:space:]]+\))?!?: [^[:space:]].*$/ { exit 1 }
+    NR == 2 && $0 !~ /^[[:space:]]*$/ { exit 1 }
+    END { if (NR == 0) exit 1 }
+' "$1"; then
+    printf '%s\n' \
+        'Commit rejected: use a Conventional Commit message.' \
+        'Format: type(scope)!: description (scope and ! are optional).' \
+        'Types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert.' \
+        'Separate an optional body or footer from the subject with a blank line.' \
+        'Example: perf(scene): optimize localized edit scheduling' >&2
+    exit 1
+fi

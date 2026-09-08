@@ -1,18 +1,18 @@
 use crate::{
-    scene::{Body, Result, SceneError, body::BodyGeometry, connectivity::Connectivity},
+    scene::{Body, Result, SceneError, body::BodyGeometry, connectivity::Connectivity, work::Work},
     world::{LEAF_EDGE, LEAF_VOXELS, Leaf, LeafCoord, VOXEL_SIZE, Voxel, VoxelCoord, WorldRead},
 };
 use glam::IVec3;
 use std::{collections::BTreeMap, sync::Arc};
 
-pub(super) fn detach(
+pub(super) async fn detach(
     cache: &mut Connectivity,
     world: &WorldRead,
     changed: &[VoxelCoord],
     edge: i32,
     max_bodies: usize,
 ) -> Result<(WorldRead, Vec<Body>, Vec<LeafCoord>)> {
-    let groups = cache.unsupported(world, changed)?;
+    let groups = cache.unsupported(world, changed).await?;
 
     if groups.len() > max_bodies {
         return Err(SceneError::Limit("dynamic bodies"));
@@ -22,8 +22,10 @@ pub(super) fn detach(
 
     let mut bodies = Vec::new();
 
+    let mut work = Work::default();
+
     for group in groups {
-        let leaves = cache.extract(world, &group, |key| world.leaf(key))?;
+        let leaves = cache.extract(world, &group, |key| world.leaf(key)).await?;
 
         let origin = leaves.keys().fold(IVec3::splat(i32::MAX), |min, key| {
             min.min(IVec3::from_array(*key))
@@ -36,6 +38,8 @@ pub(super) fn detach(
         );
 
         for (&key, selected) in &leaves {
+            work.checkpoint().await;
+
             let remaining = removal
                 .entry(key)
                 .or_insert_with(|| world.leaf(key).cloned());
@@ -64,7 +68,7 @@ pub(super) fn detach(
             .map(|(key, leaf)| ((IVec3::from_array(key) - origin).to_array(), leaf))
             .collect();
 
-        let geometry = BodyGeometry::new(cache, world, leaves, edge, None)?;
+        let geometry = BodyGeometry::new(cache, world, leaves, edge, None).await?;
 
         bodies.push(Body {
             id: 0,

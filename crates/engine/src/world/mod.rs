@@ -10,7 +10,9 @@ mod types;
 pub use config::WorldSettings;
 pub use error::{Result, WorldError};
 pub use storage::WorldRead;
-pub(crate) use storage::{LEAF_EDGE, LEAF_VOXELS, Leaf, LeafCoord, address, coordinate};
+pub(crate) use storage::{
+    LEAF_EDGE, LEAF_VOXELS, Leaf, LeafCoord, LeafSources, address, coordinate,
+};
 pub use transaction::Transaction;
 pub(crate) use transaction::prepare;
 pub use types::{

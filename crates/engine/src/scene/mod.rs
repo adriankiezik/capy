@@ -13,6 +13,7 @@ mod query;
 mod render;
 mod state;
 mod support;
+mod work;
 
 pub(crate) use body::Body;
 pub use config::{EditSettings, SceneSettings, ShadowSettings, SimulationSettings, VisualSettings};

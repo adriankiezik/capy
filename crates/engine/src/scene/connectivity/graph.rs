@@ -3,7 +3,7 @@ use super::{
     partition::{EMPTY, Mask, Partition},
 };
 use crate::{
-    scene::{Result, SceneError},
+    scene::{Result, SceneError, work::Work},
     world::{Leaf, LeafCoord, VoxelCoord, WorldRead, address},
 };
 use glam::IVec3;
@@ -45,6 +45,7 @@ pub(super) struct Graph<'a, F> {
     source: F,
     charged: HashSet<Node>,
     work: usize,
+    budget: Work,
 }
 
 impl<'a, 'b, F: Fn(LeafCoord) -> Option<&'b Arc<Leaf>>> Graph<'a, F> {
@@ -55,6 +56,7 @@ impl<'a, 'b, F: Fn(LeafCoord) -> Option<&'b Arc<Leaf>>> Graph<'a, F> {
             source,
             charged: HashSet::new(),
             work: 0,
+            budget: Work::default(),
         }
     }
 
@@ -74,7 +76,9 @@ impl<'a, 'b, F: Fn(LeafCoord) -> Option<&'b Arc<Leaf>>> Graph<'a, F> {
         }))
     }
 
-    pub(super) fn charge(&mut self, node: Node) -> Result<()> {
+    pub(super) async fn charge(&mut self, node: Node) -> Result<()> {
+        self.budget.checkpoint().await;
+
         if self.charged.insert(node) {
             let partition = self.partition(node.leaf)?.ok_or(SceneError::Invalid)?;
 
@@ -169,10 +173,12 @@ impl<'a, 'b, F: Fn(LeafCoord) -> Option<&'b Arc<Leaf>>> Graph<'a, F> {
         Ok(output)
     }
 
-    pub(super) fn group(&mut self, nodes: impl IntoIterator<Item = Node>) -> Result<Group> {
+    pub(super) async fn group(&mut self, nodes: impl IntoIterator<Item = Node>) -> Result<Group> {
         let mut group = Group::default();
 
         for node in nodes {
+            self.budget.checkpoint().await;
+
             let partition = self.partition(node.leaf)?.ok_or(SceneError::Invalid)?;
 
             group
@@ -185,7 +191,7 @@ impl<'a, 'b, F: Fn(LeafCoord) -> Option<&'b Arc<Leaf>>> Graph<'a, F> {
         Ok(group)
     }
 
-    pub(super) fn groups(&mut self, mut remaining: BTreeSet<Node>) -> Result<Vec<Group>> {
+    pub(super) async fn groups(&mut self, mut remaining: BTreeSet<Node>) -> Result<Vec<Group>> {
         let mut groups = Vec::new();
 
         while let Some(seed) = remaining.pop_first() {
@@ -194,6 +200,8 @@ impl<'a, 'b, F: Fn(LeafCoord) -> Option<&'b Arc<Leaf>>> Graph<'a, F> {
             let mut nodes = Vec::new();
 
             while let Some(node) = pending.pop() {
+                self.budget.checkpoint().await;
+
                 nodes.push(node);
 
                 for neighbor in self.neighbors(node, Relation::Bond)? {
@@ -203,7 +211,7 @@ impl<'a, 'b, F: Fn(LeafCoord) -> Option<&'b Arc<Leaf>>> Graph<'a, F> {
                 }
             }
 
-            groups.push(self.group(nodes)?);
+            groups.push(self.group(nodes).await?);
         }
 
         Ok(groups)

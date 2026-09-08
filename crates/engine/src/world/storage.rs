@@ -4,7 +4,7 @@ use crate::world::{
 use glam::IVec3;
 use std::{
     collections::{BTreeMap, BTreeSet},
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 pub(crate) const LEAF_EDGE: i32 = 8;
@@ -15,7 +15,9 @@ pub(crate) type LeafCoord = [i32; 3];
 
 type RegionCoord = [i32; 2];
 
-type Region = BTreeMap<LeafCoord, Arc<Leaf>>;
+pub(crate) type LeafSources = im::OrdMap<LeafCoord, Arc<Leaf>>;
+
+type Region = LeafSources;
 
 #[derive(Debug)]
 pub(crate) enum Leaf {
@@ -117,16 +119,18 @@ fn region(key: LeafCoord) -> RegionCoord {
 #[derive(Clone, Debug)]
 pub struct WorldRead {
     pub(crate) root: Arc<Root>,
+    reads: Option<Arc<Mutex<BTreeSet<LeafCoord>>>>,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct Root {
     pub(crate) epoch: u64,
-    pub(crate) regions: BTreeMap<RegionCoord, Arc<Region>>,
+    pub(crate) regions: im::OrdMap<RegionCoord, Arc<Region>>,
+    leaf_count: usize,
     pub(crate) settings: Arc<WorldSettings>,
     pub(crate) materials: Arc<BTreeMap<MaterialId, Material>>,
     pub(crate) owners: Arc<BTreeMap<OwnerId, Owner>>,
-    owner_leaves: BTreeMap<OwnerId, Arc<BTreeSet<LeafCoord>>>,
+    owner_leaves: im::OrdMap<OwnerId, Arc<im::OrdSet<LeafCoord>>>,
 }
 
 impl WorldRead {
@@ -171,13 +175,15 @@ impl WorldRead {
         }
 
         Ok(Self {
+            reads: None,
             root: Arc::new(Root {
                 epoch: 0,
-                regions: BTreeMap::new(),
+                regions: im::OrdMap::new(),
+                leaf_count: 0,
                 settings: Arc::new(settings),
                 materials: Arc::new(materials),
                 owners: Arc::new(owners),
-                owner_leaves: BTreeMap::new(),
+                owner_leaves: im::OrdMap::new(),
             }),
         })
     }
@@ -207,7 +213,7 @@ impl WorldRead {
     }
 
     pub fn leaf_count(&self) -> usize {
-        self.root.regions.values().map(|r| r.len()).sum()
+        self.root.leaf_count
     }
 
     pub(crate) fn resident_voxel(&self, voxel: VoxelCoord) -> Voxel {
@@ -257,7 +263,34 @@ impl WorldRead {
     }
 
     pub(crate) fn leaf(&self, key: LeafCoord) -> Option<&Arc<Leaf>> {
+        if let Some(reads) = &self.reads {
+            reads
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .insert(key);
+        }
+
         self.root.regions.get(&region(key))?.get(&key)
+    }
+
+    pub(crate) fn tracked(&self) -> Self {
+        Self {
+            root: self.root.clone(),
+            reads: Some(Arc::default()),
+        }
+    }
+
+    pub(crate) fn finish_reads(&mut self) -> BTreeSet<LeafCoord> {
+        self.reads.take().map_or_else(BTreeSet::new, |reads| {
+            std::mem::take(&mut *reads.lock().unwrap_or_else(|error| error.into_inner()))
+        })
+    }
+
+    pub(crate) fn untracked(&self) -> Self {
+        Self {
+            root: self.root.clone(),
+            reads: None,
+        }
     }
 
     pub fn owner_voxels(&self, owner: OwnerId) -> impl Iterator<Item = (VoxelCoord, Voxel)> + '_ {
@@ -301,11 +334,17 @@ impl WorldRead {
                 for owner in old.owners() {
                     if let Some(keys) = root.owner_leaves.get_mut(&owner) {
                         Arc::make_mut(keys).remove(&key);
+
+                        if keys.is_empty() {
+                            root.owner_leaves.remove(&owner);
+                        }
                     }
                 }
             }
 
             let r = Arc::make_mut(root.regions.entry(region(key)).or_default());
+
+            let existed = r.contains_key(&key);
 
             if let Some(leaf) = leaf {
                 for owner in leaf.owners() {
@@ -313,17 +352,26 @@ impl WorldRead {
                 }
 
                 r.insert(key, leaf);
+
+                if !existed {
+                    root.leaf_count += 1;
+                }
             } else {
                 r.remove(&key);
+
+                if existed {
+                    root.leaf_count -= 1;
+                }
+            }
+
+            if r.is_empty() {
+                root.regions.remove(&region(key));
             }
         }
 
-        root.regions.retain(|_, r| !r.is_empty());
-
-        root.owner_leaves.retain(|_, keys| !keys.is_empty());
-
         let read = Self {
             root: Arc::new(root),
+            reads: self.reads.clone(),
         };
 
         if read.leaf_count() > read.root.settings.max_leaves {

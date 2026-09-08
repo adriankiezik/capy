@@ -35,6 +35,7 @@ winit.workspace = true
 glam.workspace = true
 bytemuck.workspace = true
 fontdue.workspace = true
+im = "15"
 
 [dev-dependencies]
 proptest = "1"

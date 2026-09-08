@@ -1,14 +1,11 @@
 use crate::{
-    scene::{Result, SceneError, halo::Halo},
+    scene::{Result, SceneError, halo::Halo, work::Work},
     world::{Leaf, VOXEL_SIZE, Voxel, VoxelCoord, WorldRead},
 };
 use glam::{IVec3, Vec3};
-use std::{
-    collections::BTreeMap,
-    sync::{Arc, OnceLock},
-};
+use std::sync::{Arc, OnceLock};
 
-pub(crate) type MeshSources = BTreeMap<[i32; 3], Arc<MeshSource>>;
+pub(crate) type MeshSources = im::OrdMap<[i32; 3], Arc<MeshSource>>;
 
 #[derive(Debug, Default)]
 pub(crate) struct MeshSource {
@@ -16,7 +13,30 @@ pub(crate) struct MeshSource {
 }
 
 impl MeshSource {
+    pub(in crate::scene) fn vertices(&self) -> Option<usize> {
+        self.mesh.get().map(|mesh| mesh.vertices.len())
+    }
+
     pub(crate) fn resolve<'a>(
+        &self,
+        key: [i32; 3],
+        edge: i32,
+        leaf: impl Fn([i32; 3]) -> Option<&'a Leaf>,
+        world: &WorldRead,
+        maximum: usize,
+    ) -> Result<Arc<Mesh>> {
+        if let Some(mesh) = self.mesh.get() {
+            if mesh.vertices.len() > maximum {
+                return Err(SceneError::Limit("resident mesh vertices"));
+            }
+
+            return Ok(mesh.clone());
+        }
+
+        pollster::block_on(self.resolve_async(key, edge, leaf, world, maximum))
+    }
+
+    pub(in crate::scene) async fn resolve_async<'a>(
         &self,
         key: [i32; 3],
         edge: i32,
@@ -34,7 +54,7 @@ impl MeshSource {
 
         let halo = Halo::from_leaves(IVec3::from_array(key) * edge, edge, leaf);
 
-        let mesh = Arc::new(build_halo(key, edge, halo, world, maximum)?);
+        let mesh = Arc::new(build_halo(key, edge, halo, world, maximum).await?);
 
         Ok(self.mesh.get_or_init(|| mesh).clone())
     }
@@ -70,10 +90,10 @@ pub(crate) fn build(
 ) -> Result<Mesh> {
     let halo = Halo::new(IVec3::from_array(key) * edge, edge, sample);
 
-    build_halo(key, edge, halo, world, maximum)
+    pollster::block_on(build_halo(key, edge, halo, world, maximum))
 }
 
-fn build_halo(
+async fn build_halo(
     key: [i32; 3],
     edge: i32,
     halo: Halo,
@@ -92,9 +112,13 @@ fn build_halo(
 
     let mut mask = vec![Face::EMPTY; n * n];
 
+    let mut work = Work::default();
+
     for axis in 0..3 {
         for sign in [-1, 1] {
             for slice in 0..edge {
+                work.checkpoint().await;
+
                 fill_mask(&mut mask, edge, origin, axis, sign, slice, &halo);
 
                 for j in 0..n {
