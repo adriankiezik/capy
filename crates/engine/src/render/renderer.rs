@@ -19,6 +19,14 @@ struct Uniforms {
     sun: [f32; 4],
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct Target<'a> {
+    pub device: &'a wgpu::Device,
+    pub queue: &'a wgpu::Queue,
+    pub format: wgpu::TextureFormat,
+    pub size: [u32; 2],
+}
+
 pub(crate) struct Renderer {
     format: wgpu::TextureFormat,
     view_layout: wgpu::BindGroupLayout,
@@ -61,52 +69,76 @@ impl Renderer {
 
         let size = [presentation.width, presentation.height];
 
-        graphics.checked(|device, _| {
-            let uniform = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("world view"),
-                size: std::mem::size_of::<Uniforms>() as u64,
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-
-            let view_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("world view layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: wgpu::BufferSize::new(
-                            std::mem::size_of::<Uniforms>() as u64
-                        ),
-                    },
-                    count: None,
-                }],
-            });
-
-            let binding = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("world view binding"),
-                layout: &view_layout,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: uniform.as_entire_binding(),
-                }],
-            });
-
-            Self {
+        graphics.checked(|device, queue| {
+            Self::for_target(Target {
+                device,
+                queue,
                 format,
-                world: WorldRenderer::new(device, format, &view_layout),
-                overlay: OverlayRenderer::new(device, format, &view_layout),
-                ui: UiRenderer::new(device, format),
-                view_layout,
-                uniform,
-                binding,
-                depth: depth(device, size),
                 size,
-                clear: wgpu::Color::BLACK,
-            }
+            })
         })
+    }
+
+    pub(super) fn for_target(target: Target<'_>) -> Self {
+        let Target {
+            device,
+            format,
+            size,
+            ..
+        } = target;
+
+        let uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("world view"),
+            size: std::mem::size_of::<Uniforms>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let view_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("world view layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: wgpu::BufferSize::new(std::mem::size_of::<Uniforms>() as u64),
+                },
+                count: None,
+            }],
+        });
+
+        let binding = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("world view binding"),
+            layout: &view_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform.as_entire_binding(),
+            }],
+        });
+
+        Self {
+            format,
+            world: WorldRenderer::new(device, format, &view_layout),
+            overlay: OverlayRenderer::new(device, format, &view_layout),
+            ui: UiRenderer::new(device, format),
+            view_layout,
+            uniform,
+            binding,
+            depth: depth(device, size),
+            size,
+            clear: wgpu::Color::BLACK,
+        }
+    }
+
+    fn reconfigure(&mut self, device: &wgpu::Device, format: wgpu::TextureFormat) {
+        self.world.reconfigure(device, format, &self.view_layout);
+
+        self.overlay.reconfigure(device, format, &self.view_layout);
+
+        self.ui.reconfigure(device, format);
+
+        self.format = format;
     }
 
     pub(crate) fn prepare(
@@ -122,23 +154,45 @@ impl Renderer {
             .presentation()
             .ok_or(GraphicsError::NotPresenting)?;
 
-        let device = graphics.device();
-
-        let queue = graphics.queue();
-
-        let size = [p.width, p.height];
-
         if p.format != self.format {
-            graphics.checked(|device, _| {
-                self.world.reconfigure(device, p.format, &self.view_layout);
+            graphics.checked(|device, _| self.reconfigure(device, p.format))?;
+        }
 
-                self.overlay
-                    .reconfigure(device, p.format, &self.view_layout);
+        self.prepare_target(
+            Target {
+                device: graphics.device(),
+                queue: graphics.queue(),
+                format: p.format,
+                size: [p.width, p.height],
+            },
+            scene,
+            camera,
+            selection,
+            canvas,
+            dpi,
+        )?;
 
-                self.ui.reconfigure(device, p.format);
-            })?;
+        graphics.check_errors()
+    }
 
-            self.format = p.format;
+    pub(super) fn prepare_target(
+        &mut self,
+        target: Target<'_>,
+        scene: &Scene,
+        camera: Camera,
+        selection: Option<Hit>,
+        canvas: &Canvas,
+        dpi: f32,
+    ) -> Result<()> {
+        let Target {
+            device,
+            queue,
+            format,
+            size,
+        } = target;
+
+        if format != self.format {
+            self.reconfigure(device, format);
         }
 
         if self.size != size {
@@ -210,12 +264,16 @@ impl Renderer {
 
         self.ui.prepare(device, queue, canvas, size, dpi)?;
 
-        graphics.check_errors()
+        Ok(())
     }
 
     pub(crate) fn draw(&self, frame: &mut Frame) {
         let (view, encoder) = frame.parts();
 
+        self.draw_target(view, encoder);
+    }
+
+    pub(super) fn draw_target(&self, view: &wgpu::TextureView, encoder: &mut wgpu::CommandEncoder) {
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("world"),
