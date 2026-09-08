@@ -1,3 +1,6 @@
+#[cfg(feature = "cpu-bench")]
+mod bench;
+
 mod config;
 mod dynamics;
 mod error;

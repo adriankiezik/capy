@@ -7,7 +7,16 @@ rust-version.workspace = true
 [lints]
 workspace = true
 
+[features]
+cpu-bench = ["dep:divan"]
+
+[[bench]]
+name = "cpu"
+harness = false
+required-features = ["cpu-bench"]
+
 [dependencies]
+divan = { version = "0.1", optional = true }
 anyhow.workspace = true
 thiserror.workspace = true
 pollster.workspace = true

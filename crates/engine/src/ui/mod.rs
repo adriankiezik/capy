@@ -1,3 +1,6 @@
+#[cfg(feature = "cpu-bench")]
+mod bench;
+
 mod bitmap;
 mod builder;
 mod canvas;
