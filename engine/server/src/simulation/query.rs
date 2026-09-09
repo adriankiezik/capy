@@ -1,18 +1,18 @@
 use crate::{
     Aabb,
     simulation::{Result, Simulation, SimulationError},
-    world::{VOXEL_SIZE, Voxel, VoxelCoord},
+    world::{LEAF_EDGE, Leaf, LeafCoord, VOXEL_SIZE, Voxel, VoxelCoord, address},
 };
 use glam::{IVec3, Vec3};
 
 pub use capy_engine_protocol::world::{Hit, Target};
 
-fn trace(
+fn trace<'a>(
     origin: Vec3,
     direction: Vec3,
     distance: f32,
     budget: &mut usize,
-    sample: impl Fn(VoxelCoord) -> Result<Voxel>,
+    source: impl Fn(LeafCoord) -> Option<&'a Leaf>,
 ) -> Result<Option<(VoxelCoord, Voxel, IVec3, f32)>> {
     let p = origin / VOXEL_SIZE;
 
@@ -38,6 +38,8 @@ fn trace(
 
     let mut normal = IVec3::ZERO;
 
+    let mut cached = None;
+
     while t <= distance {
         if *budget == 0 {
             return Err(SimulationError::Limit("query steps"));
@@ -45,7 +47,15 @@ fn trace(
 
         *budget -= 1;
 
-        let value = sample(voxel)?;
+        let (key, index) = address(voxel);
+
+        if cached.as_ref().is_none_or(|(previous, _)| *previous != key) {
+            cached = Some((key, source(key)));
+        }
+
+        let value = cached
+            .and_then(|(_, leaf)| leaf)
+            .map_or(Voxel::EMPTY, |leaf| leaf.voxel(index));
 
         if !value.is_empty() {
             return Ok(Some((voxel, value, normal, t)));
@@ -100,7 +110,7 @@ impl Simulation {
                 direction,
                 far - near,
                 &mut budget,
-                |p| Ok(self.world.resident_voxel(p)),
+                |key| self.world.leaf(key).map(AsRef::as_ref),
             )?
             .map(|(coordinate, voxel, normal, distance)| Hit {
                 target: Target::Static(coordinate),
@@ -134,7 +144,7 @@ impl Simulation {
                 direction,
                 far - near,
                 &mut budget,
-                |p| Ok(body.geometry.voxel(p)),
+                |key| body.geometry.leaves.get(&key).map(AsRef::as_ref),
             )? {
                 hit = Some(Hit {
                     target: Target::Dynamic {
@@ -172,7 +182,9 @@ impl Simulation {
             return Ok(true);
         }
 
-        if occupied_box(min, max, &mut budget, |p| Ok(self.world.resident_voxel(p)))? {
+        if occupied_box(min, max, &mut budget, |key| {
+            self.world.leaf(key).map(AsRef::as_ref)
+        })? {
             return Ok(true);
         }
 
@@ -183,7 +195,9 @@ impl Simulation {
 
             if min.cmplt(body.geometry.max).all()
                 && max.cmpgt(body.geometry.min).all()
-                && occupied_box(min, max, &mut budget, |p| Ok(body.geometry.voxel(p)))?
+                && occupied_box(min, max, &mut budget, |key| {
+                    body.geometry.leaves.get(&key).map(AsRef::as_ref)
+                })?
             {
                 return Ok(true);
             }
@@ -193,11 +207,11 @@ impl Simulation {
     }
 }
 
-fn occupied_box(
+fn occupied_box<'a>(
     min: Vec3,
     max: Vec3,
     budget: &mut usize,
-    sample: impl Fn(VoxelCoord) -> Result<Voxel>,
+    source: impl Fn(LeafCoord) -> Option<&'a Leaf>,
 ) -> Result<bool> {
     let start = (min / VOXEL_SIZE).floor().as_ivec3();
 
@@ -205,16 +219,48 @@ fn occupied_box(
 
     for z in start.z..end.z {
         for y in start.y..end.y {
-            for x in start.x..end.x {
+            let mut x = start.x;
+
+            while x < end.x {
                 if *budget == 0 {
                     return Err(SimulationError::Limit("collision query"));
                 }
 
-                *budget -= 1;
+                let (key, index) = address(IVec3::new(x, y, z));
 
-                if !sample(IVec3::new(x, y, z))?.is_empty() {
-                    return Ok(true);
+                let next = x
+                    .saturating_add(LEAF_EDGE - x.rem_euclid(LEAF_EDGE))
+                    .min(end.x);
+
+                let count = (next - x) as usize;
+
+                match source(key) {
+                    Some(Leaf::Uniform(voxel)) if !voxel.is_empty() => {
+                        *budget -= 1;
+
+                        return Ok(true);
+                    }
+                    None | Some(Leaf::Uniform(_)) => {
+                        *budget = budget
+                            .checked_sub(count)
+                            .ok_or(SimulationError::Limit("collision query"))?;
+                    }
+                    Some(leaf) => {
+                        for offset in 0..count {
+                            if *budget == 0 {
+                                return Err(SimulationError::Limit("collision query"));
+                            }
+
+                            *budget -= 1;
+
+                            if !leaf.voxel(index + offset).is_empty() {
+                                return Ok(true);
+                            }
+                        }
+                    }
                 }
+
+                x = next;
             }
         }
     }

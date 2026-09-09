@@ -1,6 +1,7 @@
 use crate::replica::world::{LEAF_EDGE, Leaf, Voxel, VoxelCoord};
 use glam::IVec3;
 
+#[derive(Default)]
 pub(crate) struct Halo {
     origin: IVec3,
     edge: usize,
@@ -9,44 +10,51 @@ pub(crate) struct Halo {
 
 impl Halo {
     #[cfg(feature = "cpu-bench")]
-    pub(crate) fn new(origin: IVec3, edge: i32, sample: impl Fn(VoxelCoord) -> Voxel) -> Self {
+    pub(crate) fn sample(
+        &mut self,
+        origin: IVec3,
+        edge: i32,
+        sample: impl Fn(VoxelCoord) -> Voxel,
+    ) {
         let origin = origin - IVec3::ONE;
 
         let edge = (edge + 2) as usize;
 
-        let mut voxels = Vec::with_capacity(edge * edge * edge);
+        self.origin = origin;
+        self.edge = edge;
+
+        self.voxels.clear();
+
+        self.voxels.reserve(edge * edge * edge);
 
         for z in 0..edge {
             for y in 0..edge {
                 for x in 0..edge {
-                    voxels.push(sample(origin + IVec3::new(x as i32, y as i32, z as i32)));
+                    self.voxels
+                        .push(sample(origin + IVec3::new(x as i32, y as i32, z as i32)));
                 }
             }
         }
-
-        Self {
-            origin,
-            edge,
-            voxels,
-        }
     }
 
-    pub(crate) fn from_leaves<'a>(
+    pub(crate) fn fill<'a>(
+        &mut self,
         origin: IVec3,
         edge: i32,
         leaf: impl Fn([i32; 3]) -> Option<&'a Leaf>,
-    ) -> Self {
+    ) {
         let min = origin - IVec3::ONE;
 
         let max = origin + IVec3::splat(edge + 1);
 
         let edge = (edge + 2) as usize;
 
-        let mut halo = Self {
-            origin: min,
-            edge,
-            voxels: vec![Voxel::EMPTY; edge * edge * edge],
-        };
+        self.origin = min;
+        self.edge = edge;
+
+        self.voxels.resize(edge * edge * edge, Voxel::EMPTY);
+
+        self.voxels.fill(Voxel::EMPTY);
 
         let first = min.to_array().map(|v| v.div_euclid(LEAF_EDGE));
 
@@ -77,7 +85,7 @@ impl Halo {
                                 ((py - min.y) as usize + (pz - min.z) as usize * edge) * edge;
 
                             for px in start.x..end.x {
-                                halo.voxels[target + (px - min.x) as usize] =
+                                self.voxels[target + (px - min.x) as usize] =
                                     leaf.voxel(source + (px - base.x) as usize);
                             }
                         }
@@ -85,8 +93,6 @@ impl Halo {
                 }
             }
         }
-
-        halo
     }
 
     pub(crate) fn voxel(&self, p: VoxelCoord) -> Voxel {

@@ -1,6 +1,6 @@
 use super::{
     MeshError, Result,
-    geometry::{Mesh, MeshSource},
+    geometry::{Mesh, MeshSource, Scratch},
 };
 use crate::replica::world::{Leaf, WorldRead};
 use std::{
@@ -43,6 +43,8 @@ impl Scheduler {
         let worker = std::thread::Builder::new()
             .name("client-mesh".into())
             .spawn(move || {
+                let mut scratch = Scratch::default();
+
                 while let Ok(job) = receiver.recv() {
                     if stop.load(Ordering::Acquire) {
                         break;
@@ -54,6 +56,7 @@ impl Scheduler {
                         |key| job.leaves.get(&key).map(Arc::as_ref),
                         &job.world,
                         job.maximum,
+                        &mut scratch,
                     );
 
                     match result {
