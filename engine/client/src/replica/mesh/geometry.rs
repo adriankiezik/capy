@@ -7,6 +7,12 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 pub(crate) type MeshSources = im::OrdMap<[i32; 3], Arc<MeshSource>>;
 
+#[derive(Default)]
+pub(crate) struct Scratch {
+    halo: Halo,
+    mask: Vec<Face>,
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct MeshSource {
     pub(crate) mesh: OnceLock<Arc<Mesh>>,
@@ -51,6 +57,7 @@ impl MeshSource {
         leaf: impl Fn([i32; 3]) -> Option<&'a Leaf>,
         world: &WorldRead,
         maximum: usize,
+        scratch: &mut Scratch,
     ) -> Result<Arc<Mesh>> {
         if let Some(mesh) = self.mesh.get() {
             if mesh.vertices.len() > maximum {
@@ -60,30 +67,9 @@ impl MeshSource {
             return Ok(mesh.clone());
         }
 
-        pollster::block_on(self.resolve_async(key, edge, leaf, world, maximum))
-    }
+        scratch.halo.fill(IVec3::from_array(key) * edge, edge, leaf);
 
-    pub(in crate::replica::mesh) async fn resolve_async<'a>(
-        &self,
-        key: [i32; 3],
-        edge: i32,
-        leaf: impl Fn([i32; 3]) -> Option<&'a Leaf>,
-        world: &WorldRead,
-        maximum: usize,
-    ) -> Result<Arc<Mesh>> {
-        if let Some(mesh) = self.mesh.get() {
-            if mesh.vertices.len() > maximum {
-                return Err(MeshError::Limit("resident mesh vertices"));
-            }
-
-            return Ok(mesh.clone());
-        }
-
-        let halo = Halo::from_leaves(IVec3::from_array(key) * edge, edge, leaf);
-
-        let mesh = Arc::new(build_halo(key, edge, halo, world, maximum, true).await?);
-
-        Ok(mesh)
+        pollster::block_on(build_halo(key, edge, scratch, world, maximum, true)).map(Arc::new)
     }
 }
 
@@ -123,13 +109,16 @@ pub(crate) fn build(
     world: &WorldRead,
     maximum: usize,
     ambient_occlusion: bool,
+    scratch: &mut Scratch,
 ) -> Result<Mesh> {
-    let halo = Halo::new(IVec3::from_array(key) * edge, edge, sample);
+    scratch
+        .halo
+        .sample(IVec3::from_array(key) * edge, edge, sample);
 
     pollster::block_on(build_halo(
         key,
         edge,
-        halo,
+        scratch,
         world,
         maximum,
         ambient_occlusion,
@@ -139,7 +128,7 @@ pub(crate) fn build(
 async fn build_halo(
     key: [i32; 3],
     edge: i32,
-    halo: Halo,
+    scratch: &mut Scratch,
     world: &WorldRead,
     maximum: usize,
     ambient_occlusion: bool,
@@ -155,7 +144,11 @@ async fn build_halo(
 
     let n = edge as usize;
 
-    let mut mask = vec![Face::EMPTY; n * n];
+    scratch.mask.resize(n * n, Face::EMPTY);
+
+    let mask = &mut scratch.mask;
+
+    let halo = &scratch.halo;
 
     let mut work = Work::default();
 
@@ -165,11 +158,11 @@ async fn build_halo(
                 work.checkpoint().await;
 
                 fill_mask(
-                    &mut mask,
+                    mask,
                     edge,
                     origin,
                     (axis, sign, slice),
-                    &halo,
+                    halo,
                     ambient_occlusion,
                 );
 
@@ -177,7 +170,7 @@ async fn build_halo(
                     let mut i = 0;
 
                     while i < n {
-                        let Some(rectangle) = take_rectangle(&mut mask, n, i, j) else {
+                        let Some(rectangle) = take_rectangle(mask, n, i, j) else {
                             i += 1;
 
                             continue;

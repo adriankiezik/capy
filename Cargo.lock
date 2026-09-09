@@ -351,6 +351,7 @@ dependencies = [
  "proptest",
  "serde",
  "serde_json",
+ "signal-hook",
  "thiserror 2.0.20",
 ]
 
@@ -370,8 +371,6 @@ dependencies = [
  "capy-engine-protocol",
  "capy-engine-server",
  "capy-protocol",
- "clap",
- "signal-hook",
 ]
 
 [[package]]

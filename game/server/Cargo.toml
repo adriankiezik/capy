@@ -12,7 +12,3 @@ capy-protocol.workspace = true
 capy-engine-server.workspace = true
 capy-engine-protocol.workspace = true
 anyhow.workspace = true
-clap.workspace = true
-
-[target.'cfg(unix)'.dependencies]
-signal-hook = "0.3"

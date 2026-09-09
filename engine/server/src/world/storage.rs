@@ -35,6 +35,10 @@ impl Leaf {
             return None;
         }
 
+        if voxels.iter().all(|&voxel| voxel == voxels[0]) {
+            return Some(Self::Uniform(voxels[0]));
+        }
+
         let mut palette = BTreeMap::new();
 
         let mut values = Vec::new();

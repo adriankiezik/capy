@@ -1,5 +1,7 @@
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("server initialization failed: {0}")]
+    Initialization(#[source] anyhow::Error),
     #[error(transparent)]
     Session(#[from] crate::session::Error),
     #[error(transparent)]

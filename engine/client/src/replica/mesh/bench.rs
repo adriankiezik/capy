@@ -1,6 +1,6 @@
 #![allow(clippy::expect_used)]
 use super::geometry;
-use crate::replica::world::{Material, MaterialId, OwnerId, Voxel, VoxelBounds, WorldRead};
+use crate::replica::world::{Leaf, Material, MaterialId, OwnerId, Voxel, VoxelBounds, WorldRead};
 use divan::{Bencher, black_box, counter::ItemsCount};
 use glam::IVec3;
 use std::sync::Arc;
@@ -18,6 +18,8 @@ fn world(edge: i32) -> WorldRead {
 
 fn mesh(bencher: Bencher, edge: i32, checkerboard: bool) {
     let world = world(edge);
+
+    let mut scratch = geometry::Scratch::default();
 
     let voxel = Voxel::new(MaterialId(1), OwnerId(1));
 
@@ -42,6 +44,7 @@ fn mesh(bencher: Bencher, edge: i32, checkerboard: bool) {
                 black_box(&world),
                 1_000_000,
                 true,
+                &mut scratch,
             )
             .expect("mesh fixture fits vertex budget")
         });
@@ -55,6 +58,70 @@ fn mesh_solid(bencher: Bencher, edge: i32) {
 #[divan::bench(args = [8, 16, 32])]
 fn mesh_checkerboard(bencher: Bencher, edge: i32) {
     mesh(bencher, edge, true);
+}
+
+fn production_mesh(bencher: Bencher, edge: i32, reuse: bool) {
+    let mut world = world(edge);
+
+    for z in 0..edge / 8 {
+        for y in 0..edge / 8 {
+            for x in 0..edge / 8 {
+                let coordinate = [x, y, z];
+
+                world.leaves.insert(
+                    coordinate,
+                    Arc::new(Leaf(Chunk {
+                        coordinate,
+                        palette: vec![Voxel::new(MaterialId(1), OwnerId(1))],
+                        indices: vec![0; 512],
+                    })),
+                );
+            }
+        }
+    }
+
+    let source = geometry::MeshSource::default();
+
+    let resolve = |scratch: &mut geometry::Scratch| {
+        source
+            .resolve(
+                [0; 3],
+                black_box(edge),
+                |key| world.leaves.get(&key).map(Arc::as_ref),
+                black_box(&world),
+                1_000_000,
+                scratch,
+            )
+            .expect("valid production mesh")
+    };
+
+    let mut scratch = geometry::Scratch::default();
+
+    assert_eq!(resolve(&mut scratch).vertices.len(), 36);
+
+    assert!(source.ready().is_none());
+
+    let bencher = bencher.counter(ItemsCount::new((edge as u64).pow(3)));
+
+    if reuse {
+        bencher.bench_local(|| resolve(&mut scratch));
+    } else {
+        drop(scratch);
+
+        bencher
+            .with_inputs(geometry::Scratch::default)
+            .bench_local_refs(resolve);
+    }
+}
+
+#[divan::bench(args = [8, 16, 32])]
+fn mesh_production_fresh_scratch(bencher: Bencher, edge: i32) {
+    production_mesh(bencher, edge, false);
+}
+
+#[divan::bench(args = [8, 16, 32])]
+fn mesh_production_reused_scratch(bencher: Bencher, edge: i32) {
+    production_mesh(bencher, edge, true);
 }
 
 use crate::replica::{Replica, ReplicaConfig};
@@ -151,13 +218,13 @@ fn edited_render_scene(count: i32) -> Replica {
             .iter()
             .filter(|(key, source)| !Arc::ptr_eq(source, &sources[*key]))
             .count(),
-        1
+        2
     );
 
     scene
 }
 
-#[divan::bench(args = [8, 64, 128])]
+#[divan::bench(args = [8, 64, 128], ignore)]
 fn mesh_cache_cold(bencher: Bencher, leaves: i32) {
     let verification = render_scene(leaves);
 
@@ -169,11 +236,7 @@ fn mesh_cache_cold(bencher: Bencher, leaves: i32) {
     bencher
         .counter(ItemsCount::new(leaves as u64))
         .with_inputs(|| render_scene(leaves))
-        .bench_local_refs(|scene| {
-            black_box(&*scene)
-                .render_geometry()
-                .expect("valid cold geometry")
-        });
+        .bench_local_refs(|scene| complete(black_box(&*scene)).expect("valid cold geometry"));
 }
 
 #[divan::bench(args = [8, 64, 128])]
@@ -206,7 +269,7 @@ fn mesh_cache_warm(bencher: Bencher, leaves: i32) {
         });
 }
 
-#[divan::bench(args = [8, 64, 128])]
+#[divan::bench(args = [8, 64, 128], ignore)]
 fn mesh_cache_local_edit(bencher: Bencher, leaves: i32) {
     let verification = edited_render_scene(leaves);
 
@@ -220,9 +283,5 @@ fn mesh_cache_local_edit(bencher: Bencher, leaves: i32) {
     bencher
         .counter(ItemsCount::new(leaves as u64))
         .with_inputs(|| edited_render_scene(leaves))
-        .bench_local_refs(|scene| {
-            black_box(&*scene)
-                .render_geometry()
-                .expect("valid edited geometry")
-        });
+        .bench_local_refs(|scene| complete(black_box(&*scene)).expect("valid edited geometry"));
 }

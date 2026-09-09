@@ -1,7 +1,7 @@
 mod game;
-mod session;
+mod server;
 mod world;
 
 pub use capy_engine_server::runtime::ServerHandle;
 pub use game::CapyGame;
-pub use session::{create, host, local};
+pub use server::create_server;

@@ -103,6 +103,8 @@ impl VoxelModel {
             return Err(ModelError::Limit("leaves"));
         }
 
+        let mut scratch = geometry::Scratch::default();
+
         let invalid_material = Cell::new(None);
 
         let voxel = |p: IVec3| {
@@ -137,6 +139,7 @@ impl VoxelModel {
                         &world,
                         config.max_vertices - model.vertices,
                         config.bake_ambient_occlusion,
+                        &mut scratch,
                     );
 
                     if let Some((position, index)) = invalid_material.get() {

@@ -28,3 +28,6 @@ im = "15"
 serde.workspace = true
 serde_json.workspace = true
 capy-engine-protocol.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+signal-hook = "0.3"
