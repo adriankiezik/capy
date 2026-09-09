@@ -1,7 +1,7 @@
 use super::{
     residency::Geometry,
     shadows::{ShadowFrame, Shadows},
-    surfaces::Surfaces,
+    surfaces::{SurfaceFrame, Surfaces},
 };
 use crate::{
     graphics::Result,
@@ -34,7 +34,7 @@ impl WorldRenderer {
         Self {
             surfaces: Surfaces::new(device, format, view_layout, shadows.layout()),
             shadows,
-            geometry: Geometry::new(device),
+            geometry: Geometry::new(),
         }
     }
 
@@ -52,8 +52,9 @@ impl WorldRenderer {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        sources: Vec<MeshInstance>,
+        sources: std::sync::Arc<[MeshInstance]>,
         view: WorldView,
+        binding: &wgpu::BindGroup,
     ) -> Result<()> {
         let WorldView {
             matrix,
@@ -63,9 +64,7 @@ impl WorldRenderer {
             shadows,
         } = view;
 
-        let geometry_changed = self.geometry.prepare(device, queue, sources)?;
-
-        self.surfaces.prepare(&self.geometry, matrix, eye);
+        let geometry_changed = self.geometry.prepare(device, sources)?;
 
         self.shadows.prepare(
             device,
@@ -79,15 +78,34 @@ impl WorldRenderer {
                 geometry_changed,
             },
             &self.geometry,
-        )
+        )?;
+
+        self.surfaces.prepare(
+            device,
+            queue,
+            &self.geometry,
+            SurfaceFrame {
+                matrix,
+                eye,
+                view: binding,
+                shadows: self.shadows.binding(),
+                shadow_binding_generation: self.shadows.binding_generation(),
+            },
+        );
+
+        Ok(())
+    }
+
+    #[cfg(feature = "render-bench")]
+    pub(in crate::render) fn geometry_bytes(&self) -> usize {
+        self.geometry.bytes()
     }
 
     pub(in crate::render) fn draw_shadows(&self, encoder: &mut wgpu::CommandEncoder) {
-        self.shadows.draw(encoder, &self.geometry);
+        self.shadows.draw(encoder);
     }
 
     pub(in crate::render) fn draw(&self, pass: &mut wgpu::RenderPass<'_>, view: &wgpu::BindGroup) {
-        self.surfaces
-            .draw(pass, &self.geometry, view, self.shadows.binding());
+        self.surfaces.draw(pass, view, self.shadows.binding());
     }
 }

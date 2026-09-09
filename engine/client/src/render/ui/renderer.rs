@@ -171,6 +171,10 @@ impl UiRenderer {
         Ok(())
     }
 
+    pub(in crate::render) fn is_empty(&self) -> bool {
+        self.count == 0
+    }
+
     pub(in crate::render) fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
         if self.count == 0 {
             return;

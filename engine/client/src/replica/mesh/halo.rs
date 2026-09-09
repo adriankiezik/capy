@@ -8,7 +8,6 @@ pub(crate) struct Halo {
 }
 
 impl Halo {
-    #[cfg(feature = "cpu-bench")]
     pub(crate) fn new(origin: IVec3, edge: i32, sample: impl Fn(VoxelCoord) -> Voxel) -> Self {
         let origin = origin - IVec3::ONE;
 

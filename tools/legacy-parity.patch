@@ -1,0 +1,294 @@
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -17,6 +17,7 @@
+ bench = false
+ 
+ [features]
++render-parity = []
+ default = ["dlss", "fsr"]
+ # Pinned native inputs/runtime are provisioned automatically; see docs/upscaling.md.
+ # Use --no-default-features for an SDK-free build.
+--- a/src/bin/bench.rs
++++ b/src/bin/bench.rs
+@@ -57,10 +57,12 @@
+         // The window exists only because wgpu uses it to select the same
+         // surface-compatible Metal adapter and output format as the game. It is
+         // never shown and no drawable is acquired from it.
++        let output_width = std::env::var("BENCH_WIDTH").map_or(OUTPUT_WIDTH, |v| v.parse().expect("benchmark width"));
++        let output_height = std::env::var("BENCH_HEIGHT").map_or(OUTPUT_HEIGHT, |v| v.parse().expect("benchmark height"));
+         let attributes = Window::default_attributes()
+             .with_title("Capy offscreen benchmark")
+             .with_visible(false)
+-            .with_inner_size(PhysicalSize::new(OUTPUT_WIDTH, OUTPUT_HEIGHT));
++            .with_inner_size(PhysicalSize::new(output_width, output_height));
+         let window = Arc::new(
+             event_loop
+                 .create_window(attributes)
+@@ -68,8 +70,10 @@
+         );
+         let scale_factor = window.scale_factor();
+         let mut renderer = Renderer::new(window);
+-        renderer.resize(OUTPUT_WIDTH, OUTPUT_HEIGHT, scale_factor);
++        renderer.resize(output_width, output_height, scale_factor);
+         renderer.enable_offscreen_output();
++        #[cfg(feature = "render-parity")]
++        println!("BENCH_PROFILE opaque-material-v1");
+         println!(
+             "BENCH_BACKEND world=legacy render={}",
+             renderer.render_backend()
+@@ -498,6 +502,8 @@
+                 if let Ok(path) = std::env::var("BENCH_CAPTURE") {
+                     let (w, h, pixels) = renderer.capture_offscreen().expect("capture");
+                     std::fs::write(&path, pixels).expect("write capture");
++                    #[cfg(feature = "render-parity")]
++                    renderer.capture_parity_depth(&std::path::Path::new(&path).with_extension("depth")).expect("capture parity depth");
+                     println!("CAPTURE {path} {w}x{h} RGBA8");
+                 }
+                 event_loop.exit();
+--- a/src/render/mod.rs
++++ b/src/render/mod.rs
+@@ -1,3 +1,5 @@
++#[cfg(feature = "render-parity")]
++mod parity;
+ mod aabb;
+ mod avatar;
+ mod bricks;
+@@ -597,6 +599,8 @@
+     }
+ 
+     pub fn render(&mut self, frame: &Frame, time: f32) -> RenderCpuTimings {
++        #[cfg(feature = "render-parity")]
++        if self.gpu.is_offscreen() { return self.render_parity(frame, time); }
+         let mut cpu = CpuClock::new();
+         if self.presentation_deadline().is_some() {
+             self.present_due();
+@@ -1250,6 +1254,8 @@
+     }
+ 
+     pub fn capture_offscreen(&self) -> Option<(u32, u32, Vec<u8>)> {
++        #[cfg(feature = "render-parity")]
++        if self.gpu.is_offscreen() { return self.gpu.capture_texture(self.targets.color.texture()); }
+         self.gpu.capture_offscreen()
+     }
+ 
+--- a/src/render/pipelines.rs
++++ b/src/render/pipelines.rs
+@@ -1,6 +1,9 @@
+ use super::gpu::Gpu;
+ 
++#[cfg(not(feature = "render-parity"))]
+ pub const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
++#[cfg(feature = "render-parity")]
++pub const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+ pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+ pub const SELECTION_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
+ 
+@@ -460,6 +463,8 @@
+ }
+ 
+ pub(super) fn with_sun_shadow(source: &str) -> String {
++    #[cfg(feature = "render-parity")]
++    let source = super::parity::shader(source);
+     source
+         .replace(
+             "// SHARED_SUN_SHADOW",
+--- a/src/render/targets.rs
++++ b/src/render/targets.rs
+@@ -142,7 +142,7 @@
+         w,
+         h,
+         format,
+-        wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
++        wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
+     )
+     .create_view(&Default::default())
+ }
+--- a/src/render/gpu.rs
++++ b/src/render/gpu.rs
+@@ -321,7 +321,7 @@
+         self.surface.configure(&self.device, &self.config);
+     }
+ 
+-    #[cfg(any(dlss_native, fsr_native))]
++    #[cfg(any(dlss_native, fsr_native, feature = "render-parity"))]
+     pub fn is_offscreen(&self) -> bool {
+         self.offscreen.is_some()
+     }
+--- a/src/render/volume.rs
++++ b/src/render/volume.rs
+@@ -386,7 +386,7 @@
+                 eye,
+                 bricks::Pass::Opaque,
+             );
+-        } else if frustum.beyond_near_plane(self.aabb)
++        } else if (cfg!(feature = "render-parity") || frustum.beyond_near_plane(self.aabb))
+             && let Some(surface) = &self.surface.mesh
+         {
+             pass.set_pipeline(&pipelines.surface);
+--- /dev/null
++++ b/src/render/parity/config.rs
+@@ -0,0 +1,60 @@
++use glam::{Mat4, Vec3};
++use std::sync::OnceLock;
++
++pub(super) fn camera() -> (Mat4, Vec3) {
++    static CAMERA: OnceLock<(Mat4, Vec3)> = OnceLock::new();
++    *CAMERA.get_or_init(|| {
++        let path =
++            std::env::var_os("BENCH_PARITY_CAMERA").expect("BENCH_PARITY_CAMERA is required");
++        let data = std::fs::read(path).expect("read shared camera");
++        assert_eq!(data.len(), 76);
++        let values: Vec<f32> = data
++            .chunks_exact(4)
++            .map(|v| f32::from_le_bytes(v.try_into().unwrap()))
++            .collect();
++        (
++            Mat4::from_cols_array(values[..16].try_into().unwrap()),
++            Vec3::from_slice(&values[16..]),
++        )
++    })
++}
++
++pub(in crate::render) fn shader(source: &str) -> String {
++    let source = source.replace(
++        "out.pos = g.view_proj * obj.model * vec4<f32>(vertex.xyz, 1.0);",
++        "out.pos = g.view_proj * (obj.model * vec4<f32>(vertex.xyz, 1.0));",
++    );
++    let Some(start) = source.find("fn shade_hit(") else {
++        return source.to_owned();
++    };
++    let opening = start + source[start..].find('{').unwrap();
++    let mut depth = 1;
++    let mut end = opening + 1;
++    for (offset, byte) in source[opening + 1..].bytes().enumerate() {
++        match byte {
++            b'{' => depth += 1,
++            b'}' => depth -= 1,
++            _ => {}
++        }
++        if depth == 0 {
++            end = opening + offset + 2;
++            break;
++        }
++    }
++    let body = r#"{
++    if tr.mat == 0u { discard; }
++    let position = obj.model * vec4<f32>(tr.p_obj, 1.0);
++    let clip = g.view_proj * position;
++    if clip_proxy_hit && clip.z > clip.w { discard; }
++    var color = vec3<f32>(1.0, 0.0, 1.0);
++    switch tr.mat {
++        case 8u: { color = vec3<f32>(0.63, 0.66, 0.69); }
++        case 3u: { color = vec3<f32>(0.51, 0.25, 0.17); }
++        case 12u: { color = vec3<f32>(0.55, 0.52, 0.46); }
++        case 20u: { color = vec3<f32>(0.18, 0.19, 0.21); }
++        default: {}
++    }
++    return FsOut(vec4<f32>(color, 1.0), clip.z / clip.w);
++}"#;
++    format!("{}{}{}", &source[..opening], body, &source[end..])
++}
+--- /dev/null
++++ b/src/render/parity/mod.rs
+@@ -0,0 +1,4 @@
++mod config;
++mod renderer;
++
++pub(super) use config::shader;
+--- /dev/null
++++ b/src/render/parity/renderer.rs
+@@ -0,0 +1,94 @@
++use super::config;
++use crate::render::{
++    CpuClock, Frame, Frustum, RenderCpuTimings, RenderStage, Renderer, gpu_profile,
++};
++
++impl Renderer {
++    pub(in crate::render) fn render_parity(
++        &mut self,
++        frame: &Frame,
++        time: f32,
++    ) -> RenderCpuTimings {
++        let mut cpu = CpuClock::new();
++        let (matrix, eye) = config::camera();
++        let mut camera = frame.camera;
++        camera.pos = eye;
++        self.uniforms.write(
++            &self.gpu,
++            frame,
++            matrix,
++            matrix,
++            matrix,
++            time,
++            &self.shadow,
++            self.scene.extent(),
++        );
++        let frustum = Frustum::from_view_proj(matrix);
++        cpu.lap(RenderStage::Prepare);
++        let mut encoder = self.gpu.encoder();
++        let mut profiler = self.profiler.take();
++        let query = gpu_profile::begin(profiler.as_ref(), &mut encoder, "frame");
++        self.encode_opaque(&mut encoder, camera, &frustum, None, profiler.as_ref());
++        gpu_profile::end(profiler.as_ref(), &mut encoder, query);
++        if let Some(p) = &mut profiler {
++            p.resolve_queries(&mut encoder);
++        }
++        cpu.lap(RenderStage::Encode);
++        self.scene.submit(&self.gpu.queue, [encoder.finish()]);
++        self.scene.finish_frame(&self.gpu.queue);
++        cpu.lap(RenderStage::Submit);
++        if let Some(mut p) = profiler {
++            p.end_frame().expect("parity profiling complete");
++            self.profiler = Some(p);
++        }
++        let _ = self.gpu.device.poll(wgpu::PollType::Poll);
++        cpu.lap(RenderStage::Poll);
++        cpu.finish()
++    }
++
++    pub fn capture_parity_depth(&self, path: &std::path::Path) -> std::io::Result<()> {
++        let texture = self.targets.depth.texture();
++        let width = texture.width();
++        let height = texture.height();
++        let stride = (width * 4).div_ceil(256) * 256;
++        let buffer = self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
++            label: Some("parity depth capture"),
++            size: stride as u64 * height as u64,
++            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
++            mapped_at_creation: false,
++        });
++        let mut encoder = self.gpu.encoder();
++        let mut source = texture.as_image_copy();
++        source.aspect = wgpu::TextureAspect::DepthOnly;
++        encoder.copy_texture_to_buffer(
++            source,
++            wgpu::TexelCopyBufferInfo {
++                buffer: &buffer,
++                layout: wgpu::TexelCopyBufferLayout {
++                    offset: 0,
++                    bytes_per_row: Some(stride),
++                    rows_per_image: None,
++                },
++            },
++            texture.size(),
++        );
++        self.gpu.queue.submit([encoder.finish()]);
++        let (tx, rx) = std::sync::mpsc::channel();
++        buffer.map_async(wgpu::MapMode::Read, .., move |result| {
++            let _ = tx.send(result);
++        });
++        self.gpu
++            .device
++            .poll(wgpu::PollType::wait_indefinitely())
++            .map_err(std::io::Error::other)?;
++        rx.recv()
++            .map_err(std::io::Error::other)?
++            .map_err(std::io::Error::other)?;
++        let data = buffer.get_mapped_range(..).map_err(std::io::Error::other)?;
++        let pixels: Vec<_> = data
++            .chunks_exact(stride as usize)
++            .flat_map(|row| row[..width as usize * 4].iter().copied())
++            .collect();
++        std::fs::write(path, pixels)
++    }
++}

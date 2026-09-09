@@ -8,6 +8,7 @@ rust-version.workspace = true
 workspace = true
 
 [features]
+render-bench = []
 cpu-bench = ["dep:divan"]
 
 [[bench]]

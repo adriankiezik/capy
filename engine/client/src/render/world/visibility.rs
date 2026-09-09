@@ -36,7 +36,7 @@ impl Frustum {
         }
     }
 
-    fn intersects(&self, bounds: Aabb) -> bool {
+    pub(super) fn intersects(&self, bounds: Aabb) -> bool {
         self.planes.iter().all(|plane| {
             let positive = Vec3::select(plane.truncate().cmpge(Vec3::ZERO), bounds.max, bounds.min);
 

@@ -1,5 +1,5 @@
 mod error;
-mod geometry;
+pub(crate) mod geometry;
 mod halo;
 mod scheduler;
 mod work;

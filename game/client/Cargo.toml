@@ -1,5 +1,6 @@
 [package]
 name = "capy-client"
+default-run = "capy-client"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -14,3 +15,13 @@ capy-server.workspace = true
 capy-engine-protocol.workspace = true
 anyhow.workspace = true
 clap.workspace = true
+glam.workspace = true
+serde_json.workspace = true
+
+[features]
+render-bench = ["engine/render-bench"]
+
+[[bin]]
+name = "render-bench"
+path = "src/bin/render_bench.rs"
+required-features = ["render-bench"]

@@ -57,13 +57,18 @@ fn depth(device: &wgpu::Device, size: [u32; 2]) -> wgpu::TextureView {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: DEPTH_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         })
         .create_view(&Default::default())
 }
 
 impl Renderer {
+    #[cfg(feature = "render-bench")]
+    pub(super) fn depth_target(&self) -> &wgpu::Texture {
+        self.depth.texture()
+    }
+
     pub(crate) fn new(graphics: &Graphics) -> Result<Self> {
         let presentation = graphics
             .presentation()
@@ -217,7 +222,12 @@ impl Renderer {
                 visuals.sky[2],
                 visuals.ambient,
             ],
-            sun: sun.extend(0.0).to_array(),
+            sun: sun
+                .extend(
+                    (u32::from(visuals.ambient_occlusion)
+                        | (u32::from(visuals.material_variation) << 1)) as f32,
+                )
+                .to_array(),
         };
 
         queue.write_buffer(&self.uniform, 0, bytemuck::bytes_of(&uniforms));
@@ -240,6 +250,7 @@ impl Renderer {
                 near_plane: camera.near_plane,
                 shadows: visuals.shadows,
             },
+            &self.binding,
         )?;
 
         let outline = selection
@@ -258,6 +269,11 @@ impl Renderer {
         self.ui.prepare(device, queue, canvas, size, dpi)?;
 
         Ok(())
+    }
+
+    #[cfg(feature = "render-bench")]
+    pub(super) fn geometry_bytes(&self) -> usize {
+        self.world.geometry_bytes()
     }
 
     pub(crate) fn draw(&self, frame: &mut Frame) {
@@ -295,6 +311,10 @@ impl Renderer {
             self.world.draw(&mut pass, &self.binding);
 
             self.overlay.draw(&mut pass, &self.binding);
+        }
+
+        if self.ui.is_empty() {
+            return;
         }
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

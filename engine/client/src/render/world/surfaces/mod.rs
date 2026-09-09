@@ -1,3 +1,3 @@
 mod renderer;
 
-pub(super) use renderer::Surfaces;
+pub(super) use renderer::{SurfaceFrame, Surfaces};

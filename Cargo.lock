@@ -303,6 +303,8 @@ dependencies = [
  "capy-protocol",
  "capy-server",
  "clap",
+ "glam",
+ "serde_json",
 ]
 
 [[package]]

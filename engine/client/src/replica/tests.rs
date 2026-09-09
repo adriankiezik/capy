@@ -144,8 +144,8 @@ fn mesh_faces(scene: &Replica) -> Faces {
 
     warm(scene);
 
-    for instance in scene.render_geometry().unwrap() {
-        let mesh = instance.mesh;
+    for instance in scene.render_geometry().unwrap().iter() {
+        let mesh = &instance.mesh;
 
         assert_eq!(mesh.vertices.len() % 6, 0);
 
@@ -309,7 +309,10 @@ fn cached_meshes_follow_boundary_edits_and_enforce_resident_budget() {
 
             scene.settings.max_mesh_vertices = 35;
 
-            assert!(scene.render_geometry().unwrap().is_empty());
+            assert!(matches!(
+                scene.render_geometry(),
+                Err(super::ReplicaError::Limit("render vertices"))
+            ));
 
             scene.settings.max_mesh_vertices = 36;
 
@@ -333,4 +336,142 @@ fn cached_meshes_follow_boundary_edits_and_enforce_resident_budget() {
             assert_eq!(mesh_faces(&scene), expected_faces(&scene));
         }
     }
+}
+
+#[test]
+fn shared_model_leaves_match_independent_voxel_faces() {
+    let size = IVec3::new(35, 19, 21);
+
+    let sample = |p: IVec3| {
+        if p.x == 0 || p.z == size.z - 1 || p.y == 0 || (p.x % 9 == 0 && p.z % 7 == 0) {
+            1 + (p.y % 2) as u16
+        } else {
+            0
+        }
+    };
+
+    let mut voxels = Vec::new();
+
+    for z in 0..size.z {
+        for y in 0..size.y {
+            for x in 0..size.x {
+                let p = IVec3::new(x, y, z);
+
+                let material = sample(p);
+
+                if material != 0 {
+                    voxels.push((p, Voxel::new(MaterialId(material), OwnerId(1))));
+                }
+            }
+        }
+    }
+
+    let expected = expected_faces(&fixture(16, voxels));
+
+    for (leaf_edge, ambient_occlusion) in [8, 16, 32, 64]
+        .into_iter()
+        .flat_map(|edge| [true, false].map(|ao| (edge, ao)))
+    {
+        let model = VoxelModel::build(
+            size,
+            &[[1.0 / 3.0; 3], [2.0 / 3.0; 3]],
+            |p| (sample(p) != 0).then(|| sample(p) as usize - 1),
+            ModelConfig {
+                bake_ambient_occlusion: ambient_occlusion,
+                leaf_edge,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let mut scene = fixture(16, []);
+
+        scene
+            .replace_render_instances(&[VoxelInstance {
+                id: 1,
+                model,
+                translation: Vec3::ZERO,
+                rotation: glam::Quat::IDENTITY,
+                scale: 1.0,
+            }])
+            .unwrap();
+
+        assert_eq!(
+            mesh_faces(&scene),
+            expected,
+            "face mismatch for leaf edge {leaf_edge}"
+        );
+    }
+}
+
+#[test]
+fn render_instance_replacement_is_atomic_and_does_not_add_raycast_targets() {
+    let model = VoxelModel::build(
+        IVec3::splat(3),
+        &[[0.5; 3]],
+        |_| Some(0),
+        ModelConfig::default(),
+    )
+    .unwrap();
+
+    let mut first = VoxelInstance::new(7, model.clone());
+
+    first.translation = Vec3::new(4.0, 0.0, 0.0);
+
+    let mut second = VoxelInstance::new(8, model);
+
+    second.translation = Vec3::new(6.0, 0.0, 0.0);
+
+    let mut scene = Replica::empty(ReplicaConfig::default()).unwrap();
+
+    scene
+        .replace_render_instances(&[first, second.clone()])
+        .unwrap();
+
+    assert_eq!(scene.render_geometry().unwrap().len(), 2);
+
+    assert!(
+        scene
+            .raycast(Vec3::new(3.0, 0.1, 0.1), Vec3::X, 10.0)
+            .unwrap()
+            .is_none()
+    );
+
+    scene
+        .replace_render_instances(std::slice::from_ref(&second))
+        .unwrap();
+
+    let geometry = scene.render_geometry().unwrap();
+
+    assert_eq!(geometry.len(), 1);
+
+    assert!(matches!(geometry[0].id, MeshId::Model(8, _)));
+
+    assert!(matches!(
+        scene.replace_render_instances(&[second.clone(), second.clone()]),
+        Err(ReplicaError::DuplicateRenderInstance(8))
+    ));
+
+    for field in ["translation", "rotation", "scale"] {
+        let mut invalid = second.clone();
+
+        match field {
+            "translation" => invalid.translation.x = f32::NAN,
+            "rotation" => invalid.rotation = glam::Quat::from_xyzw(0.0, 0.0, 0.0, 0.0),
+            _ => invalid.scale = 0.0,
+        }
+
+        assert!(
+            matches!(scene.replace_render_instances(&[invalid]), Err(ReplicaError::InvalidRenderInstance { id: 8, field: invalid_field }) if invalid_field.starts_with(field))
+        );
+
+        assert!(std::sync::Arc::ptr_eq(
+            &scene.render_geometry().unwrap(),
+            &geometry
+        ));
+    }
+
+    scene.replace_render_instances(&[]).unwrap();
+
+    assert!(scene.render_geometry().unwrap().is_empty());
 }

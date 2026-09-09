@@ -3,6 +3,8 @@ use std::net::SocketAddr;
 
 #[derive(Parser)]
 pub struct Config {
+    #[arg(long, conflicts_with = "connect")]
+    pub city: bool,
     #[arg(long)]
     pub connect: Option<SocketAddr>,
 }

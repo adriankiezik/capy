@@ -26,6 +26,8 @@ impl Default for ReplicaConfig {
 
 #[derive(Clone, Debug)]
 pub struct VisualSettings {
+    pub ambient_occlusion: bool,
+    pub material_variation: bool,
     pub sky: [f32; 3],
     pub sunlight: [f32; 3],
     pub ambient: f32,
@@ -105,6 +107,8 @@ impl VisualSettings {
 impl Default for VisualSettings {
     fn default() -> Self {
         Self {
+            ambient_occlusion: true,
+            material_variation: true,
             sky: [0.48, 0.68, 0.83],
             sunlight: [0.4, 0.85, 0.3],
             ambient: 0.4,

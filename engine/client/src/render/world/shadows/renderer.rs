@@ -1,11 +1,11 @@
 use super::super::{
-    residency::{Geometry, Instance},
+    residency::{DrawList, Geometry, Instance, SurfaceVertex},
     visibility::Order,
 };
 use super::cascades::{COUNT, Cascades};
 use crate::{
     graphics::{GraphicsError, Result},
-    replica::{ShadowSettings, Vertex},
+    replica::ShadowSettings,
 };
 use bytemuck::Zeroable;
 use glam::{Mat4, Vec3};
@@ -31,8 +31,10 @@ pub(in crate::render::world) struct ShadowFrame {
 
 pub(in crate::render::world) struct Shadows {
     pipeline: wgpu::RenderPipeline,
+    draws: [DrawList; COUNT],
     layout: wgpu::BindGroupLayout,
     binding: wgpu::BindGroup,
+    binding_generation: u64,
     views: [wgpu::TextureView; COUNT],
     lights: [wgpu::BindGroup; COUNT],
     matrices: [Mat4; COUNT],
@@ -115,14 +117,14 @@ impl Shadows {
                 compilation_options: Default::default(),
                 buffers: &[
                     Some(wgpu::VertexBufferLayout {
-                        array_stride: std::mem::size_of::<Vertex>() as u64,
+                        array_stride: std::mem::size_of::<SurfaceVertex>() as u64,
                         step_mode: wgpu::VertexStepMode::Vertex,
                         attributes: &wgpu::vertex_attr_array![0 => Float32x3],
                     }),
                     Some(wgpu::VertexBufferLayout {
                         array_stride: std::mem::size_of::<Instance>() as u64,
                         step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &wgpu::vertex_attr_array![3 => Float32x4],
+                        attributes: &wgpu::vertex_attr_array![3 => Float32x4, 5 => Float32x4, 6 => Float32x4, 7 => Float32x4, 8 => Float32x4],
                     }),
                 ],
             },
@@ -186,8 +188,10 @@ impl Shadows {
 
         Self {
             pipeline,
+            draws: std::array::from_fn(|_| DrawList::new(device)),
             layout,
             binding,
+            binding_generation: 0,
             views,
             lights,
             matrices: [Mat4::IDENTITY; COUNT],
@@ -236,6 +240,7 @@ impl Shadows {
                 resolution,
             );
             self.resolution = resolution;
+            self.binding_generation = self.binding_generation.wrapping_add(1);
         }
 
         let mut uniforms = Uniforms::zeroed();
@@ -248,7 +253,7 @@ impl Shadows {
                     self.dirty[i].get()
                         || resized
                         || !self.enabled
-                        || geometry_changed
+                        || (geometry_changed && geometry.changed_in(cascades.matrices[i]))
                         || self.matrices[i] != cascades.matrices[i],
                 );
 
@@ -258,6 +263,8 @@ impl Shadows {
                         Order::Directional(sun),
                         &mut self.casters[i],
                     );
+
+                    self.draws[i].prepare(device, queue, geometry, &self.casters[i]);
 
                     queue.write_buffer(
                         &self.light_uniforms[i],
@@ -291,15 +298,15 @@ impl Shadows {
         &self.layout
     }
 
+    pub(in crate::render::world) fn binding_generation(&self) -> u64 {
+        self.binding_generation
+    }
+
     pub(in crate::render::world) fn binding(&self) -> &wgpu::BindGroup {
         &self.binding
     }
 
-    pub(in crate::render::world) fn draw(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        geometry: &Geometry,
-    ) {
+    pub(in crate::render::world) fn draw(&self, encoder: &mut wgpu::CommandEncoder) {
         for i in 0..COUNT {
             if !self.dirty[i].get() {
                 continue;
@@ -323,7 +330,7 @@ impl Shadows {
 
             pass.set_bind_group(0, &self.lights[i], &[]);
 
-            geometry.draw(&mut pass, &self.casters[i]);
+            self.draws[i].draw(&mut pass);
 
             self.dirty[i].set(false);
         }

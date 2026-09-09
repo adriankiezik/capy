@@ -1,3 +1,4 @@
+mod city_view;
 mod config;
 mod controls;
 mod game;
@@ -25,7 +26,13 @@ fn main() -> ApplicationResult<()> {
         .with_runtime(RuntimeSettings::default().with_input_rate(20))
         .with_window_controls(controls::window_controls());
 
-    engine::run(settings, move |app| game::run(app, config))?;
+    engine::run(settings, move |app| async move {
+        if config.city {
+            city_view::run(app).await
+        } else {
+            game::run(app, config).await
+        }
+    })?;
 
     Ok(())
 }

@@ -1,6 +1,8 @@
 mod config;
 mod error;
+mod instances;
 pub(crate) mod mesh;
+mod model;
 mod object;
 mod query;
 mod render;
@@ -12,6 +14,7 @@ pub use config::{ReplicaConfig, ShadowSettings, VisualSettings};
 pub use error::{ReplicaError, Result};
 pub use mesh::MeshError;
 pub(crate) use mesh::{Mesh, Vertex};
+pub use model::{ModelConfig, ModelError, VoxelInstance, VoxelModel};
 pub use object::RenderObject;
 pub(crate) use render::{MeshId, MeshInstance};
 pub use state::Replica;

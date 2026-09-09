@@ -81,7 +81,7 @@ impl MeshSource {
 
         let halo = Halo::from_leaves(IVec3::from_array(key) * edge, edge, leaf);
 
-        let mesh = Arc::new(build_halo(key, edge, halo, world, maximum).await?);
+        let mesh = Arc::new(build_halo(key, edge, halo, world, maximum, true).await?);
 
         Ok(mesh)
     }
@@ -116,17 +116,24 @@ pub(crate) fn key(voxel: VoxelCoord, edge: i32) -> [i32; 3] {
     voxel.to_array().map(|v| v.div_euclid(edge))
 }
 
-#[cfg(feature = "cpu-bench")]
 pub(crate) fn build(
     key: [i32; 3],
     edge: i32,
     sample: impl Fn(VoxelCoord) -> Voxel,
     world: &WorldRead,
     maximum: usize,
+    ambient_occlusion: bool,
 ) -> Result<Mesh> {
     let halo = Halo::new(IVec3::from_array(key) * edge, edge, sample);
 
-    pollster::block_on(build_halo(key, edge, halo, world, maximum))
+    pollster::block_on(build_halo(
+        key,
+        edge,
+        halo,
+        world,
+        maximum,
+        ambient_occlusion,
+    ))
 }
 
 async fn build_halo(
@@ -135,6 +142,7 @@ async fn build_halo(
     halo: Halo,
     world: &WorldRead,
     maximum: usize,
+    ambient_occlusion: bool,
 ) -> Result<Mesh> {
     let origin = IVec3::from_array(key) * edge;
 
@@ -156,7 +164,14 @@ async fn build_halo(
             for slice in 0..edge {
                 work.checkpoint().await;
 
-                fill_mask(&mut mask, edge, origin, axis, sign, slice, &halo);
+                fill_mask(
+                    &mut mask,
+                    edge,
+                    origin,
+                    (axis, sign, slice),
+                    &halo,
+                    ambient_occlusion,
+                );
 
                 for j in 0..n {
                     let mut i = 0;
@@ -221,10 +236,9 @@ fn fill_mask(
     mask: &mut [Face],
     edge: i32,
     origin: IVec3,
-    axis: usize,
-    sign: i32,
-    slice: i32,
+    (axis, sign, slice): (usize, i32, i32),
     halo: &Halo,
+    ambient_occlusion: bool,
 ) {
     let u = (axis + 1) % 3;
 
@@ -248,7 +262,11 @@ fn fill_mask(
                 if !voxel.is_empty() && halo.voxel(p + normal).is_empty() {
                     Face {
                         voxel,
-                        occlusion: halo.occlusion(p, axis, sign),
+                        occlusion: if ambient_occlusion {
+                            halo.occlusion(p, axis, sign)
+                        } else {
+                            [3; 4]
+                        },
                     }
                 } else {
                     Face::EMPTY

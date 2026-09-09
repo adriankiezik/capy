@@ -41,6 +41,7 @@ fn mesh(bencher: Bencher, edge: i32, checkerboard: bool) {
                 sample,
                 black_box(&world),
                 1_000_000,
+                true,
             )
             .expect("mesh fixture fits vertex budget")
         });
@@ -102,7 +103,7 @@ fn render_scene(count: i32) -> Replica {
     .expect("valid replica fixture")
 }
 
-fn complete(scene: &Replica) -> crate::replica::Result<Vec<crate::replica::MeshInstance>> {
+fn complete(scene: &Replica) -> crate::replica::Result<Arc<[crate::replica::MeshInstance]>> {
     let deadline = Instant::now() + Duration::from_secs(10);
 
     loop {
@@ -188,7 +189,7 @@ fn mesh_cache_warm(bencher: Bencher, leaves: i32) {
     assert!(
         meshes
             .iter()
-            .zip(&cached)
+            .zip(cached.iter())
             .all(|(a, b)| Arc::ptr_eq(&a.mesh, &b.mesh))
     );
 

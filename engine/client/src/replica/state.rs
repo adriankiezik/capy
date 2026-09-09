@@ -26,6 +26,8 @@ pub(crate) struct Body {
 }
 
 pub struct Replica {
+    pub(crate) render_cache: std::sync::Mutex<Option<(usize, Arc<[super::MeshInstance]>)>>,
+    pub(crate) voxel_instances: Vec<super::VoxelInstance>,
     pub(crate) world: WorldRead,
     pub(crate) meshes: Arc<MeshSources>,
     pub(crate) bodies: Vec<Body>,
@@ -34,7 +36,7 @@ pub struct Replica {
     pub(crate) scheduler: Scheduler,
     owners: BTreeSet<OwnerId>,
     revision: u64,
-    updated: Instant,
+    pub(super) updated: Instant,
 }
 
 fn sources(leaves: &im::OrdMap<[i32; 3], Arc<Leaf>>, edge: i32) -> MeshSources {
@@ -101,6 +103,22 @@ impl Replica {
             return Err(ReplicaError::Invalid);
         }
 
+        if self.objects.len() == objects.len()
+            && objects.iter().all(|description| {
+                self.objects.get(&description.id).is_some_and(|o| {
+                    o.description.bounds == description.bounds
+                        && o.description.color == description.color
+                })
+            })
+        {
+            return Ok(());
+        }
+
+        *self
+            .render_cache
+            .get_mut()
+            .unwrap_or_else(|e| e.into_inner()) = None;
+
         self.objects.retain(|id, _| seen.contains(id));
 
         for &description in objects {
@@ -129,6 +147,23 @@ impl Replica {
         }
 
         Ok(())
+    }
+
+    pub fn empty(settings: ReplicaConfig) -> Result<Self> {
+        Self::new(
+            settings,
+            0,
+            WorldSnapshot {
+                bounds: VoxelBounds {
+                    min: IVec3::ZERO,
+                    max: IVec3::ONE,
+                },
+                materials: Vec::new(),
+                owners: Vec::new(),
+                chunks: Vec::new(),
+                bodies: Vec::new(),
+            },
+        )
     }
 
     pub fn new(settings: ReplicaConfig, revision: u64, snapshot: WorldSnapshot) -> Result<Self> {
@@ -232,6 +267,8 @@ impl Replica {
         let meshes = Arc::new(sources(&world.leaves, settings.render_leaf_edge));
 
         let mut scene = Self {
+            render_cache: Default::default(),
+            voxel_instances: Vec::new(),
             world,
             meshes,
             bodies: Vec::new(),
@@ -449,6 +486,10 @@ impl Replica {
             }
         }
 
+        *self
+            .render_cache
+            .get_mut()
+            .unwrap_or_else(|e| e.into_inner()) = None;
         self.world = next;
         self.meshes = Arc::new(meshes);
         self.bodies = bodies;
