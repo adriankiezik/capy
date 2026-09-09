@@ -1,7 +1,3 @@
-#[cfg(feature = "gpu-bench")]
-#[path = "bench.rs"]
-pub(super) mod bench;
-
 use super::{
     overlay::OverlayRenderer,
     ui::UiRenderer,

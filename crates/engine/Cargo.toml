@@ -9,21 +9,13 @@ workspace = true
 
 [features]
 cpu-bench = ["dep:divan"]
-gpu-bench = ["dep:criterion"]
-scenario-bench = []
 
 [[bench]]
 name = "cpu"
 harness = false
 required-features = ["cpu-bench"]
 
-[[bench]]
-name = "gpu"
-harness = false
-required-features = ["gpu-bench"]
-
 [dependencies]
-criterion = { version = "0.8", optional = true, default-features = false, features = ["cargo_bench_support"] }
 divan = { version = "0.1", optional = true }
 anyhow.workspace = true
 thiserror.workspace = true

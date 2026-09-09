@@ -407,10 +407,97 @@ fn expected_faces(scene: &Scene) -> Faces {
     faces
 }
 
+fn corner_ao(p: IVec3, normal: IVec3, corner: IVec3, occupied: impl Fn(IVec3) -> bool) -> f32 {
+    let axis = (0..3).find(|&axis| normal[axis] != 0).unwrap();
+
+    let mut sides = [IVec3::ZERO; 2];
+
+    for (index, axis) in (0..3).filter(|&a| a != axis).enumerate() {
+        sides[index][axis] = if corner[axis] == p[axis] { -1 } else { 1 };
+    }
+
+    let side_count = sides
+        .iter()
+        .filter(|&&side| occupied(p + normal + side))
+        .count();
+
+    let blocked = if side_count == 2 {
+        3
+    } else {
+        side_count + usize::from(occupied(p + normal + sides[0] + sides[1]))
+    };
+
+    (3 - blocked) as f32 / 3.0
+}
+
+fn assert_face_ao(
+    quad: &[super::Vertex],
+    origin: Vec3,
+    p: IVec3,
+    normal: IVec3,
+    occupied: impl Fn(IVec3) -> bool,
+) {
+    let axes: Vec<_> = (0..3).filter(|&axis| normal[axis] == 0).collect();
+
+    for a in 0..=1 {
+        for b in 0..=1 {
+            let mut corner = p + normal.max(IVec3::ZERO);
+
+            corner[axes[0]] += a;
+            corner[axes[1]] += b;
+
+            let q = glam::Vec2::new(corner[axes[0]] as f32, corner[axes[1]] as f32);
+
+            let expected = corner_ao(p, normal, corner, &occupied);
+
+            let mut found = false;
+
+            for triangle in quad.chunks_exact(3) {
+                let xy: Vec<_> = triangle
+                    .iter()
+                    .map(|v| {
+                        let p = (Vec3::from_array(v.position) + origin) / VOXEL_SIZE;
+
+                        glam::Vec2::new(p[axes[0]], p[axes[1]])
+                    })
+                    .collect();
+
+                let area = (xy[1] - xy[0]).perp_dot(xy[2] - xy[0]);
+
+                let w = [
+                    (xy[1] - q).perp_dot(xy[2] - q) / area,
+                    (xy[2] - q).perp_dot(xy[0] - q) / area,
+                    (xy[0] - q).perp_dot(xy[1] - q) / area,
+                ];
+
+                if w.iter().all(|&w| w >= -1e-5) {
+                    let actual: f32 = w.iter().zip(triangle).map(|(w, v)| w * v.occlusion).sum();
+
+                    assert!(
+                        (actual - expected).abs() < 1e-5,
+                        "AO at {p:?}, {normal:?}, corner {corner:?}: {actual} != {expected}"
+                    );
+
+                    found = true;
+                }
+            }
+
+            assert!(found);
+        }
+    }
+}
+
 fn mesh_faces(scene: &Scene) -> Faces {
     let mut faces = BTreeMap::new();
 
-    for instance in scene.render_geometry().unwrap() {
+    let groups = std::iter::repeat_n(None, scene.meshes.len()).chain(
+        scene
+            .bodies
+            .iter()
+            .flat_map(|body| std::iter::repeat_n(Some(body), body.geometry.meshes.len())),
+    );
+
+    for (instance, body) in scene.render_geometry().unwrap().into_iter().zip(groups) {
         let mesh = instance.mesh;
 
         assert_eq!(mesh.vertices.len() % 6, 0);
@@ -500,6 +587,20 @@ fn mesh_faces(scene: &Scene) -> Faces {
                     p[u] = a;
                     p[v] = b;
                     p[axis] -= i32::from(normal[axis] > 0.0);
+
+                    assert_face_ao(quad, instance.world_origin, p, normal.as_ivec3(), |p| {
+                        !body
+                            .map_or_else(
+                                || scene.world.resident_voxel(p),
+                                |body| {
+                                    body.geometry.voxel(
+                                        p - (body.translation / VOXEL_SIZE).round().as_ivec3(),
+                                    )
+                                },
+                            )
+                            .is_empty()
+                    });
+
                     *faces
                         .entry((
                             p.to_array(),
@@ -592,6 +693,218 @@ fn cached_meshes_follow_boundary_edits_and_enforce_resident_budget() {
             scene.settings.max_mesh_vertices = 1_000_000;
 
             assert_eq!(mesh_faces(&scene), expected_faces(&scene));
+        }
+    }
+}
+
+#[test]
+fn ao_corner_patterns_choose_correct_values_and_triangle_diagonals() {
+    let p = IVec3::new(-1, 7, 8);
+
+    let mut diagonals = [0usize; 2];
+
+    for axis in 0..3 {
+        let u = (axis + 1) % 3;
+
+        let v = (axis + 2) % 3;
+
+        for sign in [-1, 1] {
+            let mut normal = IVec3::ZERO;
+
+            normal[axis] = sign;
+
+            for pattern in 0u16..256 {
+                let mut cells = BTreeSet::from([p.to_array()]);
+
+                let ring: Vec<_> = (-1..=1)
+                    .flat_map(|a| {
+                        (-1..=1).filter_map(move |b| (a != 0 || b != 0).then_some((a, b)))
+                    })
+                    .collect();
+
+                for (bit, &(a, b)) in ring.iter().enumerate() {
+                    if pattern & (1 << bit) != 0 {
+                        let mut q = p + normal;
+
+                        q[u] += a;
+                        q[v] += b;
+
+                        cells.insert(q.to_array());
+                    }
+                }
+
+                let mut scene = Scene::new(settings()).unwrap();
+
+                let mut transaction = scene.transaction();
+
+                for &q in &cells {
+                    transaction.place(IVec3::from_array(q), voxel(1)).unwrap();
+                }
+
+                scene.world = world::prepare(&scene.world, transaction).unwrap().0;
+                scene.meshes = Arc::new(
+                    cells
+                        .iter()
+                        .map(|&q| {
+                            (
+                                geometry::key(IVec3::from_array(q), 8),
+                                Arc::new(geometry::MeshSource::default()),
+                            )
+                        })
+                        .collect(),
+                );
+
+                let mut checked = 0;
+
+                for instance in scene.render_geometry().unwrap() {
+                    for quad in instance.mesh.vertices.chunks_exact(6) {
+                        let positions: Vec<_> = quad
+                            .iter()
+                            .map(|v| {
+                                ((Vec3::from_array(v.position) + instance.world_origin)
+                                    / VOXEL_SIZE)
+                                    .round()
+                                    .as_ivec3()
+                            })
+                            .collect();
+
+                        if quad[0].normal != normal.as_vec3().to_array()
+                            || !positions.iter().all(|q| {
+                                q[axis] == p[axis] + i32::from(sign > 0)
+                                    && (p[u]..=p[u] + 1).contains(&q[u])
+                                    && (p[v]..=p[v] + 1).contains(&q[v])
+                            })
+                        {
+                            continue;
+                        }
+
+                        assert_face_ao(quad, instance.world_origin, p, normal, |q| {
+                            cells.contains(&q.to_array())
+                        });
+
+                        let corners = [(0, 0), (1, 0), (1, 1), (0, 1)].map(|(a, b)| {
+                            let mut q = p + normal.max(IVec3::ZERO);
+
+                            q[u] += a;
+                            q[v] += b;
+
+                            q
+                        });
+
+                        let ao = corners
+                            .map(|q| corner_ao(p, normal, q, |q| cells.contains(&q.to_array())));
+
+                        let flip = ao[0] + ao[2] > ao[1] + ao[3] + 1e-5;
+
+                        let shared: BTreeSet<_> = positions[..3]
+                            .iter()
+                            .filter(|q| positions[3..].contains(q))
+                            .map(|q| q.to_array())
+                            .collect();
+
+                        let expected = if flip {
+                            [corners[1], corners[3]]
+                        } else {
+                            [corners[0], corners[2]]
+                        };
+
+                        assert_eq!(
+                            shared,
+                            expected.map(|q| q.to_array()).into_iter().collect(),
+                            "pattern {pattern}, axis {axis}, sign {sign}"
+                        );
+
+                        diagonals[usize::from(flip)] += 1;
+                        checked += 1;
+                    }
+                }
+
+                assert_eq!(checked, 1);
+            }
+        }
+    }
+
+    assert!(diagonals.iter().all(|&count| count > 0));
+}
+
+#[test]
+fn diagonal_ao_boundary_edits_match_fresh_geometry_for_sync_and_queued_removal() {
+    for edge in [8, 16, 32] {
+        for boundary in [-edge, 0, edge] {
+            let mut config = settings();
+
+            config.render_leaf_edge = edge;
+            config.world.bounds.min.y = 0;
+
+            let mut fixture = Scene::new(config).unwrap();
+
+            place(
+                &mut fixture,
+                (boundary - 2..=boundary + 1)
+                    .flat_map(|x| {
+                        (boundary - 2..=boundary + 1).map(move |z| (IVec3::new(x, 0, z), voxel(1)))
+                    })
+                    .chain([(IVec3::new(boundary, 1, boundary), voxel(1))]),
+            );
+
+            let receiver = geometry::key(IVec3::new(boundary - 1, 0, boundary - 1), edge);
+
+            fixture.render_geometry().unwrap();
+
+            let source = fixture.meshes[&receiver].clone();
+
+            for queued in [false, true] {
+                let mut scene = fixture.clone();
+
+                let target = IVec3::new(boundary, 1, boundary);
+
+                if queued {
+                    let mut edits =
+                        super::SceneEdits::new(&scene, super::EditSettings::default()).unwrap();
+
+                    assert!(edits.queue_remove(Target::Static(target)));
+
+                    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+
+                    while edits.pending() != 0 {
+                        for outcome in edits.update(&mut scene).unwrap() {
+                            outcome.result.unwrap();
+                        }
+
+                        assert!(std::time::Instant::now() < deadline);
+
+                        std::thread::yield_now();
+                    }
+                } else {
+                    scene.remove(Target::Static(target)).unwrap();
+                }
+
+                assert!(!Arc::ptr_eq(&source, &scene.meshes[&receiver]));
+
+                assert_eq!(mesh_faces(&scene), expected_faces(&scene));
+
+                let mut fresh = Scene::new(scene.settings.clone()).unwrap();
+
+                place(
+                    &mut fresh,
+                    (boundary - 2..=boundary + 1).flat_map(|x| {
+                        (boundary - 2..=boundary + 1).map(move |z| (IVec3::new(x, 0, z), voxel(1)))
+                    }),
+                );
+
+                let actual = scene.render_geometry().unwrap();
+
+                let expected = fresh.render_geometry().unwrap();
+
+                assert_eq!(actual.len(), expected.len());
+
+                for (a, b) in actual.iter().zip(expected) {
+                    assert_eq!(
+                        bytemuck::cast_slice::<_, u8>(&a.mesh.vertices),
+                        bytemuck::cast_slice::<_, u8>(&b.mesh.vertices)
+                    );
+                }
+            }
         }
     }
 }
