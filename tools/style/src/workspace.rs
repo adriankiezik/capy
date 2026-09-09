@@ -22,47 +22,42 @@ impl Workspace {
             .ok_or(StyleError::MissingMetadata("repository root"))?
             .to_owned();
 
-        let mut packages = Vec::new();
+        let output = Command::new("cargo")
+            .args([
+                "metadata",
+                "--locked",
+                "--offline",
+                "--no-deps",
+                "--format-version",
+                "1",
+                "--manifest-path",
+            ])
+            .arg(root.join("Cargo.toml"))
+            .output()
+            .map_err(|source| StyleError::Io {
+                operation: "Reading Cargo workspace metadata",
+                source,
+            })?;
 
-        for workspace in ["engine", "game"] {
-            let output = Command::new("cargo")
-                .args([
-                    "metadata",
-                    "--locked",
-                    "--offline",
-                    "--no-deps",
-                    "--format-version",
-                    "1",
-                    "--manifest-path",
-                ])
-                .arg(root.join(workspace).join("Cargo.toml"))
-                .output()
-                .map_err(|source| StyleError::Io {
-                    operation: "Reading Cargo workspace metadata",
-                    source,
-                })?;
-
-            if !output.status.success() {
-                return Err(StyleError::CargoMetadata(
-                    String::from_utf8_lossy(&output.stderr).into_owned(),
-                ));
-            }
-
-            let metadata: Value = serde_json::from_slice(&output.stdout)?;
-
-            let members = metadata["workspace_members"]
-                .as_array()
-                .ok_or(StyleError::MissingMetadata("workspace members"))?;
-
-            packages.extend(
-                metadata["packages"]
-                    .as_array()
-                    .ok_or(StyleError::MissingMetadata("Cargo packages"))?
-                    .iter()
-                    .filter(|package| members.contains(&package["id"]))
-                    .cloned(),
-            );
+        if !output.status.success() {
+            return Err(StyleError::CargoMetadata(
+                String::from_utf8_lossy(&output.stderr).into_owned(),
+            ));
         }
+
+        let metadata: Value = serde_json::from_slice(&output.stdout)?;
+
+        let members = metadata["workspace_members"]
+            .as_array()
+            .ok_or(StyleError::MissingMetadata("workspace members"))?;
+
+        let packages = metadata["packages"]
+            .as_array()
+            .ok_or(StyleError::MissingMetadata("Cargo packages"))?
+            .iter()
+            .filter(|package| members.contains(&package["id"]))
+            .cloned()
+            .collect();
 
         Ok(Self { root, packages })
     }

@@ -14,7 +14,7 @@ trap 'rm -rf "$temporary"' 0
 trap 'exit 1' 1 2 15
 
 git diff --cached --name-only --no-renames --diff-filter=ACDMRTUXB -z -- \
-    engine/ game/ .cargo/ .githooks/ \
+    Cargo.toml Cargo.lock engine/ game/ tools/ .cargo/ .githooks/ \
     rustfmt.toml .rustfmt.toml rust-toolchain rust-toolchain.toml > "$temporary/changes"
 
 if [ ! -s "$temporary/changes" ]; then
@@ -32,7 +32,7 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX
 
 cd "$temporary/tree"
 
-if cargo run --quiet --locked --offline --manifest-path engine/style/Cargo.toml -- check --staged-changes "$temporary/changes"; then
+if cargo run --quiet --locked --offline -p style -- check --staged-changes "$temporary/changes"; then
     exit 0
 else
     printf '%s\n' 'Staged style check failed. Run cargo style fix, then stage the corrected files.' >&2

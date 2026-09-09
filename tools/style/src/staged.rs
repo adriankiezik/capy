@@ -39,10 +39,6 @@ pub fn affected(changes: &Path, workspace: &Workspace) -> Result<Vec<PathBuf>> {
             Some(
                 "Cargo.toml"
                     | "Cargo.lock"
-                    | "engine/Cargo.toml"
-                    | "engine/Cargo.lock"
-                    | "game/Cargo.toml"
-                    | "game/Cargo.lock"
                     | "rustfmt.toml"
                     | ".rustfmt.toml"
                     | "rust-toolchain"

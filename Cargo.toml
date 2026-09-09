@@ -1,6 +1,14 @@
 [workspace]
-members = ["client", "server", "protocol", "style"]
-default-members = ["client", "server", "protocol"]
+members = [
+    "engine/client",
+    "engine/server",
+    "engine/protocol",
+    "game/client",
+    "game/server",
+    "game/protocol",
+    "tools/style",
+]
+default-members = ["game/client"]
 resolver = "3"
 
 [workspace.package]
@@ -28,8 +36,11 @@ taffy = { version = "0.14", default-features = false, features = ["std", "taffy_
 raw-window-handle = "0.6"
 wgpu = "30.0.1"
 winit = "0.30.13"
-engine = { package = "capy-engine-client", path = "client" }
-capy-engine-protocol = { path = "protocol" }
+engine = { package = "capy-engine-client", path = "engine/client" }
+capy-engine-server = { path = "engine/server" }
+capy-engine-protocol = { path = "engine/protocol" }
+capy-protocol = { path = "game/protocol" }
+capy-server = { path = "game/server" }
 glam = { version = "0.33", features = ["serde"] }
 bytemuck = { version = "1", features = ["derive"] }
 fontdue = "0.9"

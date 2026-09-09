@@ -6,7 +6,7 @@ use std::path::PathBuf;
     name = "cargo style",
     version,
     about = "Check or fix repository source style",
-    after_help = "Without a subcommand, checks engine/ and game/. Consecutive assignments stay grouped.\nCargo target metadata identifies self-crate paths. Ambiguous ownership, shadowing,\nand macro token bodies are preserved rather than guessed."
+    after_help = "Without a subcommand, checks engine/, game/, and tools/. Consecutive assignments stay grouped.\nCargo target metadata identifies self-crate paths. Ambiguous ownership, shadowing,\nand macro token bodies are preserved rather than guessed."
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -35,7 +35,7 @@ pub struct Input {
     #[arg(
         value_name = "PATH",
         conflicts_with = "stdin",
-        help = "Files or directories; defaults to engine/ and game/"
+        help = "Files or directories; defaults to engine/, game/, and tools/"
     )]
     pub paths: Vec<PathBuf>,
 
