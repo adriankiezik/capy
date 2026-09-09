@@ -1,0 +1,30 @@
+[package]
+name = "capy-engine-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+cpu-bench = ["dep:divan"]
+
+[[bench]]
+name = "cpu"
+harness = false
+required-features = ["cpu-bench"]
+
+[dev-dependencies]
+proptest = "1"
+
+[dependencies]
+divan = { version = "0.1", optional = true }
+thiserror.workspace = true
+anyhow.workspace = true
+glam.workspace = true
+pollster.workspace = true
+im = "15"
+serde.workspace = true
+serde_json.workspace = true
+capy-engine-protocol.workspace = true

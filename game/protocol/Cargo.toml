@@ -1,0 +1,12 @@
+[package]
+name = "capy-protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+capy-engine-protocol.workspace = true
+serde.workspace = true

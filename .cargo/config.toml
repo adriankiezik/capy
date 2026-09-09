@@ -1,2 +1,2 @@
 [alias]
-style = "run --quiet --package style --"
+style = "run --quiet --manifest-path engine/style/Cargo.toml --"

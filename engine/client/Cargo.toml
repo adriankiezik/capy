@@ -1,0 +1,35 @@
+[package]
+name = "capy-engine-client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+cpu-bench = ["dep:divan"]
+
+[[bench]]
+name = "cpu"
+harness = false
+required-features = ["cpu-bench"]
+
+[dependencies]
+serde.workspace = true
+capy-engine-protocol.workspace = true
+divan = { version = "0.1", optional = true }
+anyhow.workspace = true
+thiserror.workspace = true
+pollster.workspace = true
+taffy.workspace = true
+raw-window-handle.workspace = true
+wgpu.workspace = true
+winit.workspace = true
+glam.workspace = true
+bytemuck.workspace = true
+fontdue.workspace = true
+im = "15"
+
+[dev-dependencies]
+proptest = "1"
