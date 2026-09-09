@@ -25,7 +25,7 @@ pub async fn run(mut app: Engine, config: Config) -> Result<()> {
         let address = crate::config::LOCAL_SERVER;
 
         let server = match std::net::TcpListener::bind(address) {
-            Ok(listener) => Some(capy_server::host(listener)?),
+            Ok(listener) => Some(capy_server::create_server().host(listener)?),
             Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => None,
             Err(error) => return Err(error.into()),
         };
